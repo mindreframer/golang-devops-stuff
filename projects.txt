@@ -8,6 +8,7 @@ https://github.com/bitly/nsq.git
 https://github.com/buger/gor.git
 https://github.com/BurntSushi/cmail.git
 https://github.com/cloudfoundry/gorouter.git
+https://github.com/cloudfoundry/gosigar.git
 https://github.com/cloudfoundry/hm9000.git
 https://github.com/cloudfoundry/yagnats.git
 https://github.com/coreos/etcd.git
@@ -20,7 +21,6 @@ https://github.com/flynn/rpcplus.git
 https://github.com/globocom/gandalf.git
 https://github.com/globocom/tsuru.git
 https://github.com/golang/groupcache.git
-https://github.com/cloudfoundry/gosigar.git
 https://github.com/jondot/groundcontrol.git
 https://github.com/jordansissel/lumberjack.git
 https://github.com/mindreframer/emtail.git
