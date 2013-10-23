@@ -1,0 +1,45 @@
+/***** BEGIN LICENSE BLOCK *****
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this file,
+# You can obtain one at http://mozilla.org/MPL/2.0/.
+#
+# The Initial Developer of the Original Code is the Mozilla Foundation.
+# Portions created by the Initial Developer are Copyright (C) 2012
+# the Initial Developer. All Rights Reserved.
+#
+# Contributor(s):
+#   Rob Miller (rmiller@mozilla.com)
+#   Mike Trinkala (trink@mozilla.com)
+#
+# ***** END LICENSE BLOCK *****/
+
+/*
+
+Client package to talk to heka from Go.
+
+*/
+package client
+
+import (
+	"github.com/mozilla-services/heka/message"
+)
+
+type Client struct {
+	Sender  Sender
+	Encoder Encoder
+	buf     []byte
+}
+
+func NewClient(sender Sender, encoder Encoder) (self *Client) {
+	buf := make([]byte, message.MAX_MESSAGE_SIZE+message.MAX_HEADER_SIZE+3)
+	self = &Client{sender, encoder, buf}
+	return
+}
+
+func (self *Client) SendMessage(msg *message.Message) (err error) {
+	err = self.Encoder.EncodeMessageStream(msg, &self.buf)
+	if err == nil {
+		err = self.Sender.SendMessage(self.buf)
+	}
+	return
+}
