@@ -1,0 +1,5 @@
+.DS_Store
+local_config.json
+mcat/phd/*.csv
+mcat/phd/plot/*.pdf
+*.coverprofile
