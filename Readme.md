@@ -116,6 +116,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       groupcache is a caching and cache-filling library, intended as a replacement for memcached in many cases.
        19 commits, last change: 2013-10-03 20:14:56, 2,285 stars, 191 forks
 
+    hashicorp/serf:
+      Service orchestration and management tool.
+       378 commits, last change: 2013-10-23 11:39:46, 183 stars, 8 forks
+
     jondot/groundcontrol:
       Manage and monitor your Raspberry Pi with ease
        50 commits, last change: 2013-08-22 07:19:32, 610 stars, 41 forks
