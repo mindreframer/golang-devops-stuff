@@ -1,0 +1,205 @@
+Teleport tool: Backwards-compatible resilience to network outages
+=================================================================
+Written by Petar Maymounkov. Part of the Go Circuit Project.
+Read the HTML version of this document at http://blog.gocircuit.org/teleport-tool
+
+The Teleport Tool is a communication utility for Linux, Mac OSX and Windows,
+distributed under the Apache License (http://www.apache.org/licenses/), written entirely in 
+Go (http://golang.org), that allows you to:
+
+* Shrink your devops workload by protecting your client/server deployments against network interruptions,
+* Retrofit legacy software (or sloppily written new software) to benefit from automatic connection caching and pooling,
+* Keep your interactive sessions (ssh and such) alive after you close your notebook's lid,
+* Reduce the configuration complexity of your cloud applications.
+
+Motivation
+----------
+
+When clients and servers talk it is not uncommon for the network connectivity
+to disappear only to re-appear later.  In data centers, compelex network
+misconfigurations or DDoS attacks inflict temporary network outages.  Mobile
+devices going into tunnels lose connection to Internet servers until they are
+back out.  Notebooks going to sleep shutdown all network operations for live
+processes to discover at power resumption.
+
+When such outages occur most software treats them in a heavy-handed manner,
+closing out user sessions, possibly losing data, disrupting system operations
+and imposing complexity on software design.  In many domains — like data
+streaming or interactive terminal sessions — applications could continue
+working healthily after an outage if only they did not receive the premature
+network error condition, forcing them to declare failure and resort to possibly
+complicated recovery-and-retry steps. For example,
+
+* A dropped ssh session would lose accumulated state (running
+processes, environment, shell history, etc.) requiring a manual replay of
+interactive steps, whereas 
+
+* A dropped Apache Kafka (http://kafka.apache.org) event stream connection would require a
+heavy-handed course-grain replay of events from its on-disk log whenever the network
+reappears.
+
+Much headache could be saved if application endpoints did not experience
+network failures as terminal error conditions in favor of experiencing them as
+prolonged read and write operations.  We set out to accomplish this state of
+matter in a backwards-compatible manner, whereby pre-existing software can take
+advantage without change. Furthermore, as a by-product of our design, we are
+also able to equip legacy software with intelligent connection caching and
+pooling.
+
+Solution
+--------
+
+Qualitatively, intermittent network outages are no different than temporarily
+slow networks.  Quantitatively, they differ in that they impose usually longer
+time intervals between successful transmissions.  Since TCP can handle slow
+networks, our approach is to harness its power and "amplify" it to handle
+network interruptions.
+
+The high-level idea is simple. We use a plain TCP connection to transmit data
+under normal network conditions.  When this connection breaks, in response to a
+network outage, we do not prompt the application layer with an error, instead
+we wait to establish a new TCP connection and represent a slow/unresponsive
+network to the application layer.  When connectivity is resumed, the
+application layer experiences a perceived dramatic increase in network
+bandwidth.
+
+We trade errors for time.
+
+This simple mechanism is trickier to accomplish than is apparent on the
+surface. When TCP connections (or any other reliable connections, for that
+matter) are dropped, there is no guarantee that the last few writes have been
+trasmitted through reliably before the connection error was reported. To remedy
+this, we incorporated a light-weight protocol that, transparently to the
+application, guarantees exactly-once delivery (basically proper semantics) of
+every single byte written to the connections at the application level.
+
+How it works
+------------
+
+The Teleport Tool ships as a single command-line utility tele which executes in
+either client or server mode.  Its operating diagram is illustrated below.
+
+
+                                     client input address
+                                           |
+        +---------------+                  | +-------------+
+        | USER's CLIENT +---- localhost -->• | TELE CLIENT +-----+
+        +---------------+                    +-------------+     |
+                                                                 ≈
+                                                                 |
+       CLIENT-SIDE                                               |
+  ·····················································  UNRELIABLE NETWORK  ·····
+       SERVER-SIDE                                               |
+                                                                 |
+                                                                 ≈
+        +---------------+                    +-------------+     |
+        | USER's SERVER | •<-- localhost ----+ TELE SERVER | •<--+
+        +---------------+ |                  +-------------+ |
+                          |                                  |
+      	          server input address       server+client output address
+
+
+
+On the server side, the user deploys the TCP server software as usual, depicted
+as the "USER's SERVER" box.  For instance, this could be an sshd server,
+listening on port 22. The TCP address (with port) of the user's TCP server is
+dubbed the server input address.
+
+Alongside with the user's TCP server (i.e. on the same host) one deploys the
+Teleport Tool in server mode, or teleport server for short.  The job of the
+teleport server is to accept outside incoming connections — that are resilient
+to network outages — from a peering "teleport client" and proxy them to the
+user's TCP server. The teleport server listens for outside connections on what
+we call the server output address. To launch the teleport server, one invokes:
+
+% tele -server -in=SERVER_INPUT_ADDR -out=SERVER_OUTPUT_ADDR
+
+On the connecting host, one launches the Teleport Tool in client mode, or
+teleport client. The teleport client accepts TCP connections from user's
+clients, running on the same host, and forwards them — in a network outage
+resilient manner — across the unreliable outside network to the teleport
+server, which in turn forwards them to the user's TCP server. Incoming user TCP
+connections are received on the client input address and the remote teleport
+server is expected to be found at the client output address. So, in fact, the
+client and server output addresses should equal. The teleport client is invoked
+by:
+
+% tele -client -in=CLIENT_INPUT_ADDR -out=CLIENT_OUTPUT_ADDR
+
+The user's TCP server and clients can be recycled without restarting the teleport server and client.
+
+The teleport server and client can be restarted while the user's TCP server and
+clients are live.  This will result in interruption of current client-server
+connections, as the Teleport Tool does not prevent against endpoint failures
+(only network failures), but new connections will proceed normally.
+
+Examples and use cases
+----------------------
+
+Surviving ssh sessions during power suspension, in user mode
+°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°
+
+It is not uncommon that if you are an engineer you regularly log into a remote
+datacenter host via ssh from your notebook computer.  Every time you suspend
+your notebook or your notebook switches from one WiFi network to another, your
+live ssh sessions are terminated and all state is lost.
+
+You can now entirely avoid this by tunneling your ssh traffic through the
+Teleport Tool. What's more, you don't have to have root privileges on the
+remote datacenter machine. Simply start the teleport server with user
+credentials and pick a sufficiently high port to bind it to:
+
+% tele -server -in=:22 -out=:40300
+
+On your notebook, start your teleport client only once (usually on startup):
+
+% tele -client -in=:22999 -out=host9.datacenter.net:40300
+
+And try it:
+
+% ssh -p 22999 localhost
+
+Reducing cloud applications configuration complexity
+°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°°
+
+In large datacenters, one often encounters complicated tools for updating the
+configurations of deployed cloud services. These tools are often used to update
+endpoint addresses, hardcoded in configuration files of different services.
+
+One source of complexity there is the need to deal with a myriad different
+types of configuration files, belonging to unrelated software packages.  When
+deploying network services in conjunction with the Teleport Tool, one is able
+to avoid reconfiguration complexity by configuring all services against the
+unchanging localhost addresses of teleport clients.
+
+Download, build and install
+---------------------------
+
+Proceed as follows:
+
+(1) Install the latest release of the >Go Language compiler (http://golang.org),
+(2) Fetch, build and install the Teleport Tool by typing in:
+
+% go get github.com/petar/GoTeleport/tele
+% go install github.com/petar/GoTeleport/tele/cmd/tele
+
+(3) Run tele to get the help screen and verify the installation was successful.
+
+Contributing and fineprint
+--------------------------
+
+The Teleport Tool and the communication technology behind it — Teleport
+Transport, to be described in another article — are part of the Go Circuit
+Project (http://gocircuit.org).
+
+To facilitate adoption and contribution to the Teleport Tool, I am maintaining
+a mirror of its source tree (which originates within the source of the Go
+Circuit, https://code.google.com/p/gocircuit) on GitHub, at GitHub,
+https://github.com/petar/GoTeleport, where pull requests will be accepted.
+
+Contributions of significant new features or interfaces should first be
+discussed on the gocircuit-dev discussion group, found at
+https://groups.google.com/forum/#!forum/gocircuit-dev
+
+For news and updates, tune into to Twitter @gocircuit or subscribe to the RSS
+feed of The Go Circuit Blog, at http://blog.gocircuit.org/feed.atom
