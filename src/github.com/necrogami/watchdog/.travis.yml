@@ -1,0 +1,6 @@
+language: go
+
+install:
+  - go get code.google.com/p/goconf/conf
+  - go get github.com/cloudfoundry/gosigar
+  - go get labix.org/v2/mgo
