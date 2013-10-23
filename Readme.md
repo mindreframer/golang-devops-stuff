@@ -64,6 +64,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
        336 commits, last change: 2013-08-27 16:14:13, 66 stars, 22 forks
 
+    cloudfoundry/hm9000:
+
+       197 commits, last change: 2013-10-22 12:03:31, 8 stars, 2 forks
+
     coreos/etcd:
       A highly-available key value store for shared configuration and service discovery
        652 commits, last change: 2013-10-22 09:45:47, 1,560 stars, 118 forks
