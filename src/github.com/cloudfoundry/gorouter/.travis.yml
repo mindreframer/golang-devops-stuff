@@ -1,0 +1,15 @@
+language: go
+go:
+  - 1.1
+  - tip
+
+matrix:
+  allow_failures:
+    - go: tip
+
+install:
+  - gem install nats --pre
+  - go get -v ./...
+  - go build -v ./...
+
+script: go test -v ./...
