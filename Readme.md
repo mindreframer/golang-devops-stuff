@@ -64,6 +64,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
        336 commits, last change: 2013-08-27 16:14:13, 66 stars, 22 forks
 
+    cloudfoundry/gosigar:
+
+       15 commits, last change: 2013-08-06 16:12:49, 32 stars, 15 forks
+
     cloudfoundry/hm9000:
 
        197 commits, last change: 2013-10-22 12:03:31, 8 stars, 2 forks
@@ -111,10 +115,6 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     golang/groupcache:
       groupcache is a caching and cache-filling library, intended as a replacement for memcached in many cases.
        19 commits, last change: 2013-10-03 20:14:56, 2,285 stars, 191 forks
-
-    jondot/gosigar:
-
-       13 commits, last change: , 2 stars, 15 forks
 
     jondot/groundcontrol:
       Manage and monitor your Raspberry Pi with ease
