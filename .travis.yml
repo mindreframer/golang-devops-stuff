@@ -1,0 +1,15 @@
+language: go
+go:
+  - 1.1
+  - 1.1.1
+
+branches:
+  only:
+    - master
+
+script:
+  - go build
+  - go fmt ./...
+  - go vet ./...
+  - go test -i -race ./...
+  - go test -v -race ./...
