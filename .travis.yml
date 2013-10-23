@@ -1,0 +1,12 @@
+language: go
+
+go:
+  - 1.1
+
+install:
+  - go get github.com/goraft/raft
+  - go get github.com/gorilla/mux
+  - go get github.com/miekg/dns
+  - go get github.com/skynetservices/skydns/msg
+  - go get github.com/rcrowley/go-metrics
+  - go get github.com/stathat/go
