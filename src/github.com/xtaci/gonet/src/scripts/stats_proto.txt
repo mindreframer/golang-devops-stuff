@@ -1,0 +1,8 @@
+# 增加一个统计数据
+ADD_REQ=
+data array byte
+===
+
+INT=
+v int32
+===
