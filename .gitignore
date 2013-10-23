@@ -1,0 +1,21 @@
+# OS Cache Files #
+##################
+.DS_Store
+Thumbs.db
+.SyncID
+.SyncIgnore
+
+# Editor & IDE Files #
+######################
+*.sublime-project
+*.sublime-workspace
+.*.swp
+
+# Untracked Directories #
+#########################
+bin/
+env/
+shipbuilder
+config.json
+*.pem
+
