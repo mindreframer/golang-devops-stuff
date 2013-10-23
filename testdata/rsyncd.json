@@ -1,0 +1,93 @@
+[
+  {
+    "Name": "bytes_total",
+    "Program": "rsyncd.em",
+    "Kind": 0,
+    "Keys": [
+      "operation"
+    ],
+    "Values": {
+      "D": null,
+      "Next": {
+        "received": {
+          "D": {
+            "Value": 975017,
+            "Time": "2011-02-23T05:54:10Z"
+          },
+          "Next": {}
+        },
+        "sent": {
+          "D": {
+            "Value": 62793673,
+            "Time": "2011-02-23T05:54:10Z"
+          },
+          "Next": {}
+        }
+      }
+    }
+  },
+  {
+    "Name": "connections_total",
+    "Program": "rsyncd.em",
+    "Kind": 0,
+    "Keys": [],
+    "Values": {
+      "D": {
+        "Value": 52,
+        "Time": "2011-02-22T21:54:13Z"
+      },
+      "Next": null
+    }
+  },
+  {
+    "Name": "connection-time_total",
+    "Program": "rsyncd.em",
+    "Kind": 0,
+    "Keys": [],
+    "Values": {
+      "D": {
+        "Value": 1181011,
+        "Time": "2011-02-23T05:54:10Z"
+      },
+      "Next": null
+    }
+  },
+  {
+    "Name": "transfers_total",
+    "Program": "rsyncd.em",
+    "Kind": 0,
+    "Keys": [
+      "module",
+      "operation"
+    ],
+    "Values": {
+      "D": null,
+      "Next": {
+        "module": {
+          "D": null,
+          "Next": {
+            "send": {
+              "D": {
+                "Value": 2,
+                "Time": "2011-02-23T05:50:32Z"
+              },
+              "Next": {}
+            }
+          }
+        },
+        "repo": {
+          "D": null,
+          "Next": {
+            "send": {
+              "D": {
+                "Value": 25,
+                "Time": "2011-02-23T05:51:14Z"
+              },
+              "Next": {}
+            }
+          }
+        }
+      }
+    }
+  }
+]
