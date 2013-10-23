@@ -20,7 +20,7 @@ https://github.com/flynn/rpcplus.git
 https://github.com/globocom/gandalf.git
 https://github.com/globocom/tsuru.git
 https://github.com/golang/groupcache.git
-https://github.com/jondot/gosigar.git
+https://github.com/cloudfoundry/gosigar.git
 https://github.com/jondot/groundcontrol.git
 https://github.com/jordansissel/lumberjack.git
 https://github.com/mindreframer/emtail.git
