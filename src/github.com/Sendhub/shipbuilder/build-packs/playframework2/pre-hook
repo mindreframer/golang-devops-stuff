@@ -1,0 +1,7 @@
+#!/bin/bash
+cd /app/src
+export _JAVA_OPTIONS='-Xmx5000m -XX:-UseConcMarkSweepGC'
+stdbuf -o0 play compile >> /app/out
+rc=$?
+echo "RETURN_CODE: ${rc}" >> /app/out
+exit $rc

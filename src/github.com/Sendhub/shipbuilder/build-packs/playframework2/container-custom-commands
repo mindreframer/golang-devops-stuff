@@ -1,0 +1,1 @@
+curl http://downloads.typesafe.com/play/2.1.2/play-2.1.2.zip > play-2.1.2.zip && unzip play-2.1.2.zip && sudo mv play-2.1.2 /usr/local/ && sudo ln -s /usr/local/play{-2.1.2,} && sudo ln -s /usr/local/play/play /usr/local/bin/play && rm -f play-2.1.2.zip
