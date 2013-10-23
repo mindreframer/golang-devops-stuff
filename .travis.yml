@@ -1,0 +1,18 @@
+language: go
+
+go:
+  - 1.1
+
+before_install:
+  - sudo apt-get update -qq > apt-get.out 2>&1  || (cat apt-get.out && exit 1)
+  - sudo apt-get install bzr mercurial git -qq > apt-get.out 2>&1 || (cat apt-get.out && exit 1)
+
+script:
+  - go test -v ./aws/
+  - go test -v ./cloudwatch/
+  - go test -v ./dynamodb/
+  - go test -v ./ec2/
+  - go test -v ./elb/
+  - go test -v ./iam/
+  - go test -v ./s3/
+  - go test -v ./sqs/
