@@ -15,6 +15,7 @@ https://github.com/cloudfoundry/yagnats.git
 https://github.com/coreos/etcd.git
 https://github.com/crowdmob/goamz.git
 https://github.com/dotcloud/docker.git
+https://github.com/efficient/epaxos.git
 https://github.com/errplane/errplane-go.git
 https://github.com/flynn/go-crypto-ssh.git
 https://github.com/flynn/go-discover.git
@@ -39,4 +40,3 @@ https://github.com/skynetservices/skydns.git
 https://github.com/spf13/nitro.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
-https://github.com/efficient/epaxos.git
