@@ -39,3 +39,4 @@ https://github.com/skynetservices/skydns.git
 https://github.com/spf13/nitro.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
+https://github.com/efficient/epaxos.git
