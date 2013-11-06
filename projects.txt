@@ -24,6 +24,7 @@ https://github.com/globocom/gandalf.git
 https://github.com/globocom/tsuru.git
 https://github.com/golang/groupcache.git
 https://github.com/hashicorp/serf.git
+https://github.com/influxdb/influxdb.git
 https://github.com/jondot/groundcontrol.git
 https://github.com/jordansissel/lumberjack.git
 https://github.com/mindreframer/emtail.git
@@ -40,4 +41,3 @@ https://github.com/skynetservices/skydns.git
 https://github.com/spf13/nitro.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
-https://github.com/influxdb/influxdb.git
