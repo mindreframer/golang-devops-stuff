@@ -1,0 +1,40 @@
+*~
+
+config.json
+/test
+/bin/
+
+/pkg/
+
+TAGS
+
+flymake.sh
+refresh_tags.sh
+a.out
+
+*.test
+/src/query/a.out*
+.DS_Store
+
+# ignore generated files.
+src/parser/lex.yy.c
+src/parser/y.tab.h
+src/parser/y.tab.c
+build/
+
+# executables
+server
+main
+godef
+
+# dependencies
+src/code.google.com/p/log4go
+src/code.google.com/p/go.crypto/
+/src/code.google.com/p/goplan9/
+/src/code.google.com/p/goprotobuf/
+/src/code.google.com/p/rog-go/
+src/launchpad.net/gocheck/
+/src/github.com/nsf/gocode/
+/src/github.com/*
+out_rpm/
+packages/
