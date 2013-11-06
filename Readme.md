@@ -134,6 +134,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Service orchestration and management tool.
        378 commits, last change: 2013-10-23 11:39:46, 183 stars, 8 forks
 
+    influxdb/influxdb:
+      Scalable datastore for metrics, events, and real-time analytics
+       342 commits, last change: 2013-11-05 16:13:44, 298 stars, 6 forks
+
     jondot/groundcontrol:
       Manage and monitor your Raspberry Pi with ease
        50 commits, last change: 2013-08-22 07:19:32, 610 stars, 41 forks
