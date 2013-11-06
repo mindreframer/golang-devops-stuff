@@ -1,0 +1,41 @@
+package protocol;
+
+message FieldValue {
+  optional string string_value = 1;
+  optional double double_value = 3;
+  optional bool bool_value = 4;
+  optional int64 int64_value = 5;
+}
+
+message Point {
+  repeated FieldValue values = 1;
+  required int64 timestamp = 2;
+  required uint32 sequence_number = 3;
+}
+
+message Series {
+  repeated Point points = 1;
+  required string name = 2;
+  repeated string fields = 3;
+}
+
+message Request {
+  enum Type {
+    QUERY = 1;
+    WRITE = 2;
+    GET_SERVERS = 3;
+  }
+  required int32 id = 1;
+  required Type type = 2;
+}
+
+message Response {
+  enum Type {
+    QUERY = 1;
+    WRITE_OK = 2;
+    END_STREAM = 3;
+  }
+  required int32 id = 1;
+  optional Series series = 2;
+  repeated string servers = 3;
+}

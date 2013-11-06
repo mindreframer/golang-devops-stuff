@@ -1,0 +1,16 @@
+language: go
+
+go:
+  - 1.1
+  - tip
+
+before_install:
+  - sudo apt-get update
+  - sudo apt-get install -y protobuf-compiler valgrind
+
+install: ./build.sh
+script: ./test.sh
+
+notifications:
+  irc: "chat.freenode.net#influxdb"
+  use_notice: true
