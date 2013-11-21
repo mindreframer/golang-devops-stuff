@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/cloudfoundry/go_cfmessagebus/mock_cfmessagebus"
+	"github.com/cloudfoundry/yagnats/fakeyagnats"
 	. "launchpad.net/gocheck"
 
 	"github.com/cloudfoundry/gorouter/config"
@@ -14,7 +14,7 @@ import (
 type RegistrySuite struct {
 	*Registry
 
-	messageBus *mock_cfmessagebus.MockMessageBus
+	messageBus *fakeyagnats.FakeYagnats
 }
 
 var _ = Suite(&RegistrySuite{})
@@ -27,7 +27,7 @@ func (s *RegistrySuite) SetUpTest(c *C) {
 	configObj = config.DefaultConfig()
 	configObj.DropletStaleThreshold = 10 * time.Millisecond
 
-	s.messageBus = mock_cfmessagebus.NewMockMessageBus()
+	s.messageBus = fakeyagnats.New()
 	s.Registry = NewRegistry(configObj, s.messageBus)
 
 	fooEndpoint = &route.Endpoint{
@@ -299,7 +299,7 @@ func (s *RegistrySuite) TestPruneStaleAppsWhenStateStale(c *C) {
 
 	time.Sleep(s.dropletStaleThreshold + 1*time.Millisecond)
 
-	s.messageBus.OnPing(func() bool { return false })
+	s.messageBus.PingResponse = false
 
 	time.Sleep(s.dropletStaleThreshold + 1*time.Millisecond)
 
@@ -320,11 +320,11 @@ func (s *RegistrySuite) TestPruneStaleDropletsDoesNotDeadlock(c *C) {
 
 	completeSequence := make(chan string)
 
-	s.messageBus.OnPing(func() bool {
+	s.messageBus.OnPing = func() bool {
 		time.Sleep(5 * time.Second)
 		completeSequence <- "stale"
 		return false
-	})
+	}
 
 	go s.PruneStaleDroplets()
 

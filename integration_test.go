@@ -4,7 +4,7 @@ import (
 	"os/exec"
 	"time"
 
-	mbus "github.com/cloudfoundry/go_cfmessagebus"
+	"github.com/cloudfoundry/yagnats"
 	. "launchpad.net/gocheck"
 
 	"github.com/cloudfoundry/gorouter/config"
@@ -15,7 +15,7 @@ import (
 
 type IntegrationSuite struct {
 	Config     *config.Config
-	mbusClient mbus.MessageBus
+	mbusClient yagnats.NATSClient
 	router     *Router
 
 	natsPort uint16

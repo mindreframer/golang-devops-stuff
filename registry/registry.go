@@ -5,9 +5,9 @@ import (
 	"sync"
 	"time"
 
-	mbus "github.com/cloudfoundry/go_cfmessagebus"
 	"github.com/cloudfoundry/gorouter/stats"
 	steno "github.com/cloudfoundry/gosteno"
+	"github.com/cloudfoundry/yagnats"
 
 	"github.com/cloudfoundry/gorouter/config"
 	"github.com/cloudfoundry/gorouter/log"
@@ -29,7 +29,7 @@ type Registry struct {
 	pruneStaleDropletsInterval time.Duration
 	dropletStaleThreshold      time.Duration
 
-	messageBus mbus.MessageBus
+	messageBus yagnats.NATSClient
 
 	timeOfLastUpdate time.Time
 }
@@ -44,7 +44,7 @@ type tableEntry struct {
 	updatedAt time.Time
 }
 
-func NewRegistry(c *config.Config, mbus mbus.MessageBus) *Registry {
+func NewRegistry(c *config.Config, mbus yagnats.NATSClient) *Registry {
 	r := &Registry{}
 
 	r.Logger = steno.NewLogger("router.registry")

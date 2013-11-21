@@ -44,7 +44,7 @@ mkdir -p src/github.com/cloudfoundry
 
 go get -v ./src/github.com/cloudfoundry/gorouter/...
 
-gem install nats
+go get github.com/apcera/gnatsd
 ```
 
 ### Running Tests
@@ -64,11 +64,19 @@ go test -v ./... -gocheck.f=Registry
 go test -v ./registry
 ```
 
+If tests are failing with `...open .../gorouter/router_test.go: too many open files`
+you should increase your max file descriptor ulimit
+
+```bash
+ulimit -n 1024
+```
+
+
 ### Start
 
 ```bash
 # Start NATS server in daemon mode
-nats-server -d
+gnatsd &
 
 # Start gorouter
 router

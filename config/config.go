@@ -44,7 +44,8 @@ var defaultLoggingConfig = LoggingConfig{
 }
 
 type LoggregatorConfig struct {
-	Url string
+	Url          string
+	SharedSecret string "shared_secret"
 }
 
 var defaultLoggregatorConfig = LoggregatorConfig{
@@ -53,7 +54,7 @@ var defaultLoggregatorConfig = LoggregatorConfig{
 
 type Config struct {
 	Status            StatusConfig      "status"
-	Nats              NatsConfig        "nats"
+	Nats              []NatsConfig      "nats"
 	Logging           LoggingConfig     "logging"
 	LoggregatorConfig LoggregatorConfig "loggregatorConfig"
 
@@ -83,7 +84,7 @@ type Config struct {
 
 var defaultConfig = Config{
 	Status:            defaultStatusConfig,
-	Nats:              defaultNatsConfig,
+	Nats:              []NatsConfig{defaultNatsConfig},
 	Logging:           defaultLoggingConfig,
 	LoggregatorConfig: defaultLoggregatorConfig,
 
@@ -124,6 +125,11 @@ func (c *Config) Process() {
 	}
 }
 
+func (c *Config) Initialize(configYAML []byte) error {
+	c.Nats = []NatsConfig{}
+	return goyaml.Unmarshal(configYAML, &c)
+}
+
 func InitConfigFromFile(path string) *Config {
 	var c *Config = DefaultConfig()
 	var e error
@@ -133,7 +139,7 @@ func InitConfigFromFile(path string) *Config {
 		panic(e.Error())
 	}
 
-	e = goyaml.Unmarshal(b, c)
+	e = c.Initialize(b)
 	if e != nil {
 		panic(e.Error())
 	}

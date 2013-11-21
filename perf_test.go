@@ -1,7 +1,7 @@
 package router
 
 import (
-	"github.com/cloudfoundry/go_cfmessagebus/mock_cfmessagebus"
+	"github.com/cloudfoundry/yagnats/fakeyagnats"
 	"strconv"
 	"testing"
 
@@ -19,7 +19,7 @@ const (
 
 func BenchmarkRegister(b *testing.B) {
 	c := config.DefaultConfig()
-	mbus := mock_cfmessagebus.NewMockMessageBus()
+	mbus := fakeyagnats.New()
 	r := registry.NewRegistry(c, mbus)
 	p := proxy.NewProxy(c, r, varz.NewVarz(r))
 

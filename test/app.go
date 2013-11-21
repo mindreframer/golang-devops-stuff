@@ -7,8 +7,8 @@ import (
 	. "launchpad.net/gocheck"
 	"net/http"
 
-	mbus "github.com/cloudfoundry/go_cfmessagebus"
 	"github.com/cloudfoundry/gorouter/common"
+	"github.com/cloudfoundry/yagnats"
 
 	"github.com/cloudfoundry/gorouter/route"
 )
@@ -17,12 +17,12 @@ type TestApp struct {
 	port       uint16      // app listening port
 	rPort      uint16      // router listening port
 	urls       []route.Uri // host registered host name
-	mbusClient mbus.MessageBus
+	mbusClient yagnats.NATSClient
 	tags       map[string]string
 	mux        *http.ServeMux
 }
 
-func NewTestApp(urls []route.Uri, rPort uint16, mbusClient mbus.MessageBus, tags map[string]string) *TestApp {
+func NewTestApp(urls []route.Uri, rPort uint16, mbusClient yagnats.NATSClient, tags map[string]string) *TestApp {
 	app := new(TestApp)
 
 	port, _ := common.GrabEphemeralPort()
