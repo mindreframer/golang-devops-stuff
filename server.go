@@ -88,7 +88,7 @@ type Server struct {
 	secret     string
 }
 
-// Create a new Server
+// Newserver returns a new Server.
 func NewServer(members []string, domain string, dnsAddr string, httpAddr string, dataDir string, rt, wt time.Duration, secret string) (s *Server) {
 	s = &Server{
 		members:      members,
@@ -133,13 +133,13 @@ func NewServer(members []string, domain string, dnsAddr string, httpAddr string,
 	return
 }
 
-// Returns IP:Port of DNS Server.
+// DNSAddr returns IP:Port of a DNS Server.
 func (s *Server) DNSAddr() string { return s.dnsAddr }
 
-// Returns IP:Port of HTTP Server.
+// HTTPAddr returns IP:Port of HTTP Server.
 func (s *Server) HTTPAddr() string { return s.httpAddr }
 
-// Starts DNS server and blocks waiting to be killed.
+// Start starts a DNS server and blocks waiting to be killed.
 func (s *Server) Start() (*sync.WaitGroup, error) {
 	var err error
 	log.Printf("Initializing Server. DNS Addr: %q, HTTP Addr: %q, Data Dir: %q", s.dnsAddr, s.httpAddr, s.dataDir)
@@ -218,13 +218,13 @@ func (s *Server) Start() (*sync.WaitGroup, error) {
 	return s.waiter, nil
 }
 
-// Stops server
+// Stop stops a server.
 func (s *Server) Stop() {
 	log.Println("Stopping server")
 	s.waiter.Done()
 }
 
-// Returns the current leader
+// Leader returns the current leader.
 func (s *Server) Leader() string {
 	l := s.raftServer.Leader()
 
@@ -236,12 +236,12 @@ func (s *Server) Leader() string {
 	return l
 }
 
-// Is this instance the current leader
+// IsLeader returns true if this instance the current leader.
 func (s *Server) IsLeader() bool {
 	return s.raftServer.State() == raft.Leader
 }
 
-// Returns a slice of members
+// Members returns the current members.
 func (s *Server) Members() (members []string) {
 	peers := s.raftServer.Peers()
 
@@ -281,7 +281,7 @@ run:
 	s.Stop()
 }
 
-// Joins an existing skydns cluster
+// Join joins an existing SkyDNS cluster.
 func (s *Server) Join(members []string) error {
 	command := &raft.DefaultJoinCommand{
 		Name:             s.raftServer.Name(),
@@ -313,12 +313,12 @@ func (s *Server) Join(members []string) error {
 	return errors.New("Could not connect to any cluster members")
 }
 
-// Proxy HTTP handlers to Gorilla's mux.Router
+// HandleFunc proxies HTTP handlers to Gorilla's mux.Router.
 func (s *Server) HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request)) {
 	s.router.HandleFunc(pattern, handler)
 }
 
-// Handles incomming RAFT joins
+// Handles incoming RAFT joins.
 func (s *Server) joinHandler(w http.ResponseWriter, req *http.Request) {
 	log.Println("Processing incoming join")
 	command := &raft.DefaultJoinCommand{}
@@ -341,7 +341,7 @@ func (s *Server) joinHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Handler for DNS requests, responsible for parsing DNS request and returning response
+// Handler for DNS requests, responsible for parsing DNS request and returning response.
 func (s *Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 	requestCount.Inc(1)
 
