@@ -106,7 +106,7 @@ func (u *ColoredUi) colorize(message string, color UiColor, bold bool) string {
 		attr = 1
 	}
 
-	return fmt.Sprintf("\033[%d;%d;40m%s\033[0m", attr, color, message)
+	return fmt.Sprintf("\033[%d;%dm%s\033[0m", attr, color, message)
 }
 
 func (u *ColoredUi) supportsColors() bool {
@@ -210,7 +210,7 @@ func (rw *BasicUi) Say(message string) {
 	log.Printf("ui: %s", message)
 	_, err := fmt.Fprint(rw.Writer, message+"\n")
 	if err != nil {
-		panic(err)
+		log.Printf("[ERR] Failed to write to UI: %s", err)
 	}
 }
 
@@ -221,7 +221,7 @@ func (rw *BasicUi) Message(message string) {
 	log.Printf("ui: %s", message)
 	_, err := fmt.Fprint(rw.Writer, message+"\n")
 	if err != nil {
-		panic(err)
+		log.Printf("[ERR] Failed to write to UI: %s", err)
 	}
 }
 
@@ -232,7 +232,7 @@ func (rw *BasicUi) Error(message string) {
 	log.Printf("ui error: %s", message)
 	_, err := fmt.Fprint(rw.Writer, message+"\n")
 	if err != nil {
-		panic(err)
+		log.Printf("[ERR] Failed to write to UI: %s", err)
 	}
 }
 

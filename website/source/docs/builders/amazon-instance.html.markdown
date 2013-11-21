@@ -23,6 +23,13 @@ quite a bit.
 The builder does _not_ manage AMIs. Once it creates an AMI and stores it
 in your account, it is up to you to use, delete, etc. the AMI.
 
+<div class="alert alert-block alert-info">
+<strong>Note:</strong> This builder requires that the
+<a href="http://aws.amazon.com/developertools/368">Amazon EC2 AMI Tools</a>
+are installed onto the machine. This can be done within a provisioner, but
+must be done before the builder finishes running.
+</div>
+
 ## Configuration Reference
 
 There are many configuration options available for the builder. They are
@@ -128,6 +135,10 @@ Optional:
   will automatically create a new temporary security group to allow SSH
   access. Note that if this is specified, you must be sure the security
   group allows access to the `ssh_port` given below.
+
+* `security_group_ids` (array of string) - A list of security groups as
+  described above. Note that if this is specified, you must omit the
+  security_group_id.
 
 * `ssh_port` (int) - The port that SSH will be available on. This defaults
   to port 22.
