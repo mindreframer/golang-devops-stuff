@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	mbus "github.com/cloudfoundry/go_cfmessagebus"
+	"github.com/cloudfoundry/yagnats"
 	. "launchpad.net/gocheck"
 
 	"github.com/cloudfoundry/gorouter/common"
@@ -27,7 +27,7 @@ import (
 type RouterSuite struct {
 	Config        *config.Config
 	natsServerCmd *exec.Cmd
-	mbusClient    mbus.MessageBus
+	mbusClient    *yagnats.Client
 	router        *Router
 	natsPort      uint16
 }
@@ -58,9 +58,11 @@ func (s *RouterSuite) TearDownSuite(c *C) {
 func (s *RouterSuite) TestRouterGreets(c *C) {
 	response := make(chan []byte)
 
-	s.mbusClient.Request("router.greet", []byte{}, func(payload []byte) {
-		response <- payload
+	s.mbusClient.Subscribe("router.greet.test.response", func(msg *yagnats.Message) {
+		response <- msg.Payload
 	})
+
+	s.mbusClient.PublishWithReplyTo("router.greet", "router.greet.test.response", []byte{})
 
 	select {
 	case msg := <-response:
@@ -78,11 +80,17 @@ func (s *RouterSuite) TestDiscover(c *C) {
 	// sure that router has run at least for one second
 	time.Sleep(time.Second)
 
-	s.mbusClient.Request("vcap.component.discover", []byte{}, func(payload []byte) {
+	s.mbusClient.Subscribe("vcap.component.discover.test.response", func(msg *yagnats.Message) {
 		var component common.VcapComponent
-		_ = json.Unmarshal(payload, &component)
+		_ = json.Unmarshal(msg.Payload, &component)
 		sig <- component
 	})
+
+	s.mbusClient.PublishWithReplyTo(
+		"vcap.component.discover",
+		"vcap.component.discover.test.response",
+		[]byte{},
+	)
 
 	cc := <-sig
 
@@ -350,7 +358,7 @@ func (s *RouterSuite) TestProxyPutRequest(c *C) {
 func (s *RouterSuite) TestRouterSendsStartOnConnect(c *C) {
 	started := make(chan bool)
 
-	s.router.mbusClient.Subscribe("router.start", func([]byte) {
+	s.router.mbusClient.Subscribe("router.start", func(*yagnats.Message) {
 		started <- true
 	})
 

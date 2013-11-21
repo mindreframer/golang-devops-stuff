@@ -4,10 +4,10 @@ status:
   pass:
 
 nats:
-  host: "localhost"
-  port: 4222
-  user:
-  pass:
+  - host: "localhost"
+    port: 4222
+    user:
+    pass:
 
 logging:
   file:

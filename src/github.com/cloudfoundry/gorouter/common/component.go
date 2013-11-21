@@ -3,9 +3,9 @@ package common
 import (
 	"encoding/json"
 	"fmt"
-	mbus "github.com/cloudfoundry/go_cfmessagebus"
 	. "github.com/cloudfoundry/gorouter/common/http"
 	steno "github.com/cloudfoundry/gosteno"
+	"github.com/cloudfoundry/yagnats"
 	"net/http"
 	"runtime"
 	"time"
@@ -106,15 +106,16 @@ func StartComponent(c *VcapComponent) {
 	go c.ListenAndServe()
 }
 
-func Register(c *VcapComponent, mbusClient mbus.MessageBus) {
-	mbusClient.RespondToChannel("vcap.component.discover", func(payload []byte) []byte {
+func Register(c *VcapComponent, mbusClient *yagnats.Client) {
+	mbusClient.Subscribe("vcap.component.discover", func(msg *yagnats.Message) {
 		Component.Uptime = Component.Start.Elapsed()
 		b, e := json.Marshal(Component)
 		if e != nil {
 			log.Warnf(e.Error())
-			return nil
+			return
 		}
-		return b
+
+		mbusClient.Publish(msg.ReplyTo, b)
 	})
 
 	b, e := json.Marshal(Component)
@@ -122,6 +123,7 @@ func Register(c *VcapComponent, mbusClient mbus.MessageBus) {
 		log.Fatal(e.Error())
 		panic("Component's information should be correct")
 	}
+
 	mbusClient.Publish("vcap.component.announce", b)
 
 	log.Infof("Component %s registered successfully", Component.Type)

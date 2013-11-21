@@ -24,6 +24,8 @@ type RequestHandler struct {
 
 	request  *http.Request
 	response http.ResponseWriter
+
+	transport *http.Transport
 }
 
 func NewRequestHandler(request *http.Request, response http.ResponseWriter) RequestHandler {
@@ -99,6 +101,8 @@ func (h *RequestHandler) HandleWebSocketRequest(endpoint *route.Endpoint) {
 }
 
 func (h *RequestHandler) HandleHttpRequest(transport *http.Transport, endpoint *route.Endpoint) (*http.Response, error) {
+	h.transport = transport
+
 	h.setupRequest(endpoint)
 	h.setupConnection()
 
@@ -132,7 +136,7 @@ func (h *RequestHandler) WriteResponse(endpointResponse *http.Response) int64 {
 	return bytesSent
 }
 
-func (h *RequestHandler) copyToResponse(src io.Reader) (int64, error) {
+func (h *RequestHandler) copyToResponse(src io.ReadCloser) (int64, error) {
 	if src == nil {
 		return 0, nil
 	}
@@ -146,7 +150,13 @@ func (h *RequestHandler) copyToResponse(src io.Reader) (int64, error) {
 		dst = u
 	}
 
-	return io.Copy(dst, src)
+	copied, err := io.Copy(dst, src)
+	if err != nil {
+		h.transport.CancelRequest(h.request)
+	}
+
+	return copied, err
+
 }
 
 func (h *RequestHandler) setupRequest(endpoint *route.Endpoint) {

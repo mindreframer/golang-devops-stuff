@@ -80,7 +80,7 @@ type AccessLogger struct {
 	index uint
 }
 
-func NewAccessLogger(f io.Writer, loggregatorUrl string, index uint) *AccessLogger {
+func NewAccessLogger(f io.Writer, loggregatorUrl, loggregatorSharedSecret string, index uint) *AccessLogger {
 	a := &AccessLogger{
 		w:     f,
 		c:     make(chan AccessLogRecord, 128),
@@ -88,7 +88,7 @@ func NewAccessLogger(f io.Writer, loggregatorUrl string, index uint) *AccessLogg
 	}
 
 	if isValidUrl(loggregatorUrl) {
-		a.e, _ = emitter.NewEmitter(loggregatorUrl, "ROUTER", strconv.FormatUint(uint64(index), 10), steno.NewLogger("router.loggregator"))
+		a.e, _ = emitter.NewEmitter(loggregatorUrl, "RTR", strconv.FormatUint(uint64(index), 10), loggregatorSharedSecret, steno.NewLogger("router.loggregator"))
 	} else {
 		log.Errorf("Invalid loggregator url %s", loggregatorUrl)
 	}

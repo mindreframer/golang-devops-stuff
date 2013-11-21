@@ -2,7 +2,6 @@ package config
 
 import (
 	. "launchpad.net/gocheck"
-	"launchpad.net/goyaml"
 	"time"
 )
 
@@ -28,7 +27,7 @@ status:
 	c.Check(s.Status.User, Equals, "")
 	c.Check(s.Status.Pass, Equals, "")
 
-	goyaml.Unmarshal(b, &s.Config)
+	s.Config.Initialize(b)
 
 	c.Check(s.Status.Port, Equals, uint16(1234))
 	c.Check(s.Status.User, Equals, "user")
@@ -42,7 +41,7 @@ endpoint_timeout: 10
 
 	c.Check(s.EndpointTimeoutInSeconds, Equals, 60)
 
-	goyaml.Unmarshal(b, &s.Config)
+	s.Config.Initialize(b)
 
 	c.Check(s.EndpointTimeoutInSeconds, Equals, 10)
 }
@@ -50,23 +49,25 @@ endpoint_timeout: 10
 func (s *ConfigSuite) TestNats(c *C) {
 	var b = []byte(`
 nats:
-  host: remotehost
-  port: 4223
-  user: user
-  pass: pass
+  - host: remotehost
+    port: 4223
+    user: user
+    pass: pass
 `)
 
-	c.Check(s.Nats.Host, Equals, "localhost")
-	c.Check(s.Nats.Port, Equals, uint16(4222))
-	c.Check(s.Nats.User, Equals, "")
-	c.Check(s.Nats.Pass, Equals, "")
+	c.Assert(len(s.Nats), Not(Equals), 0)
+	c.Check(s.Nats[0].Host, Equals, "localhost")
+	c.Check(s.Nats[0].Port, Equals, uint16(4222))
+	c.Check(s.Nats[0].User, Equals, "")
+	c.Check(s.Nats[0].Pass, Equals, "")
 
-	goyaml.Unmarshal(b, &s.Config)
+	s.Config.Initialize(b)
 
-	c.Check(s.Nats.Host, Equals, "remotehost")
-	c.Check(s.Nats.Port, Equals, uint16(4223))
-	c.Check(s.Nats.User, Equals, "user")
-	c.Check(s.Nats.Pass, Equals, "pass")
+	c.Assert(len(s.Nats), Not(Equals), 0)
+	c.Check(s.Nats[0].Host, Equals, "remotehost")
+	c.Check(s.Nats[0].Port, Equals, uint16(4223))
+	c.Check(s.Nats[0].User, Equals, "user")
+	c.Check(s.Nats[0].Pass, Equals, "pass")
 }
 
 func (s *ConfigSuite) TestLogging(c *C) {
@@ -81,7 +82,7 @@ logging:
 	c.Check(s.Logging.Syslog, Equals, "")
 	c.Check(s.Logging.Level, Equals, "debug")
 
-	goyaml.Unmarshal(b, &s.Config)
+	s.Config.Initialize(b)
 
 	c.Check(s.Logging.File, Equals, "/tmp/file")
 	c.Check(s.Logging.Syslog, Equals, "syslog")
@@ -96,7 +97,7 @@ loggregatorConfig:
 
 	c.Check(s.LoggregatorConfig.Url, Equals, "")
 
-	goyaml.Unmarshal(b, &s.Config)
+	s.Config.Initialize(b)
 
 	c.Check(s.LoggregatorConfig.Url, Equals, "10.10.16.14:3456")
 }
@@ -130,7 +131,7 @@ start_response_delay_interval: 15
 	c.Check(s.PublishActiveAppsInterval, Equals, 0*time.Second)
 	c.Check(s.StartResponseDelayInterval, Equals, 5*time.Second)
 
-	goyaml.Unmarshal(b, &s.Config)
+	s.Config.Initialize(b)
 
 	s.Config.Process()
 

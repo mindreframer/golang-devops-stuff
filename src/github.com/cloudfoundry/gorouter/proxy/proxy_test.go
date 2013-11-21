@@ -3,6 +3,7 @@ package proxy
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net"
@@ -11,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cloudfoundry/go_cfmessagebus/mock_cfmessagebus"
+	"github.com/cloudfoundry/yagnats/fakeyagnats"
 	. "launchpad.net/gocheck"
 
 	"github.com/cloudfoundry/gorouter/config"
@@ -140,7 +141,7 @@ func (s *ProxySuite) SetUpTest(c *C) {
 	config.TraceKey = "my_trace_key"
 	config.EndpointTimeout = 500 * time.Millisecond
 
-	mbus := mock_cfmessagebus.NewMockMessageBus()
+	mbus := fakeyagnats.New()
 	s.r = registry.NewRegistry(config, mbus)
 	s.p = NewProxy(config, s.r, nullVarz{})
 
@@ -149,7 +150,8 @@ func (s *ProxySuite) SetUpTest(c *C) {
 		panic(err)
 	}
 
-	go http.Serve(ln, s.p)
+	server := http.Server{Handler: s.p}
+	go server.Serve(ln)
 
 	s.proxyServer = ln
 }
@@ -523,6 +525,27 @@ func (s *ProxySuite) TestTransferEncodingChunked(c *C) {
 	}
 }
 
+func (s *ProxySuite) TestStatusNoContentHasNoTransferEncodingInResponse(c *C) {
+	s.RegisterHandler(c, "not-modified", func(x *httpConn) {
+		resp := newResponse(http.StatusNoContent)
+		resp.Header.Set("Connection", "close")
+		x.WriteResponse(resp)
+		x.Close()
+	})
+
+	x := s.DialProxy(c)
+
+	req := x.NewRequest("GET", "/", nil)
+	req.Header.Set("Connection", "close")
+	req.Host = "not-modified"
+	x.WriteRequest(req)
+
+	resp, _ := x.ReadResponse()
+	fmt.Printf("response: %#v\n", resp)
+	c.Check(resp.StatusCode, Equals, http.StatusNoContent)
+	c.Check(resp.TransferEncoding, IsNil)
+}
+
 func (s *ProxySuite) TestRequestTerminatesWhenResponseTakesTooLong(c *C) {
 	started := time.Now()
 	s.RegisterHandler(c, "slow-app", func(x *httpConn) {
@@ -541,4 +564,40 @@ func (s *ProxySuite) TestRequestTerminatesWhenResponseTakesTooLong(c *C) {
 	resp, _ := x.ReadResponse()
 	c.Check(resp.StatusCode, Equals, http.StatusBadGateway)
 	c.Check(time.Since(started) < time.Duration(800*time.Millisecond), Equals, true)
+}
+
+func (s *ProxySuite) TestRequestTerminatedWhenClientClosesConnection(c *C) {
+	serverResult := make(chan error)
+	s.RegisterHandler(c, "slow-app", func(x *httpConn) {
+		x.CheckLine("GET / HTTP/1.1")
+
+		timesToTick := 10
+
+		x.WriteLines([]string{
+			"HTTP/1.1 200 OK",
+			fmt.Sprintf("Content-Length: %d", timesToTick),
+		})
+
+		for i := 0; i < 10; i++ {
+			_, err := x.Conn.Write([]byte("x"))
+			if err != nil {
+				serverResult <- err
+				return
+			}
+
+			time.Sleep(100 * time.Millisecond)
+		}
+
+		serverResult <- nil
+	})
+
+	x := s.DialProxy(c)
+
+	req := x.NewRequest("GET", "/", nil)
+	req.Host = "slow-app"
+	x.WriteRequest(req)
+
+	x.Conn.Close()
+
+	c.Assert(<-serverResult, NotNil)
 }

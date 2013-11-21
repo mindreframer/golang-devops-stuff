@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cloudfoundry/go_cfmessagebus/mock_cfmessagebus"
+	"github.com/cloudfoundry/yagnats/fakeyagnats"
 	. "launchpad.net/gocheck"
 
 	"github.com/cloudfoundry/gorouter/config"
@@ -22,7 +22,7 @@ type VarzSuite struct {
 var _ = Suite(&VarzSuite{})
 
 func (s *VarzSuite) SetUpTest(c *C) {
-	r := registry.NewRegistry(config.DefaultConfig(), mock_cfmessagebus.NewMockMessageBus())
+	r := registry.NewRegistry(config.DefaultConfig(), fakeyagnats.New())
 	s.Registry = r
 	s.Varz = NewVarz(r)
 }

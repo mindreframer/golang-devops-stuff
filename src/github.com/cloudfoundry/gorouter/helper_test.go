@@ -53,11 +53,13 @@ func SpecConfig(natsPort, statusPort, proxyPort uint16) *config.Config {
 		Pass: "pass",
 	}
 
-	c.Nats = config.NatsConfig{
-		Host: "localhost",
-		Port: natsPort,
-		User: "nats",
-		Pass: "nats",
+	c.Nats = []config.NatsConfig{
+		{
+			Host: "localhost",
+			Port: natsPort,
+			User: "nats",
+			Pass: "nats",
+		},
 	}
 
 	c.Logging = config.LoggingConfig{
@@ -69,7 +71,7 @@ func SpecConfig(natsPort, statusPort, proxyPort uint16) *config.Config {
 }
 
 func StartNats(port int) *exec.Cmd {
-	cmd := exec.Command("nats-server", "-p", strconv.Itoa(port), "--user", "nats", "--pass", "nats")
+	cmd := exec.Command("gnatsd", "-p", strconv.Itoa(port), "--user", "nats", "--pass", "nats")
 	err := cmd.Start()
 	if err != nil {
 		panic(fmt.Sprintf("NATS failed to start: %v\n", err))
