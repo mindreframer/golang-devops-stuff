@@ -13,12 +13,30 @@ type Counter interface {
 	Inc(int64)
 }
 
+// Get an existing or create and register a new Counter.
+func GetOrRegisterCounter(name string, r Registry) Counter {
+	if nil == r {
+		r = DefaultRegistry
+	}
+	return r.GetOrRegister(name, NewCounter()).(Counter)
+}
+
 // Create a new Counter.
 func NewCounter() Counter {
 	if UseNilMetrics {
 		return NilCounter{}
 	}
 	return &StandardCounter{0}
+}
+
+// Create and register a new Counter.
+func NewRegisteredCounter(name string, r Registry) Counter {
+	c := NewCounter()
+	if nil == r {
+		r = DefaultRegistry
+	}
+	r.Register(name, c)
+	return c
 }
 
 // No-op Counter.

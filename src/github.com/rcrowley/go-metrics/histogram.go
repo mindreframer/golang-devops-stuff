@@ -24,6 +24,14 @@ type Histogram interface {
 	Variance() float64
 }
 
+// Get an existing or create and register a new Histogram.
+func GetOrRegisterHistogram(name string, r Registry, s Sample) Histogram {
+	if nil == r {
+		r = DefaultRegistry
+	}
+	return r.GetOrRegister(name, NewHistogram(s)).(Histogram)
+}
+
 // Create a new Histogram with the given Sample.  The initial values compare
 // so that the first value will be both min and max and the variance is flagged
 // for special treatment on its first iteration.
@@ -37,6 +45,16 @@ func NewHistogram(s Sample) Histogram {
 		s:        s,
 		variance: [2]float64{-1.0, 0.0},
 	}
+}
+
+// Create and register a new Histogram.
+func NewRegisteredHistogram(name string, r Registry, s Sample) Histogram {
+	c := NewHistogram(s)
+	if nil == r {
+		r = DefaultRegistry
+	}
+	r.Register(name, c)
+	return c
 }
 
 // No-op Histogram.

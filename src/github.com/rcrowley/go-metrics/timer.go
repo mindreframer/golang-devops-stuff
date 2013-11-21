@@ -23,12 +23,30 @@ type Timer interface {
 	UpdateSince(time.Time)
 }
 
+// Get an existing or create and register a new Timer.
+func GetOrRegisterTimer(name string, r Registry) Timer {
+	if nil == r {
+		r = DefaultRegistry
+	}
+	return r.GetOrRegister(name, NewTimer()).(Timer)
+}
+
 // Create a new timer with the given Histogram and Meter.
 func NewCustomTimer(h Histogram, m Meter) Timer {
 	if UseNilMetrics {
 		return NilTimer{}
 	}
 	return &StandardTimer{h, m}
+}
+
+// Create and register a new Timer.
+func NewRegisteredTimer(name string, r Registry) Timer {
+	c := NewTimer()
+	if nil == r {
+		r = DefaultRegistry
+	}
+	r.Register(name, c)
+	return c
 }
 
 // Create a new timer with a standard histogram and meter.  The histogram
