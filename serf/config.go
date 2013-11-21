@@ -7,6 +7,18 @@ import (
 	"time"
 )
 
+// ProtocolVersionMap is the mapping of Serf delegate protocol versions
+// to memberlist protocol versions. We mask the memberlist protocols using
+// our own protocol version.
+var ProtocolVersionMap map[uint8]uint8
+
+func init() {
+	ProtocolVersionMap = map[uint8]uint8{
+		1: 1,
+		0: 0,
+	}
+}
+
 // Config is the configuration for creating a Serf instance.
 type Config struct {
 	// The name of this node. This must be unique in the cluster. If this
@@ -29,6 +41,10 @@ type Config struct {
 	// but point-in-time snapshots of members can still be retrieved by
 	// calling Members on Serf.
 	EventCh chan<- Event
+
+	// ProtocolVersion is the protocol version to speak. This must be between
+	// ProtocolVersionMin and ProtocolVersionMax.
+	ProtocolVersion uint8
 
 	// BroadcastTimeout is the amount of time to wait for a broadcast
 	// message to be sent to the cluster. Broadcast messages are used for
@@ -58,6 +74,12 @@ type Config struct {
 	// every event will always be delayed by at least 10 seconds.
 	CoalescePeriod  time.Duration
 	QuiescentPeriod time.Duration
+
+	// The settings below relate to Serf's user event coalescing feature.
+	// The settings operate like above but only affect user messages and
+	// not the Member* messages that Serf generates.
+	UserCoalescePeriod  time.Duration
+	UserQuiescentPeriod time.Duration
 
 	// The settings below relate to Serf keeping track of recently
 	// failed/left nodes and attempting reconnects.
@@ -133,6 +155,7 @@ func DefaultConfig() *Config {
 		BroadcastTimeout:   5 * time.Second,
 		EventBuffer:        512,
 		LogOutput:          os.Stderr,
+		ProtocolVersion:    ProtocolVersionMax,
 		ReapInterval:       15 * time.Second,
 		RecentIntentBuffer: 128,
 		ReconnectInterval:  30 * time.Second,

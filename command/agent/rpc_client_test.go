@@ -42,6 +42,50 @@ func testRPCClient(t *testing.T) (*RPCClient, *Agent) {
 	return &RPCClient{Client: rpcClient}, agent
 }
 
+func TestRPCClientForceLeave(t *testing.T) {
+	client, a1 := testRPCClient(t)
+	a2 := testAgent()
+	defer client.Close()
+	defer a1.Shutdown()
+	defer a2.Shutdown()
+
+	if err := a1.Start(); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if err := a2.Start(); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	testutil.Yield()
+
+	s2Addr := a2.SerfConfig.MemberlistConfig.BindAddr
+	if _, err := a1.Join([]string{s2Addr}, false); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	testutil.Yield()
+
+	if err := a2.Shutdown(); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	testutil.Yield()
+
+	if err := client.ForceLeave(a2.SerfConfig.NodeName); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	m := a1.Serf().Members()
+	if len(m) != 2 {
+		t.Fatalf("should have 2 members: %#v", a1.Serf().Members())
+	}
+
+	if m[1].Status != serf.StatusLeft {
+		t.Fatalf("should be left: %#v", m[1])
+	}
+}
+
 func TestRPCClientJoin(t *testing.T) {
 	client, a1 := testRPCClient(t)
 	a2 := testAgent()
@@ -59,7 +103,7 @@ func TestRPCClientJoin(t *testing.T) {
 
 	testutil.Yield()
 
-	n, err := client.Join([]string{a2.SerfConfig.MemberlistConfig.BindAddr})
+	n, err := client.Join([]string{a2.SerfConfig.MemberlistConfig.BindAddr}, false)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -95,7 +139,7 @@ func TestRPCClientMembers(t *testing.T) {
 		t.Fatalf("bad: %#v", mem)
 	}
 
-	_, err = client.Join([]string{a2.SerfConfig.MemberlistConfig.BindAddr})
+	_, err = client.Join([]string{a2.SerfConfig.MemberlistConfig.BindAddr}, false)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -126,7 +170,7 @@ func TestRPCClientUserEvent(t *testing.T) {
 
 	testutil.Yield()
 
-	if err := client.UserEvent("deploy", []byte("foo")); err != nil {
+	if err := client.UserEvent("deploy", []byte("foo"), false); err != nil {
 		t.Fatalf("err: %s", err)
 	}
 
@@ -183,7 +227,7 @@ func TestRPCClientMonitor(t *testing.T) {
 	drainEventCh(eventCh)
 
 	// Join a bad thing to generate more events
-	a1.Join(nil)
+	a1.Join(nil, false)
 
 	testutil.Yield()
 

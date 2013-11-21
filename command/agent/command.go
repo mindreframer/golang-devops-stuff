@@ -4,11 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"github.com/hashicorp/logutils"
-	"github.com/hashicorp/serf/cli"
 	"github.com/hashicorp/serf/serf"
+	"github.com/mitchellh/cli"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Command is a Command implementation that runs a Serf agent.
@@ -17,116 +18,90 @@ import (
 // exit.
 type Command struct {
 	ShutdownCh <-chan struct{}
+	Ui         cli.Ui
 
 	lock         sync.Mutex
 	shuttingDown bool
 }
 
-func (c *Command) Help() string {
-	helpText := `
-Usage: serf agent [options]
-
-  Starts the Serf agent and runs until an interrupt is received. The
-  agent represents a single node in a cluster.
-
-Options:
-
-  -bind=0.0.0.0            Address to bind network listeners to
-  -event-handler=foo       Script to execute when events occur. This can
-                           be specified multiple times. See the event scripts
-                           section below for more info.
-  -log-level=info          Log level of the agent.
-  -node=hostname           Name of this node. Must be unique in the cluster
-  -role=foo                The role of this node, if any. This can be used
-                           by event scripts to differentiate different types
-                           of nodes that may be part of the same cluster.
-  -rpc-addr=127.0.0.1:7373 Address to bind the RPC listener.
-
-Event handlers:
-
-  For more information on what event handlers are, please read the
-  Serf documentation. This section will document how to configure them
-  on the command-line. There are three methods of specifying an event
-  handler:
-
-  - The value can be a plain script, such as "event.sh". In this case,
-    Serf will send all events to this script, and you'll be responsible
-    for differentiating between them based on the SERF_EVENT.
-
-  - The value can be in the format of "TYPE=SCRIPT", such as
-    "member-join=join.sh". With this format, Serf will only send events
-    of that type to that script.
-
-  - The value can be in the format of "user:EVENT=SCRIPT", such as
-    "user:deploy=deploy.sh". This means that Serf will only invoke this
-    script in the case of user events named "deploy".
-`
-	return strings.TrimSpace(helpText)
-}
-
-func (c *Command) Run(args []string, rawUi cli.Ui) int {
+func (c *Command) Run(args []string) int {
 	ui := &cli.PrefixedUi{
 		OutputPrefix: "==> ",
 		InfoPrefix:   "    ",
 		ErrorPrefix:  "==> ",
-		Ui:           rawUi,
+		Ui:           c.Ui,
 	}
 
-	var bindAddr string
-	var logLevel string
-	var eventHandlers []string
-	var nodeName string
-	var nodeRole string
-	var rpcAddr string
+	var cmdConfig Config
+	var configFiles []string
 
 	cmdFlags := flag.NewFlagSet("agent", flag.ContinueOnError)
 	cmdFlags.Usage = func() { ui.Output(c.Help()) }
-	cmdFlags.StringVar(&bindAddr, "bind", "0.0.0.0", "address to bind listeners to")
-	cmdFlags.Var((*AppendSliceValue)(&eventHandlers), "event-handler",
+	cmdFlags.StringVar(&cmdConfig.BindAddr, "bind", "", "address to bind listeners to")
+	cmdFlags.Var((*AppendSliceValue)(&configFiles), "config-file",
+		"json file to read config from")
+	cmdFlags.Var((*AppendSliceValue)(&configFiles), "config-dir",
+		"directory of json files to read")
+	cmdFlags.StringVar(&cmdConfig.EncryptKey, "encrypt", "", "encryption key")
+	cmdFlags.Var((*AppendSliceValue)(&cmdConfig.EventHandlers), "event-handler",
 		"command to execute when events occur")
-	cmdFlags.StringVar(&logLevel, "log-level", "INFO", "log level")
-	cmdFlags.StringVar(&nodeName, "node", "", "node name")
-	cmdFlags.StringVar(&nodeRole, "role", "", "role name")
-	cmdFlags.StringVar(&rpcAddr, "rpc-addr", "127.0.0.1:7373",
+	cmdFlags.Var((*AppendSliceValue)(&cmdConfig.StartJoin), "join",
+		"address of agent to join on startup")
+	cmdFlags.StringVar(&cmdConfig.LogLevel, "log-level", "", "log level")
+	cmdFlags.StringVar(&cmdConfig.NodeName, "node", "", "node name")
+	cmdFlags.IntVar(&cmdConfig.Protocol, "protocol", -1, "protocol version")
+	cmdFlags.StringVar(&cmdConfig.Role, "role", "", "role name")
+	cmdFlags.StringVar(&cmdConfig.RPCAddr, "rpc-addr", "",
 		"address to bind RPC listener to")
 	if err := cmdFlags.Parse(args); err != nil {
 		return 1
 	}
 
-	if nodeName == "" {
-		hostname, err := os.Hostname()
+	config := DefaultConfig
+	if len(configFiles) > 0 {
+		fileConfig, err := ReadConfigPaths(configFiles)
 		if err != nil {
-			rawUi.Error(fmt.Sprintf("Error determining hostname: %s", err))
+			c.Ui.Error(err.Error())
 			return 1
 		}
 
-		nodeName = hostname
+		config = MergeConfig(config, fileConfig)
 	}
 
-	config := Config{
-		NodeName:      nodeName,
-		Role:          nodeRole,
-		BindAddr:      bindAddr,
-		RPCAddr:       rpcAddr,
-		EventHandlers: eventHandlers,
+	config = MergeConfig(config, &cmdConfig)
+
+	if config.NodeName == "" {
+		hostname, err := os.Hostname()
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Error determining hostname: %s", err))
+			return 1
+		}
+
+		config.NodeName = hostname
 	}
 
 	eventScripts, err := config.EventScripts()
 	if err != nil {
-		rawUi.Error(err.Error())
+		c.Ui.Error(err.Error())
 		return 1
 	}
 
 	for _, script := range eventScripts {
 		if !script.Valid() {
-			rawUi.Error(fmt.Sprintf("Invalid event script: %s", script.String()))
+			c.Ui.Error(fmt.Sprintf("Invalid event script: %s", script.String()))
 			return 1
 		}
 	}
 
 	bindIP, bindPort, err := config.BindAddrParts()
 	if err != nil {
-		rawUi.Error(fmt.Sprintf("Invalid bind address: %s", err))
+		c.Ui.Error(fmt.Sprintf("Invalid bind address: %s", err))
+		return 1
+	}
+
+	encryptKey, err := config.EncryptBytes()
+	if err != nil {
+		c.Ui.Error(fmt.Sprintf("Invalid encryption key: %s", err))
 		return 1
 	}
 
@@ -134,11 +109,11 @@ func (c *Command) Run(args []string, rawUi cli.Ui) int {
 	// store logs until we're ready to show them. Then create the level
 	// filter, filtering logs of the specified level.
 	logGate := &GatedWriter{
-		Writer: &cli.UiWriter{Ui: rawUi},
+		Writer: &cli.UiWriter{Ui: c.Ui},
 	}
 
 	logLevelFilter := LevelFilter()
-	logLevelFilter.MinLevel = logutils.LogLevel(strings.ToUpper(logLevel))
+	logLevelFilter.MinLevel = logutils.LogLevel(strings.ToUpper(config.LogLevel))
 	logLevelFilter.Writer = logGate
 	if !ValidateLevelFilter(logLevelFilter) {
 		ui.Error(fmt.Sprintf(
@@ -151,8 +126,14 @@ func (c *Command) Run(args []string, rawUi cli.Ui) int {
 	serfConfig.MemberlistConfig.BindAddr = bindIP
 	serfConfig.MemberlistConfig.TCPPort = bindPort
 	serfConfig.MemberlistConfig.UDPPort = bindPort
-	serfConfig.NodeName = nodeName
-	serfConfig.Role = nodeRole
+	serfConfig.MemberlistConfig.SecretKey = encryptKey
+	serfConfig.NodeName = config.NodeName
+	serfConfig.Role = config.Role
+	serfConfig.ProtocolVersion = uint8(config.Protocol)
+	serfConfig.CoalescePeriod = 3 * time.Second
+	serfConfig.QuiescentPeriod = time.Second
+	serfConfig.UserCoalescePeriod = 3 * time.Second
+	serfConfig.UserQuiescentPeriod = time.Second
 
 	agent := &Agent{
 		EventHandler: &ScriptEventHandler{
@@ -163,7 +144,7 @@ func (c *Command) Run(args []string, rawUi cli.Ui) int {
 			Scripts: eventScripts,
 		},
 		LogOutput:  logLevelFilter,
-		RPCAddr:    rpcAddr,
+		RPCAddr:    config.RPCAddr,
 		SerfConfig: serfConfig,
 	}
 
@@ -172,11 +153,25 @@ func (c *Command) Run(args []string, rawUi cli.Ui) int {
 		ui.Error(err.Error())
 		return 1
 	}
+	defer agent.Shutdown()
 
 	ui.Output("Serf agent running!")
 	ui.Info(fmt.Sprintf("Node name: '%s'", config.NodeName))
 	ui.Info(fmt.Sprintf("Bind addr: '%s:%d'", bindIP, bindPort))
-	ui.Info(fmt.Sprintf(" RPC addr: '%s'", rpcAddr))
+	ui.Info(fmt.Sprintf(" RPC addr: '%s'", config.RPCAddr))
+	ui.Info(fmt.Sprintf("Encrypted: %#v", config.EncryptKey != ""))
+
+	if len(config.StartJoin) > 0 {
+		ui.Output("Joining cluster...")
+		n, err := agent.Join(config.StartJoin, true)
+		if err != nil {
+			ui.Error(err.Error())
+			return 1
+		}
+
+		ui.Info(fmt.Sprintf("Join completed. Synced with %d initial agents", n))
+	}
+
 	ui.Info("")
 	ui.Output("Log data will now stream in as it occurs:\n")
 	logGate.Flush()
@@ -190,10 +185,6 @@ func (c *Command) Run(args []string, rawUi cli.Ui) int {
 	}
 
 	return 0
-}
-
-func (c *Command) Synopsis() string {
-	return "Runs a Serf agent"
 }
 
 func (c *Command) startShutdownWatcher(agent *Agent, ui cli.Ui) (graceful <-chan struct{}, forceful <-chan struct{}) {
@@ -227,4 +218,62 @@ func (c *Command) startShutdownWatcher(agent *Agent, ui cli.Ui) (graceful <-chan
 	}()
 
 	return
+}
+
+func (c *Command) Synopsis() string {
+	return "Runs a Serf agent"
+}
+
+func (c *Command) Help() string {
+	helpText := `
+Usage: serf agent [options]
+
+  Starts the Serf agent and runs until an interrupt is received. The
+  agent represents a single node in a cluster.
+
+Options:
+
+  -bind=0.0.0.0            Address to bind network listeners to
+  -config-file=foo         Path to a JSON file to read configuration from.
+                           This can be specified multiple times.
+  -config-dir=foo          Path to a directory to read configuration files
+                           from. This will read every file ending in ".json"
+                           as configuration in this directory in alphabetical
+                           order.
+  -encrypt=foo             Key for encrypting network traffic within Serf.
+                           Must be a base64-encoded 16-byte key.
+  -event-handler=foo       Script to execute when events occur. This can
+                           be specified multiple times. See the event scripts
+                           section below for more info.
+  -join=addr               An initial agent to join with. This flag can be
+                           specified multiple times.
+  -log-level=info          Log level of the agent.
+  -node=hostname           Name of this node. Must be unique in the cluster
+  -protocol=n              Serf protocol version to use. This defaults to
+                           the latest version, but can be set back for upgrades.
+  -role=foo                The role of this node, if any. This can be used
+                           by event scripts to differentiate different types
+                           of nodes that may be part of the same cluster.
+  -rpc-addr=127.0.0.1:7373 Address to bind the RPC listener.
+
+Event handlers:
+
+  For more information on what event handlers are, please read the
+  Serf documentation. This section will document how to configure them
+  on the command-line. There are three methods of specifying an event
+  handler:
+
+  - The value can be a plain script, such as "event.sh". In this case,
+    Serf will send all events to this script, and you'll be responsible
+    for differentiating between them based on the SERF_EVENT.
+
+  - The value can be in the format of "TYPE=SCRIPT", such as
+    "member-join=join.sh". With this format, Serf will only send events
+    of that type to that script.
+
+  - The value can be in the format of "user:EVENT=SCRIPT", such as
+    "user:deploy=deploy.sh". This means that Serf will only invoke this
+    script in the case of user events named "deploy".
+`
+	return strings.TrimSpace(helpText)
 }
