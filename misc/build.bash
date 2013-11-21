@@ -11,8 +11,8 @@ destination_dir="dist-server"
 
 function build_and_package {
 	echo "Building $1... "
- 	go build -o $destination_dir/gandalf-$1 github.com/globocom/gandalf/$1
-	tar -C $destination_dir -czf $destination_dir/gandalf-$1.tar.gz gandalf-$1
+ 	go build -o ${destination_dir}/gandalf-${1} github.com/globocom/gandalf/${1}
+	tar -C $destination_dir -czf $destination_dir/gandalf-${REVISION}-${1}.tar.gz gandalf-$1
 	rm $destination_dir/gandalf-$1
 }
 

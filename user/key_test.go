@@ -171,10 +171,17 @@ func (s *S) TestDumpWriteFailure(c *gocheck.C) {
 	c.Assert(err, gocheck.NotNil)
 }
 
-func (s *S) TestAuthKeysShouldBeAbsolutePathToUsersAuthorizedKeysByDefault(c *gocheck.C) {
+func (s *S) TestAuthKeyUnconfigured(c *gocheck.C) {
 	home := os.Getenv("HOME")
 	expected := path.Join(home, ".ssh", "authorized_keys")
 	c.Assert(authKey(), gocheck.Equals, expected)
+}
+
+func (s *S) TestAuthKeyConfig(c *gocheck.C) {
+	path := "/var/ssh/authorized_keys"
+	config.Set("authorized-keys-path", path)
+	defer config.Unset("authorized-keys-path")
+	c.Assert(authKey(), gocheck.Equals, path)
 }
 
 func (s *S) TestWriteKey(c *gocheck.C) {

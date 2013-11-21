@@ -78,7 +78,7 @@ Then download and install the binaries. First, wrapper:
 
 ::
 
-    $ curl -sL https://s3.amazonaws.com/tsuru/dist-server/gandalf-bin.tar.gz | sudo tar -xz -C /usr/bin
+    $ curl -sL https://s3.amazonaws.com/tsuru/dist-server/gandalf-master-bin.tar.gz | sudo tar -xz -C /usr/bin
 
 Then the API webserver:
 
@@ -86,7 +86,7 @@ Then the API webserver:
 
 ::
 
-    curl -sL https://s3.amazonaws.com/tsuru/dist-server/gandalf-webserver.tar.gz | sudo tar -xz -C /usr/bin
+    curl -sL https://s3.amazonaws.com/tsuru/dist-server/gandalf-master-webserver.tar.gz | sudo tar -xz -C /usr/bin
 
 Configuring
 -----------

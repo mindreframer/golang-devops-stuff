@@ -34,7 +34,6 @@ func Connect() {
 		panic(err)
 	}
 	Session.DB = s.DB(name)
-	Session.DB.Session.LiveServers()
 }
 
 // Repository returns a reference to the "repository" collection in MongoDB.
