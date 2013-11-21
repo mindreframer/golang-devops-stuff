@@ -32,6 +32,7 @@ https://github.com/mitchellh/packer.git
 https://github.com/mozilla-services/heka.git
 https://github.com/necrogami/watchdog.git
 https://github.com/nf/gohttptun.git
+https://github.com/oleiade/trousseau.git
 https://github.com/petar/GoTeleport.git
 https://github.com/rackspace/gophercloud.git
 https://github.com/rcrowley/go-metrics.git
@@ -41,4 +42,3 @@ https://github.com/skynetservices/skydns.git
 https://github.com/spf13/nitro.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
-https://github.com/oleiade/trousseau.git
