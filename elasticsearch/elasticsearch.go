@@ -1,4 +1,4 @@
-package replay
+package gor
 
 import (
 	"encoding/json"
@@ -84,11 +84,10 @@ func (p *ESPlugin) Init(URI string) {
 	p.done = make(chan bool)
 	p.indexor.Run(p.done)
 
-	if Settings.Verbose {
-		// Only start the ErrorHandler goroutine when in verbose mode
-		// no need to burn ressources otherwise
-		go p.ErrorHandler()
-	}
+	// Only start the ErrorHandler goroutine when in verbose mode
+	// no need to burn ressources otherwise
+	// go p.ErrorHandler()
+
 	log.Println("Initialized Elasticsearch Plugin")
 	return
 }
@@ -112,45 +111,42 @@ func (p *ESPlugin) RttDurationToMs(d time.Duration) int64 {
 	return int64(fl)
 }
 
-func (p *ESPlugin) ResponseAnalyze(r *HttpResponse) {
-	if r.resp == nil {
-		Debug("nil http response - skipped elasticsearch export for this request")
+func (p *ESPlugin) ResponseAnalyze(req *http.Request, resp *http.Response, start, stop time.Time) {
+	if resp == nil {
+		// nil http response - skipped elasticsearch export for this request
 		return
 	}
 	t := time.Now()
-	rtt := p.RttDurationToMs(r.timing.respDone.Sub(r.timing.reqStart))
+	rtt := p.RttDurationToMs(stop.Sub(start))
 
-	resp := ESRequestResponse{
-		ReqUrl:               r.req.URL.String(),
-		ReqMethod:            r.req.Method,
-		ReqUserAgent:         r.req.UserAgent(),
-		ReqAcceptLanguage:    r.req.Header.Get("Accept-Language"),
-		ReqAccept:            r.req.Header.Get("Accept"),
-		ReqAcceptEncoding:    r.req.Header.Get("Accept-Encoding"),
-		ReqIfModifiedSince:   r.req.Header.Get("If-Modified-Since"),
-		ReqConnection:        r.req.Header.Get("Connection"),
-		ReqCookies:           r.req.Cookies(),
-		RespStatus:           r.resp.Status,
-		RespStatusCode:       r.resp.StatusCode,
-		RespProto:            r.resp.Proto,
-		RespContentLength:    r.resp.ContentLength,
-		RespContentType:      r.resp.Header.Get("Content-Type"),
-		RespTransferEncoding: r.resp.TransferEncoding,
-		RespContentEncoding:  r.resp.Header.Get("Content-Encoding"),
-		RespExpires:          r.resp.Header.Get("Expires"),
-		RespCacheControl:     r.resp.Header.Get("Cache-Control"),
-		RespVary:             r.resp.Header.Get("Vary"),
-		RespSetCookie:        r.resp.Header.Get("Set-Cookie"),
+	esResp := ESRequestResponse{
+		ReqUrl:               req.URL.String(),
+		ReqMethod:            req.Method,
+		ReqUserAgent:         req.UserAgent(),
+		ReqAcceptLanguage:    req.Header.Get("Accept-Language"),
+		ReqAccept:            req.Header.Get("Accept"),
+		ReqAcceptEncoding:    req.Header.Get("Accept-Encoding"),
+		ReqIfModifiedSince:   req.Header.Get("If-Modified-Since"),
+		ReqConnection:        req.Header.Get("Connection"),
+		ReqCookies:           req.Cookies(),
+		RespStatus:           resp.Status,
+		RespStatusCode:       resp.StatusCode,
+		RespProto:            resp.Proto,
+		RespContentLength:    resp.ContentLength,
+		RespContentType:      resp.Header.Get("Content-Type"),
+		RespTransferEncoding: resp.TransferEncoding,
+		RespContentEncoding:  resp.Header.Get("Content-Encoding"),
+		RespExpires:          resp.Header.Get("Expires"),
+		RespCacheControl:     resp.Header.Get("Cache-Control"),
+		RespVary:             resp.Header.Get("Vary"),
+		RespSetCookie:        resp.Header.Get("Set-Cookie"),
 		Rtt:                  rtt,
 		Timestamp:            t,
 	}
-	j, err := json.Marshal(&resp)
+	j, err := json.Marshal(&esResp)
 	if err != nil {
 		log.Println(err)
 	} else {
-		if Settings.Verbose {
-			log.Printf("Elasticsearch - Response to Index: %s", j)
-		}
 		p.indexor.Index(p.Index, "RequestResponse", "", "", &t, j)
 	}
 	return

@@ -1,3 +1,3 @@
 language: go 
 go: 1.1
-script: sudo -E bash -c "source /etc/profile && gvm use go1.1 && export GOPATH=$HOME/gopath:$GOPATH && go test -v ./..."
+script: sudo -E bash -c "source /etc/profile && gvm use go1.1 && export GOPATH=$HOME/gopath:$GOPATH && go test -v"

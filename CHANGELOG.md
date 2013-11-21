@@ -1,3 +1,10 @@
+v0.7.0 - 31 Oct 2013
+* New modular architecture. Listener and Replay functionality merged.
+* Added option to equally split traffic between multiple outputs: --split-output true
+* Saving requests to file and replaying from it
+* Injecting custom headers to http requests
+* Advanced stats using ElasticSearch
+
 v0.3.5 - 15 Sep 2013
 * Significantly improved test coverage
 * Fixed bug with redirect replay https://github.com/buger/gor/pull/15
