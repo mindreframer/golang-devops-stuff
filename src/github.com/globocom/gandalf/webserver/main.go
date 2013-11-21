@@ -6,6 +6,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"github.com/bmizerany/pat"
 	"github.com/globocom/config"
 	"github.com/globocom/gandalf/api"
@@ -14,10 +15,18 @@ import (
 	"net/http"
 )
 
+const version = "0.2.0"
+
 func main() {
 	dry := flag.Bool("dry", false, "dry-run: does not start the server (for testing purpose)")
 	configFile := flag.String("config", "/etc/gandalf.conf", "Gandalf configuration file")
+	gVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *gVersion {
+		fmt.Printf("gandalf-webserver version %s\n", version)
+		return
+	}
 
 	err := config.ReadAndWatchConfigFile(*configFile)
 	if err != nil {

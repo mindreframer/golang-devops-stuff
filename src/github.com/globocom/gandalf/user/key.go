@@ -86,6 +86,9 @@ func (k *Key) dump(w io.Writer) error {
 
 // authKey returns the file to write user's keys.
 func authKey() string {
+	if path, _ := config.GetString("authorized-keys-path"); path != "" {
+		return path
+	}
 	var home string
 	if current, err := user.Current(); err == nil {
 		home = current.HomeDir
