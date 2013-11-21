@@ -1,9 +1,10 @@
-package listener
+package raw_socket
 
 import (
 	"encoding/binary"
 	"log"
 	"net"
+	"strconv"
 )
 
 // Capture traffic from socket using RAW_SOCKET's
@@ -13,7 +14,7 @@ import (
 // Ports is TCP feature, same as flow control, reliable transmission and etc.
 // Since we can't use default TCP libraries RAWTCPLitener implements own TCP layer
 // TCP packets is parsed using tcp_packet.go, and flow control is managed by tcp_message.go
-type RAWTCPListener struct {
+type Listener struct {
 	messages map[uint32]*TCPMessage // buffer of TCPMessages waiting to be send
 
 	c_packets  chan *TCPPacket
@@ -26,8 +27,8 @@ type RAWTCPListener struct {
 }
 
 // RAWTCPListen creates a listener to capture traffic from RAW_SOCKET
-func RAWTCPListen(addr string, port int) (rawListener *RAWTCPListener) {
-	rawListener = &RAWTCPListener{}
+func NewListener(addr string, port string) (rawListener *Listener) {
+	rawListener = &Listener{}
 
 	rawListener.c_packets = make(chan *TCPPacket, 100)
 	rawListener.c_messages = make(chan *TCPMessage, 100)
@@ -35,7 +36,7 @@ func RAWTCPListen(addr string, port int) (rawListener *RAWTCPListener) {
 	rawListener.messages = make(map[uint32]*TCPMessage)
 
 	rawListener.addr = addr
-	rawListener.port = port
+	rawListener.port, _ = strconv.Atoi(port)
 
 	go rawListener.listen()
 	go rawListener.readRAWSocket()
@@ -43,7 +44,7 @@ func RAWTCPListen(addr string, port int) (rawListener *RAWTCPListener) {
 	return
 }
 
-func (t *RAWTCPListener) listen() {
+func (t *Listener) listen() {
 	for {
 		select {
 		// If message ready for deletion it means that its also complete or expired by timeout
@@ -58,7 +59,7 @@ func (t *RAWTCPListener) listen() {
 	}
 }
 
-func (t *RAWTCPListener) readRAWSocket() {
+func (t *Listener) readRAWSocket() {
 	conn, e := net.ListenPacket("ip4:tcp", t.addr)
 	defer conn.Close()
 
@@ -73,7 +74,7 @@ func (t *RAWTCPListener) readRAWSocket() {
 		n, _, err := conn.ReadFrom(buf)
 
 		if err != nil {
-			Debug("Error:", err)
+			log.Println("Error:", err)
 			continue
 		}
 
@@ -83,7 +84,7 @@ func (t *RAWTCPListener) readRAWSocket() {
 	}
 }
 
-func (t *RAWTCPListener) parsePacket(buf []byte) {
+func (t *Listener) parsePacket(buf []byte) {
 	if t.isIncomingDataPacket(buf) {
 		new_buf := make([]byte, len(buf))
 		copy(new_buf, buf)
@@ -92,7 +93,7 @@ func (t *RAWTCPListener) parsePacket(buf []byte) {
 	}
 }
 
-func (t *RAWTCPListener) isIncomingDataPacket(buf []byte) bool {
+func (t *Listener) isIncomingDataPacket(buf []byte) bool {
 	// To avoid full packet parsing every time, we manually parsing values needed for packet filtering
 	// http://en.wikipedia.org/wiki/Transmission_Control_Protocol
 	dest_port := binary.BigEndian.Uint16(buf[2:4])
@@ -116,7 +117,7 @@ func (t *RAWTCPListener) isIncomingDataPacket(buf []byte) bool {
 // Trying to add packet to existing message or creating new message
 //
 // For TCP message unique id is Acknowledgment number (see tcp_packet.go)
-func (t *RAWTCPListener) processTCPPacket(packet *TCPPacket) {
+func (t *Listener) processTCPPacket(packet *TCPPacket) {
 	var message *TCPMessage
 
 	message, ok := t.messages[packet.Ack]
@@ -132,6 +133,6 @@ func (t *RAWTCPListener) processTCPPacket(packet *TCPPacket) {
 }
 
 // Receive TCP messages from the listener channel
-func (t *RAWTCPListener) Receive() *TCPMessage {
+func (t *Listener) Receive() *TCPMessage {
 	return <-t.c_messages
 }

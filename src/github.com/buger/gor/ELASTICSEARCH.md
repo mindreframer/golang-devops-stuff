@@ -39,22 +39,12 @@ gor
 Start your gor replay server with elasticsearch option:
 
 ```
-./gor replay -f <your-dev-system-url> -ip <your_replay_listener_ip> -p <your_replay_listener_port> -es <elasticsearch_host>:<elasticsearch_port>/<elasticsearch_index>
+./gor --input-raw :8000 --output-http http://staging.com  --output-http-elasticsearch localhost:9200/gor
 ```
 
-In our example this would be:
-
-```
-./gor replay -f <your-dev-system-url> -ip <your_replay_listener_ip> -p 28020 -es localhost:9200/gor
-```
 
 (You don't have to create the index upfront. That will be done for you automatically)
 
-Now start your gor listen process as usual:
-
-```
-sudo gor listen -p 80 -r replay.server.local:28020
-```
 
 Now visit your kibana url, load the predefined dashboard from the gist https://gist.github.com/gottwald/b2c875037f24719a9616 and watch the data rush in.
 

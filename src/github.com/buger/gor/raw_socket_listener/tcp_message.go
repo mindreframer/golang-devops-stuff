@@ -1,6 +1,7 @@
-package listener
+package raw_socket
 
 import (
+	"log"
 	"sort"
 	"time"
 )
@@ -91,7 +92,7 @@ func (t *TCPMessage) AddPacket(packet *TCPPacket) {
 	}
 
 	if packetFound {
-		Debug("Received packet with same sequence")
+		log.Println("Received packet with same sequence")
 	} else {
 		t.packets = append(t.packets, packet)
 	}
