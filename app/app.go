@@ -222,7 +222,9 @@ func (app *App) AddUnit(u *Unit) {
 			return
 		}
 	}
-	u.QuotaItem = generateUnitQuotaItems(app, 1)[0]
+	if u.QuotaItem == "" {
+		u.QuotaItem = generateUnitQuotaItems(app, 1)[0]
+	}
 	app.Units = append(app.Units, *u)
 }
 
@@ -330,10 +332,9 @@ func (app *App) RemoveUnits(n uint) error {
 	sort.Sort(units)
 	items := make([]string, int(n))
 	for i := 0; i < int(n); i++ {
-		err = Provisioner.RemoveUnit(app, units[i].GetName())
-		if err == nil {
-			removed = append(removed, i)
-		}
+		name := units[i].GetName()
+		go Provisioner.RemoveUnit(app, name)
+		removed = append(removed, i)
 		app.unbindUnit(&units[i])
 		items[i] = units[i].QuotaItem
 	}
@@ -372,10 +373,12 @@ func (app *App) unbindUnit(unit provision.AppUnit) error {
 		return err
 	}
 	for _, instance := range instances {
-		err = instance.UnbindUnit(unit)
-		if err != nil {
-			log.Printf("Error unbinding the unit %s with the service instance %s.", unit.GetIp(), instance.Name)
-		}
+		go func(instance service.ServiceInstance) {
+			err = instance.UnbindUnit(unit)
+			if err != nil {
+				log.Errorf("Error unbinding the unit %s with the service instance %s.", unit.GetIp(), instance.Name)
+			}
+		}(instance)
 	}
 	return nil
 }
@@ -436,7 +439,7 @@ func (app *App) GetTeams() []auth.Team {
 	var teams []auth.Team
 	conn, err := db.Conn()
 	if err != nil {
-		log.Printf("Failed to connect to the database: %s", err)
+		log.Errorf("Failed to connect to the database: %s", err)
 		return nil
 	}
 	defer conn.Close()
@@ -540,12 +543,12 @@ func (app *App) Restart(w io.Writer) error {
 	}
 	err = log.Write(w, []byte("\n ---> Restarting your app\n"))
 	if err != nil {
-		log.Printf("[restart] error on write app log for the app %s - %s", app.Name, err)
+		log.Errorf("[restart] error on write app log for the app %s - %s", app.Name, err)
 		return err
 	}
 	err = Provisioner.Restart(app)
 	if err != nil {
-		log.Printf("[restart] error on restart the app %s - %s", app.Name, err)
+		log.Errorf("[restart] error on restart the app %s - %s", app.Name, err)
 		return err
 	}
 	return app.hookRunner().Restart(app, w, "after")
@@ -571,9 +574,10 @@ func (app *App) Ready() error {
 // GetUnits returns the internal list of units converted to bind.Unit.
 func (app *App) GetUnits() []bind.Unit {
 	var units []bind.Unit
-	for _, u := range app.Units {
-		u.app = app
-		units = append(units, &u)
+	for _, unit := range app.Units {
+		copy := unit
+		copy.app = app
+		units = append(units, &copy)
 	}
 	return units
 }
@@ -595,6 +599,26 @@ func (app *App) GetPlatform() string {
 
 func (app *App) GetDeploys() uint {
 	return app.Deploys
+}
+
+type Deploy struct {
+	App       string
+	Timestamp time.Time
+}
+
+func (app *App) ListDeploys() ([]Deploy, error) {
+	var list []Deploy
+	conn, err := db.Conn()
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.Deploys().Find(nil).All(&list); err != nil {
+		return []Deploy{}, err
+	}
+	if err := conn.Deploys().Find(bson.M{"app": app.Name}).All(&list); err != nil {
+		return []Deploy{}, err
+	}
+	return list, nil
 }
 
 // ProvisionedUnits returns the internal list of units converted to
@@ -844,4 +868,33 @@ func List(u *auth.User) ([]App, error) {
 // Swap calls the Provisioner.Swap.
 func Swap(app1, app2 *App) error {
 	return Provisioner.Swap(app1, app2)
+}
+
+// DeployApp calls the Provisioner.Deploy
+func DeployApp(app *App, version string, writer io.Writer) error {
+	logWriter := LogWriter{App: app, Writer: writer}
+	err := Provisioner.Deploy(app, version, &logWriter)
+	if err != nil {
+		return err
+	}
+	return incrementDeploy(app)
+}
+
+func incrementDeploy(app *App) error {
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	deploy := Deploy{
+		App:       app.Name,
+		Timestamp: time.Now(),
+	}
+	if err := conn.Deploys().Insert(deploy); err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.Apps().Update(
+		bson.M{"name": app.Name},
+		bson.M{"$inc": bson.M{"deploys": 1}},
+	)
 }

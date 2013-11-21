@@ -13,6 +13,7 @@ import (
 	"github.com/globocom/tsuru/log"
 	"github.com/kr/beanstalk"
 	"io"
+	"net"
 	"regexp"
 	"sync"
 	"time"
@@ -90,7 +91,7 @@ func (b beanstalkdFactory) Handler(f func(*Message), name ...string) (Handler, e
 	return &executor{
 		inner: func() {
 			if message, err := get(5e9, name...); err == nil {
-				log.Printf("Dispatching %q message to handler function.", message.Action)
+				log.Debugf("Dispatching %q message to handler function.", message.Action)
 				go func(m *Message) {
 					f(m)
 					q := beanstalkdQ{}
@@ -101,7 +102,10 @@ func (b beanstalkdFactory) Handler(f func(*Message), name ...string) (Handler, e
 					}
 				}(message)
 			} else {
-				log.Printf("Failed to get message from the queue: %s. Trying again...", err)
+				log.Debugf("Failed to get message from the queue: %s. Trying again...", err)
+				if e, ok := err.(*net.OpError); ok && e.Op == "dial" {
+					time.Sleep(5e9)
+				}
 			}
 		},
 	}, nil

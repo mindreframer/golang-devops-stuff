@@ -8,10 +8,13 @@ package docker
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/dotcloud/docker"
 	dcli "github.com/fsouza/go-dockerclient"
 	"github.com/globocom/tsuru/log"
 	"github.com/globocom/tsuru/provision"
+	"io/ioutil"
+	"os"
 )
 
 func needsFlatten(a provision.App) bool {
@@ -36,17 +39,27 @@ func flatten(imageID string) error {
 	}
 	buf := &bytes.Buffer{}
 	if err := dockerCluster().ExportContainer(c.ID, buf); err != nil {
-		log.Printf("Flatten: Caugh error while exporting container %s: %s", c.ID, err.Error())
+		log.Errorf("Flatten: Caugh error while exporting container %s: %s", c.ID, err)
 		return err
 	}
+	// code to debug import issue
+	r := bytes.NewReader(buf.Bytes())
+	f, _ := os.Create(fmt.Sprintf("/tmp/container-%s", c.ID))
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		log.Debugf("Error while writing debug file: %s", err.Error())
+	}
+	f.Write(b)
+	f.Close()
+	r.Seek(0, 0)
 	out := &bytes.Buffer{}
 	opts := dcli.ImportImageOptions{Repository: imageID, Source: "-"}
-	if err := dockerCluster().ImportImage(opts, buf, out); err != nil {
-		log.Printf("Flatten: Caugh error while importing image from container %s: %s", c.ID, err.Error())
+	if err := dockerCluster().ImportImage(opts, r, out); err != nil {
+		log.Errorf("Flatten: Caugh error while importing image from container %s: %s", c.ID, err)
 		return err
 	}
 	if err := dockerCluster().RemoveContainer(c.ID); err != nil {
-		log.Printf("Flatten: Caugh error while removing container %s: %s", c.ID, err.Error())
+		log.Errorf("Flatten: Caugh error while removing container %s: %s", c.ID, err)
 	}
 	removeFromRegistry(imageID)
 	return nil
@@ -57,11 +70,11 @@ func flatten(imageID string) error {
 func Flatten(a provision.App) {
 	if needsFlatten(a) {
 		image := getImage(a)
-		log.Printf("Flatten: attempting to flatten image %s.", image)
+		log.Debugf("Flatten: attempting to flatten image %s.", image)
 		if err := flatten(image); err != nil {
-			log.Printf("Flatten: Caugh error while flattening image %s: %s", image, err.Error())
+			log.Errorf("Flatten: Caugh error while flattening image %s: %s", image, err)
 			return
 		}
-		log.Printf("Flatten: successfully flattened image %s.", image)
+		log.Debugf("Flatten: successfully flattened image %s.", image)
 	}
 }

@@ -52,23 +52,7 @@ func cloneRepository(w http.ResponseWriter, r *http.Request, t *auth.Token) erro
 	if err != nil {
 		return &errors.HTTP{Code: http.StatusNotFound, Message: fmt.Sprintf("App %s not found.", instance.Name)}
 	}
-	if err := incrementAppDeploy(instance); err != nil {
-		return err
-	}
-	logger := app.LogWriter{App: instance, Writer: w}
-	return app.Provisioner.Deploy(instance, version, &logger)
-}
-
-func incrementAppDeploy(instance *app.App) error {
-	conn, err := db.Conn()
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	if err := conn.Apps().Update(bson.M{"name": instance.Name}, bson.M{"$inc": bson.M{"deploys": 1}}); err != nil {
-		return err
-	}
-	return nil
+	return app.DeployApp(instance, version, w)
 }
 
 func appIsAvailable(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
@@ -151,7 +135,7 @@ func createApp(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	rec.Log(u.Email, "create-app", "name="+a.Name, "platform="+a.Platform)
 	err = app.CreateApp(&a, u)
 	if err != nil {
-		log.Printf("Got error while creating app: %s", err)
+		log.Errorf("Got error while creating app: %s", err)
 		if e, ok := err.(*errors.ValidationError); ok {
 			return &errors.HTTP{Code: http.StatusBadRequest, Message: e.Message}
 		}

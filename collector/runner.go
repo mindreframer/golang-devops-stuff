@@ -17,14 +17,14 @@ import (
 
 func collect(ticker <-chan time.Time) {
 	for _ = range ticker {
-		log.Print("Collecting status from provisioner")
+		log.Debug("Collecting status from provisioner")
 		units, err := app.Provisioner.CollectStatus()
 		if err != nil {
-			log.Printf("Failed to collect status within the provisioner: %s.", err)
+			log.Errorf("Failed to collect status within the provisioner: %s.", err)
 			continue
 		}
 		update(units)
-		log.Print("Collecting status from provisioner finished")
+		log.Debug("Collecting status from provisioner finished")
 	}
 }
 
@@ -47,6 +47,7 @@ func Run(dryMode bool) {
 	if err != nil {
 		dbName = db.DefaultDatabaseName
 	}
+
 	fmt.Printf("Using the database %q from the server %q.\n\n", dbName, connString)
 	if !dryMode {
 		provisioner, err := config.GetString("provisioner")
@@ -60,7 +61,11 @@ func Run(dryMode bool) {
 		}
 		fmt.Printf("Using %q provisioner.\n\n", provisioner)
 
-		ticker := time.Tick(time.Minute)
+		timer, err := config.GetInt("colletor:ticker-time")
+		if err != nil {
+			timer = 60
+		}
+		ticker := time.Tick(time.Duration(timer) * time.Second)
 		fmt.Println("tsuru collector agent started...")
 		collect(ticker)
 	}

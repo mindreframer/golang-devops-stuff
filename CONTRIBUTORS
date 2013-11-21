@@ -6,10 +6,11 @@
 #
 # You can update this list using the following command:
 #
-#   % git shortlog -se | awk '{print $2 " " $3 " " $4}'
+#   % git shortlog -se | awk '{$1=""; print $0}' | sed -e 's/^ //'
 #
 # Please keep this file sorted, and group users with multiple emails.
 
+Alan Justino da Silva <alan.justino@yahoo.com.br>
 Alberto Leal <albertonb@gmail.com>
 Andrews Medina <andrewsmedina@gmail.com>
 Bruno Torres <brunolct@live.com>

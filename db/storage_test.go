@@ -207,6 +207,14 @@ func (s *S) TestApps(c *gocheck.C) {
 	c.Assert(apps, HasUniqueIndex, []string{"name"})
 }
 
+func (s *S) TestDeploys(c *gocheck.C) {
+	storage, _ := Open("127.0.0.1:27017", "tsuru_storage_test")
+	defer storage.session.Close()
+	deploys := storage.Deploys()
+	deploysc := storage.Collection("deploys")
+	c.Assert(deploys, gocheck.DeepEquals, deploysc)
+}
+
 func (s *S) TestPlatforms(c *gocheck.C) {
 	storage, _ := Open("127.0.0.1:27017", "tsuru_storage_test")
 	defer storage.session.Close()
@@ -221,6 +229,34 @@ func (s *S) TestLogs(c *gocheck.C) {
 	logs := storage.Logs()
 	logsc := storage.Collection("logs")
 	c.Assert(logs, gocheck.DeepEquals, logsc)
+}
+
+func (s *S) TestLogsAppNameIndex(c *gocheck.C) {
+	storage, _ := Open("127.0.0.1", "tsuru_storage_test")
+	defer storage.session.Close()
+	logs := storage.Logs()
+	c.Assert(logs, HasIndex, []string{"appname"})
+}
+
+func (s *S) TestLogsSourceIndex(c *gocheck.C) {
+	storage, _ := Open("127.0.0.1", "tsuru_storage_test")
+	defer storage.session.Close()
+	logs := storage.Logs()
+	c.Assert(logs, HasIndex, []string{"source"})
+}
+
+func (s *S) TestLogsDateAscendingIndex(c *gocheck.C) {
+	storage, _ := Open("127.0.0.1", "tsuru_storage_test")
+	defer storage.session.Close()
+	logs := storage.Logs()
+	c.Assert(logs, HasIndex, []string{"date"})
+}
+
+func (s *S) TestLogsDateDescendingIndex(c *gocheck.C) {
+	storage, _ := Open("127.0.0.1", "tsuru_storage_test")
+	defer storage.session.Close()
+	logs := storage.Logs()
+	c.Assert(logs, HasIndex, []string{"-date"})
 }
 
 func (s *S) TestServices(c *gocheck.C) {
@@ -260,20 +296,6 @@ func (s *S) TestQuotaOwnerIsUnique(c *gocheck.C) {
 	defer storage.session.Close()
 	quota := storage.Quota()
 	c.Assert(quota, HasUniqueIndex, []string{"owner"})
-}
-
-func (s *S) TestLogAppNameIndex(c *gocheck.C) {
-	storage, _ := Open("127.0.0.1", "tsuru_storage_test")
-	defer storage.session.Close()
-	logs := storage.Logs()
-	c.Assert(logs, HasIndex, []string{"appname"})
-}
-
-func (s *S) TestLogSourceIndex(c *gocheck.C) {
-	storage, _ := Open("127.0.0.1", "tsuru_storage_test")
-	defer storage.session.Close()
-	logs := storage.Logs()
-	c.Assert(logs, HasIndex, []string{"source"})
 }
 
 func (s *S) TestRetire(c *gocheck.C) {

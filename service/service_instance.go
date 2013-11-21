@@ -7,6 +7,7 @@ package service
 import (
 	"encoding/json"
 	stderrors "errors"
+	"github.com/globocom/tsuru/action"
 	"github.com/globocom/tsuru/app/bind"
 	"github.com/globocom/tsuru/auth"
 	"github.com/globocom/tsuru/db"
@@ -95,7 +96,7 @@ func (si *ServiceInstance) Create() error {
 func (si *ServiceInstance) Service() *Service {
 	conn, err := db.Conn()
 	if err != nil {
-		log.Printf("Failed to connect to the database: %s", err)
+		log.Errorf("Failed to connect to the database: %s", err)
 		return nil
 	}
 	defer conn.Close()
@@ -171,6 +172,7 @@ func (si *ServiceInstance) BindApp(app bind.App) error {
 	var envVars []bind.EnvVar
 	select {
 	case envs := <-envsChan:
+		envVars = make([]bind.EnvVar, 0, len(envs))
 		for k, v := range envs {
 			envVars = append(envVars, bind.EnvVar{
 				Name:         k,
@@ -268,26 +270,9 @@ func CreateServiceInstance(name string, service *Service, user *auth.User) error
 			instance.Teams = append(instance.Teams, team.Name)
 		}
 	}
-	endpoint, err := service.getClient("production")
-	if err != nil {
-		return err
-	}
-	err = endpoint.Create(&instance)
-	if err != nil {
-		return err
-	}
-	conn, err := db.Conn()
-	if err != nil {
-		endpoint.Destroy(&instance)
-		return err
-	}
-	defer conn.Close()
-	err = conn.ServiceInstances().Insert(instance)
-	if err != nil {
-		endpoint.Destroy(&instance)
-		return err
-	}
-	return nil
+	actions := []*action.Action{&createServiceInstance, &insertServiceInstance}
+	pipeline := action.NewPipeline(actions...)
+	return pipeline.Execute(*service, instance)
 }
 
 func GetServiceInstancesByServices(services []Service) ([]ServiceInstance, error) {
