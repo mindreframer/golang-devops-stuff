@@ -116,6 +116,16 @@ core concepts of Docker where commits are cheap and containers can be
 created from any point in an image's history, much like source
 control.
 
+Known Issues (RUN)
+..................
+
+* :issue:`783` is about file permissions problems that can occur when
+  using the AUFS file system. You might notice it during an attempt to
+  ``rm`` a file, for example. The issue describes a workaround.
+* :issue:`2424` Locale will not be set automatically.
+
+
+
 3.4 CMD
 -------
 
@@ -174,10 +184,10 @@ override the default specified in CMD.
 
     ``EXPOSE <port> [<port>...]``
 
-The ``EXPOSE`` instruction sets ports to be publicly exposed when
-running the image. This is functionally equivalent to running ``docker
-commit -run '{"PortSpecs": ["<port>", "<port2>"]}'`` outside the
-builder. Take a look at :ref:`port_redirection` for more information.
+The ``EXPOSE`` instruction exposes ports for use within links. This is
+functionally equivalent to running ``docker commit -run '{"PortSpecs":
+["<port>", "<port2>"]}'`` outside the builder. Refer to
+:ref:`port_redirection` for detailed information.
 
 3.6 ENV
 -------
@@ -208,8 +218,19 @@ a remote file URL.
 ``<dest>`` is the path at which the source will be copied in the
 destination container.
 
+All new files and directories are created with mode 0755, uid and gid
+0.
+
+.. note::
+   if you build using STDIN (``docker build - < somefile``), there is no build 
+   context, so the Dockerfile can only contain an URL based ADD statement.
+
 The copy obeys the following rules:
 
+* The ``<src>`` path must be inside the *context* of the build; you cannot 
+  ``ADD ../something /something``, because the first step of a 
+  ``docker build`` is to send the context directory (and subdirectories) to 
+  the docker daemon.
 * If ``<src>`` is a URL and ``<dest>`` does not end with a trailing slash,
   then a file is downloaded from the URL and copied to ``<dest>``.
 * If ``<src>`` is a URL and ``<dest>`` does end with a trailing slash,
@@ -220,8 +241,9 @@ The copy obeys the following rules:
   (``http://example.com`` will not work).
 * If ``<src>`` is a directory, the entire directory is copied,
   including filesystem metadata.
-* If ``<src>``` is a tar archive in a recognized compression format
-  (identity, gzip, bzip2 or xz), it is unpacked as a directory.
+* If ``<src>`` is a *local* tar archive in a recognized compression
+  format (identity, gzip, bzip2 or xz) then it is unpacked as a
+  directory. Resources from *remote* URLs are **not** decompressed.
 
   When a directory is copied or unpacked, it has the same behavior as
   ``tar -x``: the result is the union of
@@ -229,7 +251,7 @@ The copy obeys the following rules:
   1. whatever existed at the destination path and
   2. the contents of the source tree,
 
-  with conflicts resolved in favor of 2) on a file-by-file basis.
+  with conflicts resolved in favor of "2." on a file-by-file basis.
 
 * If ``<src>`` is any other kind of file, it is copied individually
   along with its metadata. In this case, if ``<dest>`` ends with a
@@ -237,10 +259,9 @@ The copy obeys the following rules:
   contents of ``<src>`` will be written at ``<dest>/base(<src>)``.
 * If ``<dest>`` does not end with a trailing slash, it will be
   considered a regular file and the contents of ``<src>`` will be
-  written at ``<dst>``.
+  written at ``<dest>``.
 * If ``<dest>`` doesn't exist, it is created along with all missing
-  directories in its path. All new files and directories are created
-  with mode 0755, uid and gid 0.
+  directories in its path.
 
 .. _entrypoint_def:
 
@@ -297,8 +318,9 @@ this optional but default, you could use a CMD:
 
     ``VOLUME ["/data"]``
 
-The ``VOLUME`` instruction will add one or more new volumes to any
-container created from the image.
+The ``VOLUME`` instruction will create a mount point with the specified name and mark it 
+as holding externally mounted volumes from native host or other containers. For more information/examples 
+and mounting instructions via docker client, refer to :ref:`volume_def` documentation. 
 
 3.10 USER
 ---------

@@ -4,11 +4,11 @@ import (
 	"archive/tar"
 	"bytes"
 	"errors"
+	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/utils"
 	"io"
 	"io/ioutil"
 	"os"
-	"path"
 	"testing"
 	"time"
 )
@@ -118,41 +118,6 @@ func TestRegister(t *testing.T) {
 			t.Fatalf("Wrong image comment. Should be '%s', not '%s'", image.Comment, resultImg.Comment)
 		}
 	}
-}
-
-func TestMount(t *testing.T) {
-	graph := tempGraph(t)
-	defer os.RemoveAll(graph.Root)
-	archive, err := fakeTar()
-	if err != nil {
-		t.Fatal(err)
-	}
-	image, err := graph.Create(archive, nil, "Testing", "", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tmp, err := ioutil.TempDir("", "docker-test-graph-mount-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmp)
-	rootfs := path.Join(tmp, "rootfs")
-	if err := os.MkdirAll(rootfs, 0700); err != nil {
-		t.Fatal(err)
-	}
-	rw := path.Join(tmp, "rw")
-	if err := os.MkdirAll(rw, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := image.Mount(rootfs, rw); err != nil {
-		t.Fatal(err)
-	}
-	// FIXME: test for mount contents
-	defer func() {
-		if err := Unmount(rootfs); err != nil {
-			t.Error(err)
-		}
-	}()
 }
 
 // Test that an image can be deleted by its shorthand prefix
@@ -301,7 +266,7 @@ func tempGraph(t *testing.T) *Graph {
 	return graph
 }
 
-func testArchive(t *testing.T) Archive {
+func testArchive(t *testing.T) archive.Archive {
 	archive, err := fakeTar()
 	if err != nil {
 		t.Fatal(err)

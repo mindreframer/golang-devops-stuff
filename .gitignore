@@ -17,3 +17,5 @@ docs/_templates
 bundles/
 .hg/
 .git/
+vendor/pkg/
+pyenv

@@ -2,6 +2,10 @@ package docker
 
 import (
 	"fmt"
+	"github.com/dotcloud/docker/namesgenerator"
+	"github.com/dotcloud/docker/utils"
+	"io/ioutil"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +31,7 @@ func CompareConfig(a, b *Config) bool {
 		len(a.Dns) != len(b.Dns) ||
 		len(a.Env) != len(b.Env) ||
 		len(a.PortSpecs) != len(b.PortSpecs) ||
+		len(a.ExposedPorts) != len(b.ExposedPorts) ||
 		len(a.Entrypoint) != len(b.Entrypoint) ||
 		len(a.Volumes) != len(b.Volumes) {
 		return false
@@ -49,6 +54,11 @@ func CompareConfig(a, b *Config) bool {
 	}
 	for i := 0; i < len(a.PortSpecs); i++ {
 		if a.PortSpecs[i] != b.PortSpecs[i] {
+			return false
+		}
+	}
+	for k := range a.ExposedPorts {
+		if _, exists := b.ExposedPorts[k]; !exists {
 			return false
 		}
 	}
@@ -78,26 +88,47 @@ func MergeConfig(userConf, imageConf *Config) error {
 	if userConf.CpuShares == 0 {
 		userConf.CpuShares = imageConf.CpuShares
 	}
-	if userConf.PortSpecs == nil || len(userConf.PortSpecs) == 0 {
-		userConf.PortSpecs = imageConf.PortSpecs
-	} else {
-		for _, imagePortSpec := range imageConf.PortSpecs {
-			found := false
-			imageNat, err := parseNat(imagePortSpec)
-			if err != nil {
-				return err
+	if userConf.ExposedPorts == nil || len(userConf.ExposedPorts) == 0 {
+		userConf.ExposedPorts = imageConf.ExposedPorts
+	} else if imageConf.ExposedPorts != nil {
+		if userConf.ExposedPorts == nil {
+			userConf.ExposedPorts = make(map[Port]struct{})
+		}
+		for port := range imageConf.ExposedPorts {
+			if _, exists := userConf.ExposedPorts[port]; !exists {
+				userConf.ExposedPorts[port] = struct{}{}
 			}
-			for _, userPortSpec := range userConf.PortSpecs {
-				userNat, err := parseNat(userPortSpec)
-				if err != nil {
-					return err
-				}
-				if imageNat.Proto == userNat.Proto && imageNat.Backend == userNat.Backend {
-					found = true
-				}
+		}
+	}
+
+	if userConf.PortSpecs != nil && len(userConf.PortSpecs) > 0 {
+		if userConf.ExposedPorts == nil {
+			userConf.ExposedPorts = make(map[Port]struct{})
+		}
+		ports, _, err := parsePortSpecs(userConf.PortSpecs)
+		if err != nil {
+			return err
+		}
+		for port := range ports {
+			if _, exists := userConf.ExposedPorts[port]; !exists {
+				userConf.ExposedPorts[port] = struct{}{}
 			}
-			if !found {
-				userConf.PortSpecs = append(userConf.PortSpecs, imagePortSpec)
+		}
+		userConf.PortSpecs = nil
+	}
+	if imageConf.PortSpecs != nil && len(imageConf.PortSpecs) > 0 {
+		utils.Debugf("Migrating image port specs to containter: %s", strings.Join(imageConf.PortSpecs, ", "))
+		if userConf.ExposedPorts == nil {
+			userConf.ExposedPorts = make(map[Port]struct{})
+		}
+
+		ports, _, err := parsePortSpecs(imageConf.PortSpecs)
+		if err != nil {
+			return err
+		}
+		for port := range ports {
+			if _, exists := userConf.ExposedPorts[port]; !exists {
+				userConf.ExposedPorts[port] = struct{}{}
 			}
 		}
 	}
@@ -155,7 +186,7 @@ func MergeConfig(userConf, imageConf *Config) error {
 	return nil
 }
 
-func parseLxcConfOpts(opts ListOpts) ([]KeyValuePair, error) {
+func parseLxcConfOpts(opts utils.ListOpts) ([]KeyValuePair, error) {
 	out := make([]KeyValuePair, len(opts))
 	for i, o := range opts {
 		k, v, err := parseLxcOpt(o)
@@ -173,4 +204,136 @@ func parseLxcOpt(opt string) (string, string, error) {
 		return "", "", fmt.Errorf("Unable to parse lxc conf option: %s", opt)
 	}
 	return strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), nil
+}
+
+// We will receive port specs in the format of ip:public:private/proto and these need to be
+// parsed in the internal types
+func parsePortSpecs(ports []string) (map[Port]struct{}, map[Port][]PortBinding, error) {
+	exposedPorts := make(map[Port]struct{}, len(ports))
+	bindings := make(map[Port][]PortBinding)
+
+	for _, rawPort := range ports {
+		proto := "tcp"
+		if i := strings.LastIndex(rawPort, "/"); i != -1 {
+			proto = rawPort[i+1:]
+			rawPort = rawPort[:i]
+		}
+		if !strings.Contains(rawPort, ":") {
+			rawPort = fmt.Sprintf("::%s", rawPort)
+		} else if len(strings.Split(rawPort, ":")) == 2 {
+			rawPort = fmt.Sprintf(":%s", rawPort)
+		}
+
+		parts, err := utils.PartParser("ip:hostPort:containerPort", rawPort)
+		if err != nil {
+			return nil, nil, err
+		}
+		containerPort := parts["containerPort"]
+		rawIp := parts["ip"]
+		hostPort := parts["hostPort"]
+
+		if containerPort == "" {
+			return nil, nil, fmt.Errorf("No port specified: %s<empty>", rawPort)
+		}
+		if _, err := strconv.ParseUint(containerPort, 10, 16); err != nil {
+			return nil, nil, fmt.Errorf("Invalid containerPort: %s", containerPort)
+		}
+		if _, err := strconv.ParseUint(hostPort, 10, 16); hostPort != "" && err != nil {
+			return nil, nil, fmt.Errorf("Invalid hostPort: %s", hostPort)
+		}
+
+		port := NewPort(proto, containerPort)
+		if _, exists := exposedPorts[port]; !exists {
+			exposedPorts[port] = struct{}{}
+		}
+
+		binding := PortBinding{
+			HostIp:   rawIp,
+			HostPort: hostPort,
+		}
+		bslice, exists := bindings[port]
+		if !exists {
+			bslice = []PortBinding{}
+		}
+		bindings[port] = append(bslice, binding)
+	}
+	return exposedPorts, bindings, nil
+}
+
+// Splits a port in the format of port/proto
+func splitProtoPort(rawPort string) (string, string) {
+	parts := strings.Split(rawPort, "/")
+	l := len(parts)
+	if l == 0 {
+		return "", ""
+	}
+	if l == 1 {
+		return "tcp", rawPort
+	}
+	return parts[0], parts[1]
+}
+
+func parsePort(rawPort string) (int, error) {
+	port, err := strconv.ParseUint(rawPort, 10, 16)
+	if err != nil {
+		return 0, err
+	}
+	return int(port), nil
+}
+
+func migratePortMappings(config *Config, hostConfig *HostConfig) error {
+	if config.PortSpecs != nil {
+		ports, bindings, err := parsePortSpecs(config.PortSpecs)
+		if err != nil {
+			return err
+		}
+		config.PortSpecs = nil
+		if len(bindings) > 0 {
+			if hostConfig == nil {
+				hostConfig = &HostConfig{}
+			}
+			hostConfig.PortBindings = bindings
+		}
+
+		if config.ExposedPorts == nil {
+			config.ExposedPorts = make(map[Port]struct{}, len(ports))
+		}
+		for k, v := range ports {
+			config.ExposedPorts[k] = v
+		}
+	}
+	return nil
+}
+
+// Links come in the format of
+// name:alias
+func parseLink(rawLink string) (map[string]string, error) {
+	return utils.PartParser("name:alias", rawLink)
+}
+
+func RootIsShared() bool {
+	if data, err := ioutil.ReadFile("/proc/self/mountinfo"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			cols := strings.Split(line, " ")
+			if len(cols) >= 6 && cols[4] == "/" {
+				return strings.HasPrefix(cols[6], "shared")
+			}
+		}
+	}
+
+	// No idea, probably safe to assume so
+	return true
+}
+
+type checker struct {
+	runtime *Runtime
+}
+
+func (c *checker) Exists(name string) bool {
+	return c.runtime.containerGraph.Exists("/" + name)
+}
+
+// Generate a random and unique name
+func generateRandomName(runtime *Runtime) (string, error) {
+	return namesgenerator.GenerateRandomName(&checker{runtime})
 }

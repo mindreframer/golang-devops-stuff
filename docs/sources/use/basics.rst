@@ -22,14 +22,28 @@ specify the path to it and manually start it.
     # Run docker in daemon mode
     sudo <path to>/docker -d &
 
-
-Running an interactive shell
-----------------------------
+Download a pre-built image
+--------------------------
 
 .. code-block:: bash
 
   # Download an ubuntu image
   sudo docker pull ubuntu
+
+This will find the ``ubuntu`` image by name in the :ref:`Central Index 
+<searching_central_index>` and download it from the top-level Central 
+Repository to a local image cache.
+
+.. NOTE:: When the image has successfully downloaded, you will see a
+   12 character hash ``539c0211cd76: Download complete`` which is the
+   short form of the image ID. These short image IDs are the first 12
+   characters of the full image ID - which can be found using ``docker
+   inspect`` or ``docker images -notrunc=true``
+
+Running an interactive shell
+----------------------------
+
+.. code-block:: bash
 
   # Run an interactive shell in the ubuntu image,
   # allocate a tty, attach stdin and stdout
@@ -39,32 +53,36 @@ Running an interactive shell
 
 .. _dockergroup:
 
-Why ``sudo``?
--------------
+sudo and the docker Group
+-------------------------
 
 The ``docker`` daemon always runs as root, and since ``docker``
 version 0.5.2, ``docker`` binds to a Unix socket instead of a TCP
 port. By default that Unix socket is owned by the user *root*, and so,
 by default, you can access it with ``sudo``.
 
-Starting in version 0.5.3, if you create a Unix group called *docker*
-and add users to it, then the ``docker`` daemon will make the
-ownership of the Unix socket read/writable by the *docker* group when
-the daemon starts. The ``docker`` daemon must always run as root, but
-if you run the ``docker`` client as a user in the *docker* group then
-you don't need to add ``sudo`` to all the client commands.
+Starting in version 0.5.3, if you (or your Docker installer) create a
+Unix group called *docker* and add users to it, then the ``docker``
+daemon will make the ownership of the Unix socket read/writable by the
+*docker* group when the daemon starts. The ``docker`` daemon must
+always run as root, but if you run the ``docker`` client as a user in
+the *docker* group then you don't need to add ``sudo`` to all the
+client commands.
+
+**Example:**
 
 .. code-block:: bash
 
-  # Add the docker group
+  # Add the docker group if it doesn't already exist.
   sudo groupadd docker
 
-  # Add the ubuntu user to the docker group
+  # Add the user "ubuntu" to the docker group.
+  # Change the user name to match your preferred user.
   # You may have to logout and log back in again for
-  # this to take effect
+  # this to take effect.
   sudo gpasswd -a ubuntu docker
 
-  # Restart the docker daemon
+  # Restart the docker daemon.
   sudo service docker restart
 
 .. _bind_docker:
@@ -72,7 +90,7 @@ you don't need to add ``sudo`` to all the client commands.
 Bind Docker to another host/port or a Unix socket
 -------------------------------------------------
 
-.. DANGER:: Changing the default ``docker`` daemon binding to a TCP
+.. warning:: Changing the default ``docker`` daemon binding to a TCP
    port or Unix *docker* user group will increase your security risks
    by allowing non-root users to potentially gain *root* access on the
    host (`e.g. #1369
@@ -138,22 +156,19 @@ Listing all running containers
 
   sudo docker ps
 
-Expose a service on a TCP port
+Bind a service on a TCP port
 ------------------------------
 
 .. code-block:: bash
 
-  # Expose port 4444 of this container, and tell netcat to listen on it
-  JOB=$(sudo docker run -d -p 4444 ubuntu:12.10 /bin/nc -l -p 4444)
+  # Bind port 4444 of this container, and tell netcat to listen on it
+  JOB=$(sudo docker run -d -p 4444 ubuntu:12.10 /bin/nc -l 4444)
 
   # Which public port is NATed to my container?
-  PORT=$(sudo docker port $JOB 4444)
+  PORT=$(sudo docker port $JOB 4444 | awk -F: '{ print $2 }')
 
-  # Connect to the public port via the host's public address
-  # Please note that because of how routing works connecting to localhost or 127.0.0.1 $PORT will not work.
-  # Replace *eth0* according to your local interface name.
-  IP=$(ip -o -4 addr list eth0 | perl -n -e 'if (m{inet\s([\d\.]+)\/\d+\s}xms) { print $1 }')
-  echo hello world | nc $IP $PORT
+  # Connect to the public port
+  echo hello world | nc 127.0.0.1 $PORT
 
   # Verify that the network connection worked
   echo "Daemon received: $(sudo docker logs $JOB)"
@@ -183,4 +198,3 @@ You now have a image state from which you can create new instances.
 
 Read more about :ref:`working_with_the_repository` or continue to the
 complete :ref:`cli`
-

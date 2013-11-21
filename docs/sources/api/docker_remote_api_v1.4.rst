@@ -943,36 +943,36 @@ Build an image from Dockerfile via stdin
 
 .. http:post:: /build
 
-   Build an image from Dockerfile via stdin
+    Build an image from Dockerfile via stdin
 
-   **Example request**:
+    **Example request**:
 
-   .. sourcecode:: http
+    .. sourcecode:: http
 
-      POST /build HTTP/1.1
+        POST /build HTTP/1.1
 
-      {{ STREAM }}
+        {{ STREAM }}
 
-   **Example response**:
+    **Example response**:
 
-   .. sourcecode:: http
+    .. sourcecode:: http
 
-      HTTP/1.1 200 OK
+        HTTP/1.1 200 OK
 
-      {{ STREAM }}
+        {{ STREAM }}
 
 
-       The stream must be a tar archive compressed with one of the following algorithms:
-       identity (no compression), gzip, bzip2, xz. The archive must include a file called
-       `Dockerfile` at its root. It may include any number of other files, which will be
-       accessible in the build context (See the ADD build command).
+    The stream must be a tar archive compressed with one of the following algorithms:
+    identity (no compression), gzip, bzip2, xz. The archive must include a file called
+    `Dockerfile` at its root. It may include any number of other files, which will be
+    accessible in the build context (See the ADD build command).
 
-       The Content-type header should be set to "application/tar".
+    The Content-type header should be set to "application/tar".
 
-	:query t: repository name (and optionally a tag) to be applied to the resulting image in case of success
-	:query q: suppress verbose build output
+    :query t: repository name (and optionally a tag) to be applied to the resulting image in case of success
+    :query q: suppress verbose build output
     :query nocache: do not use the cache when building the image
-	:statuscode 200: no error
+    :statuscode 200: no error
     :statuscode 500: server error
 
 
@@ -1069,8 +1069,8 @@ Show the docker version information
 		"GoVersion":"go1.0.3"
 	   }
 
-        :statuscode 200: no error
-	:statuscode 500: server error
+    :statuscode 200: no error
+    :statuscode 500: server error
 
 
 Create a new image from a container's changes
@@ -1084,23 +1084,28 @@ Create a new image from a container's changes
 
     .. sourcecode:: http
 
-        POST /commit?container=44c004db4b17&m=message&repo=myrepo HTTP/1.1
+       POST /commit?container=44c004db4b17&m=message&repo=myrepo HTTP/1.1
+       Content-Type: application/json
+   
+       {
+           "Cmd": ["cat", "/world"],
+           "PortSpecs":["22"]
+       }
 
     **Example response**:
 
     .. sourcecode:: http
 
-        HTTP/1.1 201 OK
-	    Content-Type: application/vnd.docker.raw-stream
+       HTTP/1.1 201 OK
+	   Content-Type: application/vnd.docker.raw-stream
 
-        {"Id":"596069db4bf5"}
+       {"Id":"596069db4bf5"}
 
     :query container: source container
     :query repo: repository
     :query tag: tag
     :query m: commit message
     :query author: author (eg. "John Hannibal Smith <hannibal@a-team.com>")
-    :query run: config automatically applied when the image is run. (ex: {"Cmd": ["cat", "/world"], "PortSpecs":["22"]})
     :statuscode 201: no error
     :statuscode 404: no such container
     :statuscode 500: server error

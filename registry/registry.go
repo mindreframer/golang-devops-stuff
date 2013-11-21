@@ -499,7 +499,7 @@ func (r *Registry) PushImageJSONIndex(indexEp, remote string, imgList []*ImgData
 	}
 	u := fmt.Sprintf("%srepositories/%s/%s", indexEp, remote, suffix)
 	utils.Debugf("[registry] PUT %s", u)
-	utils.Debugf("Image list pushed to index:\n%s\n", imgListJSON)
+	utils.Debugf("Image list pushed to index:\n%s", imgListJSON)
 	req, err := r.reqFactory.NewRequest("PUT", u, bytes.NewReader(imgListJSON))
 	if err != nil {
 		return nil, err
@@ -520,7 +520,7 @@ func (r *Registry) PushImageJSONIndex(indexEp, remote string, imgList []*ImgData
 
 	// Redirect if necessary
 	for res.StatusCode >= 300 && res.StatusCode < 400 {
-		utils.Debugf("Redirected to %s\n", res.Header.Get("Location"))
+		utils.Debugf("Redirected to %s", res.Header.Get("Location"))
 		req, err = r.reqFactory.NewRequest("PUT", res.Header.Get("Location"), bytes.NewReader(imgListJSON))
 		if err != nil {
 			return nil, err
@@ -615,10 +615,18 @@ func (r *Registry) GetAuthConfig(withPasswd bool) *auth.AuthConfig {
 	}
 }
 
+type SearchResult struct {
+	StarCount   int    `json:"star_count"`
+	IsOfficial  bool   `json:"is_official"`
+	Name        string `json:"name"`
+	IsTrusted   bool   `json:"is_trusted"`
+	Description string `json:"description"`
+}
+
 type SearchResults struct {
-	Query      string              `json:"query"`
-	NumResults int                 `json:"num_results"`
-	Results    []map[string]string `json:"results"`
+	Query      string         `json:"query"`
+	NumResults int            `json:"num_results"`
+	Results    []SearchResult `json:"results"`
 }
 
 type RepositoryData struct {
