@@ -1,8 +1,8 @@
 package discover
 
 import (
-	"net"
 	"net/http"
+	"log"
 
 	"github.com/coreos/go-etcd/etcd"
 	"github.com/flynn/rpcplus"
@@ -38,32 +38,32 @@ type DiscoveryBackend interface {
 	Heartbeat(name string, addr string) error
 }
 
-type DiscoverAgent struct {
+type Agent struct {
 	Backend DiscoveryBackend
 	Address string
 }
 
-func NewServer() *DiscoverAgent {
-	return &DiscoverAgent{
-		Backend: &EtcdBackend{Client: etcd.NewClient()},
-		Address: ":1111",
+func NewServer(addr string) *Agent {
+	return &Agent{
+		Backend: &EtcdBackend{Client: etcd.NewClient(nil)},
+		Address: addr,
 	}
 }
 
-func ListenAndServe(server *DiscoverAgent) error {
+func ListenAndServe(server *Agent) error {
+	rpcplus.HandleHTTP()
 	err := rpcplus.Register(server)
 	if err != nil {
 		return err
 	}
-	rpcplus.HandleHTTP()
-	l, err := net.Listen("tcp", server.Address)
-	http.Serve(l, nil)
-	return err
+	return http.ListenAndServe(server.Address, nil)
 }
 
-func (s *DiscoverAgent) Subscribe(args *Args, stream rpcplus.Stream) error {
+func (s *Agent) Subscribe(args *Args, stream rpcplus.Stream) error {
 	updates, err := s.Backend.Subscribe(args.Name)
 	if err != nil {
+		log.Println("Subscribe: ", err)
+		stream.Send <- &ServiceUpdate{} // be sure to unblock client
 		return err
 	}
 	for update := range updates.Chan() {
@@ -77,14 +77,26 @@ func (s *DiscoverAgent) Subscribe(args *Args, stream rpcplus.Stream) error {
 	return nil
 }
 
-func (s *DiscoverAgent) Register(args *Args, ret *struct{}) error {
-	return s.Backend.Register(args.Name, args.Addr, args.Attrs)
+func (s *Agent) Register(args *Args, ret *struct{}) error {
+	err := s.Backend.Register(args.Name, args.Addr, args.Attrs)
+	if err != nil {
+		log.Println("Register: ", err)
+	}
+	return err
 }
 
-func (s *DiscoverAgent) Unregister(args *Args, ret *struct{}) error {
-	return s.Backend.Unregister(args.Name, args.Addr)
+func (s *Agent) Unregister(args *Args, ret *struct{}) error {
+	err := s.Backend.Unregister(args.Name, args.Addr)
+	if err != nil {
+		log.Println("Unregister: ", err)
+	}
+	return err
 }
 
-func (s *DiscoverAgent) Heartbeat(args *Args, ret *struct{}) error {
-	return s.Backend.Heartbeat(args.Name, args.Addr)
+func (s *Agent) Heartbeat(args *Args, ret *struct{}) error {
+	err := s.Backend.Heartbeat(args.Name, args.Addr)
+	if err != nil {
+		log.Println("Heartbeat: ", err)
+	}
+	return err
 }
