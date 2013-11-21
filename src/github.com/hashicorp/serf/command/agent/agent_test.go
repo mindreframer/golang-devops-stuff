@@ -46,7 +46,7 @@ func TestAgent_events(t *testing.T) {
 		t.Fatalf("bad: %d", len(prev))
 	}
 
-	a1.Join(nil)
+	a1.Join(nil, false)
 
 	select {
 	case e := <-eventsCh:
@@ -91,7 +91,7 @@ func TestAgentUserEvent(t *testing.T) {
 
 	testutil.Yield()
 
-	if err := a1.UserEvent("deploy", []byte("foo")); err != nil {
+	if err := a1.UserEvent("deploy", []byte("foo"), false); err != nil {
 		t.Fatalf("err: %s", err)
 	}
 

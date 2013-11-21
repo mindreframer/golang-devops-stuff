@@ -93,7 +93,7 @@ func (d *delegate) GetBroadcasts(overhead, limit int) [][]byte {
 	return msgs
 }
 
-func (d *delegate) LocalState() []byte {
+func (d *delegate) LocalState(join bool) []byte {
 	d.serf.memberLock.RLock()
 	defer d.serf.memberLock.RUnlock()
 	d.serf.eventLock.RLock()
@@ -127,7 +127,7 @@ func (d *delegate) LocalState() []byte {
 	return buf
 }
 
-func (d *delegate) MergeRemoteState(buf []byte) {
+func (d *delegate) MergeRemoteState(buf []byte, isJoin bool) {
 	// Check the message type
 	if messageType(buf[0]) != messagePushPullType {
 		d.serf.logger.Printf("[ERR] serf: Remote state has bad type prefix: %v", buf[0])
@@ -169,6 +169,17 @@ func (d *delegate) MergeRemoteState(buf []byte) {
 		join.LTime = statusLTime
 		join.Node = name
 		d.serf.handleNodeJoinIntent(&join)
+	}
+
+	// If we are doing a join, and eventJoinIgnore is set
+	// then we set the eventMinTime to the EventLTime. This
+	// prevents any of the incoming events from being processed
+	if isJoin && d.serf.eventJoinIgnore {
+		d.serf.eventLock.Lock()
+		if pp.EventLTime > d.serf.eventMinTime {
+			d.serf.eventMinTime = pp.EventLTime
+		}
+		d.serf.eventLock.Unlock()
 	}
 
 	// Process all the events

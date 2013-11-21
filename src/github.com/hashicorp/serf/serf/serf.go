@@ -12,6 +12,14 @@ import (
 	"time"
 )
 
+// These are the protocol versions that Serf can _understand_. These are
+// Serf-level protocol versions that are passed down as the delegate
+// version to memberlist below.
+const (
+	ProtocolVersionMin uint8 = 0
+	ProtocolVersionMax       = 1
+)
+
 func init() {
 	// Seed the random number generator
 	rand.Seed(time.Now().UnixNano())
@@ -23,8 +31,12 @@ func init() {
 //
 // All functions on the Serf structure are safe to call concurrently.
 type Serf struct {
+	// The clocks for different purposes. These MUST be the first things
+	// in this struct so due to Golang issue #599.
+	clock      LamportClock
+	eventClock LamportClock
+
 	broadcasts    *memberlist.TransmitLimitedQueue
-	clock         LamportClock
 	config        *Config
 	failedMembers []*memberState
 	leftMembers   []*memberState
@@ -41,7 +53,8 @@ type Serf struct {
 
 	eventBroadcasts *memberlist.TransmitLimitedQueue
 	eventBuffer     []*userEvents
-	eventClock      LamportClock
+	eventJoinIgnore bool
+	eventMinTime    LamportTime
 	eventLock       sync.RWMutex
 
 	logger     *log.Logger
@@ -55,6 +68,7 @@ type SerfState int
 
 const (
 	SerfAlive SerfState = iota
+	SerfLeaving
 	SerfLeft
 	SerfShutdown
 )
@@ -65,6 +79,16 @@ type Member struct {
 	Addr   net.IP
 	Role   string
 	Status MemberStatus
+
+	// The minimum, maximum, and current values of the protocol versions
+	// and delegate (Serf) protocol versions that each member can understand
+	// or is speaking.
+	ProtocolMin uint8
+	ProtocolMax uint8
+	ProtocolCur uint8
+	DelegateMin uint8
+	DelegateMax uint8
+	DelegateCur uint8
 }
 
 // MemberStatus is the state that a member is in.
@@ -142,6 +166,14 @@ const (
 // After calling this function, the configuration should no longer be used
 // or modified by the caller.
 func Create(conf *Config) (*Serf, error) {
+	if conf.ProtocolVersion < ProtocolVersionMin {
+		return nil, fmt.Errorf("Protocol version '%d' too low. Must be in range: [%d, %d]",
+			conf.ProtocolVersion, ProtocolVersionMin, ProtocolVersionMax)
+	} else if conf.ProtocolVersion > ProtocolVersionMax {
+		return nil, fmt.Errorf("Protocol version '%d' too high. Must be in range: [%d, %d]",
+			conf.ProtocolVersion, ProtocolVersionMin, ProtocolVersionMax)
+	}
+
 	serf := &Serf{
 		config:     conf,
 		logger:     log.New(conf.LogOutput, "", log.LstdFlags),
@@ -150,10 +182,25 @@ func Create(conf *Config) (*Serf, error) {
 		state:      SerfAlive,
 	}
 
-	if conf.CoalescePeriod > 0 && conf.EventCh != nil {
-		// Event coalescence is enabled, setup the channel.
+	// Check if serf member event coalescing is enabled
+	if conf.CoalescePeriod > 0 && conf.QuiescentPeriod > 0 && conf.EventCh != nil {
+		c := &memberEventCoalescer{
+			lastEvents:   make(map[string]EventType),
+			latestEvents: make(map[string]coalesceEvent),
+		}
+
 		conf.EventCh = coalescedEventCh(conf.EventCh, serf.shutdownCh,
-			conf.CoalescePeriod, conf.QuiescentPeriod)
+			conf.CoalescePeriod, conf.QuiescentPeriod, c)
+	}
+
+	// Check if user event coalescing is enabled
+	if conf.UserCoalescePeriod > 0 && conf.UserQuiescentPeriod > 0 && conf.EventCh != nil {
+		c := &userEventCoalescer{
+			events: make(map[string]*latestUserEvents),
+		}
+
+		conf.EventCh = coalescedEventCh(conf.EventCh, serf.shutdownCh,
+			conf.UserCoalescePeriod, conf.UserQuiescentPeriod, c)
 	}
 
 	// Setup the broadcast queue, which we use to send our own custom
@@ -186,7 +233,11 @@ func Create(conf *Config) (*Serf, error) {
 	// Modify the memberlist configuration with keys that we set
 	conf.MemberlistConfig.Events = &eventDelegate{serf: serf}
 	conf.MemberlistConfig.Delegate = &delegate{serf: serf}
+	conf.MemberlistConfig.DelegateProtocolVersion = conf.ProtocolVersion
+	conf.MemberlistConfig.DelegateProtocolMin = ProtocolVersionMin
+	conf.MemberlistConfig.DelegateProtocolMax = ProtocolVersionMax
 	conf.MemberlistConfig.Name = conf.NodeName
+	conf.MemberlistConfig.ProtocolVersion = ProtocolVersionMap[conf.ProtocolVersion]
 
 	// Create the underlying memberlist that will manage membership
 	// and failure detection for the Serf instance.
@@ -209,10 +260,18 @@ func Create(conf *Config) (*Serf, error) {
 	return serf, nil
 }
 
+// ProtocolVersion returns the current protocol version in use by Serf.
+// This is the Serf protocol version, not the memberlist protocol version.
+func (s *Serf) ProtocolVersion() uint8 {
+	return s.config.ProtocolVersion
+}
+
 // UserEvent is used to broadcast a custom user event with a given
 // name and payload. The events must be fairly small, and if the
-// size limit is exceeded and error will be returned.
-func (s *Serf) UserEvent(name string, payload []byte) error {
+// size limit is exceeded and error will be returned. If coalesce is enabled,
+// nodes are allowed to coalesce this event. Coalescing is only available
+// starting in v0.2
+func (s *Serf) UserEvent(name string, payload []byte, coalesce bool) error {
 	// Check the size limit
 	if len(name)+len(payload) > UserEventSizeLimit {
 		return fmt.Errorf("user event payload exceeds limit of %d bytes", UserEventSizeLimit)
@@ -223,6 +282,7 @@ func (s *Serf) UserEvent(name string, payload []byte) error {
 		LTime:   s.eventClock.Time(),
 		Name:    name,
 		Payload: payload,
+		CC:      coalesce,
 	}
 	s.eventClock.Increment()
 
@@ -242,8 +302,9 @@ func (s *Serf) UserEvent(name string, payload []byte) error {
 
 // Join joins an existing Serf cluster. Returns the number of nodes
 // successfully contacted. The returned error will be non-nil only in the
-// case that no nodes could be contacted.
-func (s *Serf) Join(existing []string) (int, error) {
+// case that no nodes could be contacted. If ignoreOld is true, then any
+// user messages sent prior to the join will be ignored.
+func (s *Serf) Join(existing []string, ignoreOld bool) (int, error) {
 	s.stateLock.Lock()
 	defer s.stateLock.Unlock()
 
@@ -251,27 +312,50 @@ func (s *Serf) Join(existing []string) (int, error) {
 		return 0, fmt.Errorf("Serf can't Join after Shutdown")
 	}
 
+	// Ignore any events from a potential join. This is safe since we hold
+	// the stateLock and nobody else can be doing a Join
+	if ignoreOld {
+		s.eventJoinIgnore = true
+		defer func() {
+			s.eventJoinIgnore = false
+		}()
+	}
+
+	// Have memberlist attempt to join
 	num, err := s.memberlist.Join(existing)
 
 	// If we joined any nodes, broadcast the join message
 	if num > 0 {
-		// Construct message to update our lamport clock
-		msg := messageJoin{
-			LTime: s.clock.Time(),
-			Node:  s.config.NodeName,
-		}
-		s.clock.Increment()
-
-		// Process update locally
-		s.handleNodeJoinIntent(&msg)
-
 		// Start broadcasting the update
-		if err := s.broadcast(messageJoinType, &msg, nil); err != nil {
+		if err := s.broadcastJoin(s.clock.Time()); err != nil {
 			return num, err
 		}
 	}
 
 	return num, err
+}
+
+// broadcastJoin broadcasts a new join intent with a
+// given clock value. It is used on either join, or if
+// we need to refute an older leave intent. Cannot be called
+// with the memberLock held.
+func (s *Serf) broadcastJoin(ltime LamportTime) error {
+	// Construct message to update our lamport clock
+	msg := messageJoin{
+		LTime: ltime,
+		Node:  s.config.NodeName,
+	}
+	s.clock.Witness(ltime)
+
+	// Process update locally
+	s.handleNodeJoinIntent(&msg)
+
+	// Start broadcasting the update
+	if err := s.broadcast(messageJoinType, &msg, nil); err != nil {
+		s.logger.Printf("[WARN] Failed to broadcast join intent: %v", err)
+		return err
+	}
+	return nil
 }
 
 // Leave gracefully exits the cluster. It is safe to call this multiple
@@ -285,6 +369,14 @@ func (s *Serf) Leave() error {
 	} else if s.state == SerfShutdown {
 		return fmt.Errorf("Leave called after Shutdown")
 	}
+
+	// Moving into a temporary Leaving state, rollback on failure
+	s.state = SerfLeaving
+	defer func() {
+		if s.state != SerfLeft {
+			s.state = SerfAlive
+		}
+	}()
 
 	// Construct the message for the graceful leave
 	msg := messageLeave{
@@ -320,13 +412,19 @@ func (s *Serf) Leave() error {
 	return nil
 }
 
-// hasAliveMembers is called to check for any alive members
+// hasAliveMembers is called to check for any alive members other than
+// ourself.
 func (s *Serf) hasAliveMembers() bool {
 	s.memberLock.RLock()
 	defer s.memberLock.RUnlock()
 
 	hasAlive := false
 	for _, m := range s.members {
+		// Skip ourself, we want to know if OTHER members are alive
+		if m.Name == s.config.NodeName {
+			continue
+		}
+
 		if m.Status == StatusAlive {
 			hasAlive = true
 			break
@@ -350,6 +448,8 @@ func (s *Serf) Members() []Member {
 
 // RemoveFailedNode forcibly removes a failed node from the cluster
 // immediately, instead of waiting for the reaper to eventually reclaim it.
+// This also has the effect that Serf will no longer attempt to reconnect
+// to this node.
 func (s *Serf) RemoveFailedNode(node string) error {
 	// Construct the message to broadcast
 	msg := messageLeave{
@@ -473,7 +573,17 @@ func (s *Serf) handleNodeJoin(n *memberlist.Node) {
 		oldStatus = member.Status
 		member.Status = StatusAlive
 		member.leaveTime = time.Time{}
+		member.Addr = net.IP(n.Addr)
+		member.Role = string(n.Meta)
 	}
+
+	// Update the protocol versions every time we get an event
+	member.ProtocolMin = n.PMin
+	member.ProtocolMax = n.PMax
+	member.ProtocolCur = n.PCur
+	member.DelegateMin = n.DMin
+	member.DelegateMax = n.DMax
+	member.DelegateCur = n.DCur
 
 	// If node was previously in a failed state, then clean up some
 	// internal accounting.
@@ -569,6 +679,14 @@ func (s *Serf) handleNodeLeaveIntent(leaveMsg *messageLeave) bool {
 		return false
 	}
 
+	// Refute us leaving if we are in the alive state
+	// Must be done in another goroutine since we have the memberLock
+	if leaveMsg.Node == s.config.NodeName && s.state == SerfAlive {
+		s.logger.Printf("[DEBUG] Refuting an older leave intent")
+		go s.broadcastJoin(s.clock.Time())
+		return false
+	}
+
 	// State transition depends on current state
 	switch member.Status {
 	case StatusAlive:
@@ -638,6 +756,11 @@ func (s *Serf) handleUserEvent(eventMsg *messageUserEvent) bool {
 	s.eventLock.Lock()
 	defer s.eventLock.Unlock()
 
+	// Ignore if it is before our minimum event time
+	if eventMsg.LTime < s.eventMinTime {
+		return false
+	}
+
 	// Check if this message is too old
 	curTime := s.eventClock.Time()
 	if curTime > LamportTime(len(s.eventBuffer)) &&
@@ -670,8 +793,10 @@ func (s *Serf) handleUserEvent(eventMsg *messageUserEvent) bool {
 
 	if s.config.EventCh != nil {
 		s.config.EventCh <- UserEvent{
-			Name:    eventMsg.Name,
-			Payload: eventMsg.Payload,
+			LTime:    eventMsg.LTime,
+			Name:     eventMsg.Name,
+			Payload:  eventMsg.Payload,
+			Coalesce: eventMsg.CC,
 		}
 	}
 	return true

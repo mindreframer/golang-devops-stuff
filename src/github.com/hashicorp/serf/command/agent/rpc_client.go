@@ -20,8 +20,17 @@ func (c *RPCClient) Close() error {
 	return c.Client.Close()
 }
 
-func (c *RPCClient) Join(addrs []string) (n int, err error) {
-	err = c.Client.Call("Agent.Join", addrs, &n)
+func (c *RPCClient) ForceLeave(node string) error {
+	return c.Client.Call("Agent.ForceLeave", node, new(interface{}))
+}
+
+func (c *RPCClient) Join(addrs []string, ignoreOld bool) (n int, err error) {
+	args := RPCJoinArgs{
+		Addrs:     addrs,
+		IgnoreOld: ignoreOld,
+	}
+
+	err = c.Client.Call("Agent.Join", args, &n)
 	return
 }
 
@@ -31,10 +40,11 @@ func (c *RPCClient) Members() ([]serf.Member, error) {
 	return result, err
 }
 
-func (c *RPCClient) UserEvent(name string, payload []byte) error {
+func (c *RPCClient) UserEvent(name string, payload []byte, coalesce bool) error {
 	return c.Client.Call("Agent.UserEvent", RPCUserEventArgs{
-		Name:    name,
-		Payload: payload,
+		Name:     name,
+		Payload:  payload,
+		Coalesce: coalesce,
 	}, new(interface{}))
 }
 
@@ -46,7 +56,7 @@ func (c *RPCClient) Monitor(level logutils.LogLevel, ch chan<- string, done <-ch
 	var lock sync.Mutex
 	internalDone := make(chan struct{})
 
-	l, err := net.Listen("tcp", "0.0.0.0:0")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return err
 	}

@@ -1,9 +1,9 @@
 package main
 
 import (
-	"github.com/hashicorp/serf/cli"
 	"github.com/hashicorp/serf/command"
 	"github.com/hashicorp/serf/command/agent"
+	"github.com/mitchellh/cli"
 	"os"
 	"os/signal"
 )
@@ -12,28 +12,50 @@ import (
 var Commands map[string]cli.CommandFactory
 
 func init() {
+	ui := &cli.BasicUi{Writer: os.Stdout}
+
 	Commands = map[string]cli.CommandFactory{
 		"agent": func() (cli.Command, error) {
 			return &agent.Command{
 				ShutdownCh: makeShutdownCh(),
+				Ui:         ui,
 			}, nil
 		},
 
 		"event": func() (cli.Command, error) {
-			return &command.EventCommand{}, nil
+			return &command.EventCommand{
+				Ui: ui,
+			}, nil
+		},
+
+		"force-leave": func() (cli.Command, error) {
+			return &command.ForceLeaveCommand{
+				Ui: ui,
+			}, nil
 		},
 
 		"join": func() (cli.Command, error) {
-			return &command.JoinCommand{}, nil
+			return &command.JoinCommand{
+				Ui: ui,
+			}, nil
+		},
+
+		"keygen": func() (cli.Command, error) {
+			return &command.KeygenCommand{
+				Ui: ui,
+			}, nil
 		},
 
 		"members": func() (cli.Command, error) {
-			return &command.MembersCommand{}, nil
+			return &command.MembersCommand{
+				Ui: ui,
+			}, nil
 		},
 
 		"monitor": func() (cli.Command, error) {
 			return &command.MonitorCommand{
 				ShutdownCh: makeShutdownCh(),
+				Ui:         ui,
 			}, nil
 		},
 
@@ -42,6 +64,7 @@ func init() {
 				Revision:          GitCommit,
 				Version:           Version,
 				VersionPrerelease: VersionPrerelease,
+				Ui:                ui,
 			}, nil
 		},
 	}

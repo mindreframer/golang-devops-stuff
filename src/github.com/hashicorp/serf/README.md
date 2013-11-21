@@ -8,7 +8,7 @@ Serf is a decentralized solution for service discovery and orchestration
 that is lightweight, highly available, and fault tolerant.
 
 Serf runs on Linux, Mac OS X, and Windows. An efficient and lightweight gossip
-protocol is used to communiate with other nodes. Serf can detect node failures
+protocol is used to communicate with other nodes. Serf can detect node failures
 and notify the rest of the cluster. An event system is built on top of
 Serf, letting you use Serf's gossip protocol to propagate events such
 as deploys, configuration changes, etc. Serf is completely masterless
@@ -37,11 +37,14 @@ setup, each node in your system will run one or more Serf agents (it can
 run multiple agents if you're running multiple cluster types. e.g. web
 servers vs. memcached servers).
 
-Start each Serf agent in a seperate terminal session so that we can see
+Mac OS X users: an extra step is needed on your platform, 
+[follow the tutorial here](http://www.serfdom.io/intro/getting-started/join.html).
+
+Start each Serf agent in a separate terminal session so that we can see
 the output of each. Start the first agent:
 
 ```
-$ serf agent -node=foo -bind-addr=127.0.0.10 -rpc-addr=127.0.0.1:7373
+$ serf agent -node=foo -bind=127.0.0.10 -rpc-addr=127.0.0.1:7373
 ...
 ```
 
@@ -49,7 +52,7 @@ Start the second agent in another terminal session (while the first is still
 running):
 
 ```
-$ serf agent -node=bar -bind-addr=127.0.0.11 -rpc-addr=127.0.0.1:7374
+$ serf agent -node=bar -bind=127.0.0.11 -rpc-addr=127.0.0.1:7374
 ...
 ```
 
@@ -71,7 +74,9 @@ to see the members of the Serf cluster:
 
 ```
 $ serf members
-TODO
+foo    127.0.0.10    alive
+bar    127.0.0.11    alive
+...
 ```
 
 At this point, you can ctrl-C or force kill either Serf agent, and they'll
@@ -90,7 +95,7 @@ http://www.serfdom.io/docs
 ## Developing Serf
 
 If you wish to work on Serf itself, you'll first need [Go](http://golang.org)
-installed (version 1.1+ is _required_). Make sure you have Go properly installed,
+installed (version 1.2+ is _required_). Make sure you have Go properly installed,
 including setting up your [GOPATH](http://golang.org/doc/code.html#GOPATH).
 
 Next, clone this repository into `$GOPATH/src/github.com/hashicorp/serf` and

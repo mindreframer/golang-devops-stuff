@@ -51,12 +51,12 @@ func TestDelegate_LocalState(t *testing.T) {
 
 	testutil.Yield()
 
-	_, err = s1.Join([]string{c2.MemberlistConfig.BindAddr})
+	_, err = s1.Join([]string{c2.MemberlistConfig.BindAddr}, false)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
 
-	err = s1.UserEvent("test", []byte("test"))
+	err = s1.UserEvent("test", []byte("test"), false)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -66,7 +66,7 @@ func TestDelegate_LocalState(t *testing.T) {
 
 	// Do a state dump
 	d := c1.MemberlistConfig.Delegate
-	buf := d.LocalState()
+	buf := d.LocalState(false)
 
 	// Verify
 	if messageType(buf[0]) != messagePushPullType {
@@ -142,7 +142,7 @@ func TestDelegate_MergeRemoteState(t *testing.T) {
 	}
 
 	// Merge in fake state
-	d.MergeRemoteState(buf)
+	d.MergeRemoteState(buf, false)
 
 	// Verify lamport
 	if s1.clock.Time() != 42 {

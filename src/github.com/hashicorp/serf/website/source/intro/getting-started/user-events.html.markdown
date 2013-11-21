@@ -42,10 +42,6 @@ Events are not limited to just an event name. The event can also contain
 a payload: arbitrary data associated with the event. With our same agent
 running, let's deliver an event with a payload: `serf event my-name-is Mitchell`
 
-Unfortunately, the logs of the Serf agent don't show the payload at the
-moment. In a future release, the debug level logs will show the payload.
-Rest assured, the payload was delivered along with the event.
-
 In practice, event payloads can contain information such as the git commit
 to deploy if you're using Serf as a deployment tool. Or perhaps it contains
 some updated configuration to modify on the nodes. It can contain anything
@@ -55,7 +51,7 @@ you'd like; it is up to the event handler to use it in some meaningful way.
 
 Custom events are delivered using the Serf gossip layer. The benefits of
 this approach is that you get completely decentralized messaging across
-your entire cluster that is fault tolerant. Event if a node is down, it will
+your entire cluster that is fault tolerant. Even if a node is down, it will
 eventually receive that event message.
 
 Due to the mechanics of gossip, custom
