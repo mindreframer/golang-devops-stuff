@@ -2,6 +2,7 @@ package vmware
 
 import (
 	"fmt"
+	"github.com/mitchellh/multistep"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -86,6 +87,10 @@ func (d *Player5LinuxDriver) IsRunning(vmxPath string) (bool, error) {
 	return false, nil
 }
 
+func (d *Player5LinuxDriver) SSHAddress(state multistep.StateBag) (string, error) {
+	return sshAddress(state)
+}
+
 func (d *Player5LinuxDriver) Start(vmxPath string, headless bool) error {
 	guiArgument := "gui"
 	if headless {
@@ -106,6 +111,10 @@ func (d *Player5LinuxDriver) Stop(vmxPath string) error {
 		return err
 	}
 
+	return nil
+}
+
+func (d *Player5LinuxDriver) SuppressMessages(vmxPath string) error {
 	return nil
 }
 

@@ -10,11 +10,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const BuilderId = "mitchellh.virtualbox"
+
+// These are the different valid mode values for "guest_additions_mode" which
+// determine how guest additions are delivered to the guest.
+const (
+	GuestAdditionsModeDisable string = "disable"
+	GuestAdditionsModeAttach         = "attach"
+	GuestAdditionsModeUpload         = "upload"
+)
 
 type Builder struct {
 	config config
@@ -28,7 +37,7 @@ type config struct {
 	DiskSize             uint       `mapstructure:"disk_size"`
 	FloppyFiles          []string   `mapstructure:"floppy_files"`
 	Format               string     `mapstructure:"format"`
-	GuestAdditionsAttach bool       `mapstructure:"guest_additions_attach"`
+	GuestAdditionsMode   string     `mapstructure:"guest_additions_mode"`
 	GuestAdditionsPath   string     `mapstructure:"guest_additions_path"`
 	GuestAdditionsURL    string     `mapstructure:"guest_additions_url"`
 	GuestAdditionsSHA256 string     `mapstructure:"guest_additions_sha256"`
@@ -64,20 +73,21 @@ type config struct {
 	tpl             *packer.ConfigTemplate
 }
 
-func (b *Builder) Prepare(raws ...interface{}) error {
+func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 	md, err := common.DecodeConfig(&b.config, raws...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	b.config.tpl, err = packer.NewConfigTemplate()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b.config.tpl.UserVars = b.config.PackerUserVars
 
-	// Accumulate any errors
+	// Accumulate any errors and warnings
 	errs := common.CheckUnusedConfig(md)
+	warnings := make([]string, 0)
 
 	if b.config.DiskSize == 0 {
 		b.config.DiskSize = 40000
@@ -85,6 +95,10 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 
 	if b.config.FloppyFiles == nil {
 		b.config.FloppyFiles = make([]string, 0)
+	}
+
+	if b.config.GuestAdditionsMode == "" {
+		b.config.GuestAdditionsMode = "upload"
 	}
 
 	if b.config.GuestAdditionsPath == "" {
@@ -145,6 +159,7 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 
 	// Errors
 	templates := map[string]*string{
+		"guest_additions_mode":    &b.config.GuestAdditionsMode,
 		"guest_additions_sha256":  &b.config.GuestAdditionsSHA256,
 		"guest_os_type":           &b.config.GuestOSType,
 		"hard_drive_interface":    &b.config.HardDriveInterface,
@@ -264,6 +279,25 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 		}
 	}
 
+	validMode := false
+	validModes := []string{
+		GuestAdditionsModeDisable,
+		GuestAdditionsModeAttach,
+		GuestAdditionsModeUpload,
+	}
+
+	for _, mode := range validModes {
+		if b.config.GuestAdditionsMode == mode {
+			validMode = true
+			break
+		}
+	}
+
+	if !validMode {
+		errs = packer.MultiErrorAppend(errs,
+			fmt.Errorf("guest_additions_mode is invalid. Must be one of: %v", validModes))
+	}
+
 	if b.config.GuestAdditionsSHA256 != "" {
 		b.config.GuestAdditionsSHA256 = strings.ToLower(b.config.GuestAdditionsSHA256)
 	}
@@ -331,11 +365,18 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 		}
 	}
 
-	if errs != nil && len(errs.Errors) > 0 {
-		return errs
+	// Warnings
+	if b.config.ShutdownCommand == "" {
+		warnings = append(warnings,
+			"A shutdown_command was not specified. Without a shutdown command, Packer\n"+
+				"will forcibly halt the virtual machine, which may result in data loss.")
 	}
 
-	return nil
+	if errs != nil && len(errs.Errors) > 0 {
+		return warnings, errs
+	}
+
+	return warnings, nil
 }
 
 func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packer.Artifact, error) {
@@ -445,9 +486,29 @@ func (b *Builder) Cancel() {
 }
 
 func (b *Builder) newDriver() (Driver, error) {
-	vboxmanagePath, err := exec.LookPath("VBoxManage")
-	if err != nil {
-		return nil, err
+	var vboxmanagePath string
+
+	if runtime.GOOS == "windows" {
+		// On Windows, we check VBOX_INSTALL_PATH env var for the path
+		if installPath := os.Getenv("VBOX_INSTALL_PATH"); installPath != "" {
+			log.Printf("[DEBUG] builder/virtualbox: VBOX_INSTALL_PATH: %s",
+				installPath)
+			for _, path := range strings.Split(installPath, ";") {
+				path = filepath.Join(path, "VBoxManage.exe")
+				if _, err := os.Stat(path); err == nil {
+					vboxmanagePath = path
+					break
+				}
+			}
+		}
+	}
+
+	if vboxmanagePath == "" {
+		var err error
+		vboxmanagePath, err = exec.LookPath("VBoxManage")
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	log.Printf("VBoxManage path: %s", vboxmanagePath)

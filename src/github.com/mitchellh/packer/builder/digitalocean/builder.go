@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/mitchellh/multistep"
 	"github.com/mitchellh/packer/common"
+	"github.com/mitchellh/packer/common/uuid"
 	"github.com/mitchellh/packer/packer"
 	"log"
 	"os"
@@ -30,6 +31,7 @@ type config struct {
 	ImageID  uint   `mapstructure:"image_id"`
 
 	SnapshotName string `mapstructure:"snapshot_name"`
+	DropletName  string `mapstructure:"droplet_name"`
 	SSHUsername  string `mapstructure:"ssh_username"`
 	SSHPort      uint   `mapstructure:"ssh_port"`
 
@@ -49,15 +51,15 @@ type Builder struct {
 	runner multistep.Runner
 }
 
-func (b *Builder) Prepare(raws ...interface{}) error {
+func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 	md, err := common.DecodeConfig(&b.config, raws...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	b.config.tpl, err = packer.NewConfigTemplate()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b.config.tpl.UserVars = b.config.PackerUserVars
 
@@ -95,6 +97,11 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 		b.config.SnapshotName = "packer-{{timestamp}}"
 	}
 
+	if b.config.DropletName == "" {
+		// Default to packer-[time-ordered-uuid]
+		b.config.DropletName = fmt.Sprintf("packer-%s", uuid.TimeOrderedUUID())
+	}
+
 	if b.config.SSHUsername == "" {
 		// Default to "root". You can override this if your
 		// SourceImage has a different user account then the DO default
@@ -121,6 +128,7 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 		"client_id":     &b.config.ClientID,
 		"api_key":       &b.config.APIKey,
 		"snapshot_name": &b.config.SnapshotName,
+		"droplet_name":  &b.config.DropletName,
 		"ssh_username":  &b.config.SSHUsername,
 		"ssh_timeout":   &b.config.RawSSHTimeout,
 		"state_timeout": &b.config.RawStateTimeout,
@@ -161,11 +169,11 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 	b.config.stateTimeout = stateTimeout
 
 	if errs != nil && len(errs.Errors) > 0 {
-		return errs
+		return nil, errs
 	}
 
 	common.ScrubConfig(b.config, b.config.ClientID, b.config.APIKey)
-	return nil
+	return nil, nil
 }
 
 func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packer.Artifact, error) {
@@ -217,9 +225,18 @@ func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packe
 		return nil, nil
 	}
 
+	region_id := state.Get("region_id").(uint)
+
+	regionName, err := client.RegionName(region_id)
+	if err != nil {
+		return nil, err
+	}
+
 	artifact := &Artifact{
 		snapshotName: state.Get("snapshot_name").(string),
 		snapshotId:   state.Get("snapshot_image_id").(uint),
+		regionId:     region_id,
+		regionName:   regionName,
 		client:       client,
 	}
 

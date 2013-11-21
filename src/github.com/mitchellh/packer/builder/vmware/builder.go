@@ -10,13 +10,13 @@ import (
 	"log"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
 )
 
 const BuilderId = "mitchellh.vmware"
+const BuilderIdESX = "mitchellh.vmware-esx"
 
 type Builder struct {
 	config config
@@ -55,6 +55,13 @@ type config struct {
 	VNCPortMin        uint              `mapstructure:"vnc_port_min"`
 	VNCPortMax        uint              `mapstructure:"vnc_port_max"`
 
+	RemoteType      string `mapstructure:"remote_type"`
+	RemoteDatastore string `mapstructure:"remote_datastore"`
+	RemoteHost      string `mapstructure:"remote_host"`
+	RemotePort      uint   `mapstructure:"remote_port"`
+	RemoteUser      string `mapstructure:"remote_username"`
+	RemotePassword  string `mapstructure:"remote_password"`
+
 	RawBootWait        string `mapstructure:"boot_wait"`
 	RawSingleISOUrl    string `mapstructure:"iso_url"`
 	RawShutdownTimeout string `mapstructure:"shutdown_timeout"`
@@ -66,20 +73,21 @@ type config struct {
 	tpl             *packer.ConfigTemplate
 }
 
-func (b *Builder) Prepare(raws ...interface{}) error {
+func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 	md, err := common.DecodeConfig(&b.config, raws...)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	b.config.tpl, err = packer.NewConfigTemplate()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	b.config.tpl.UserVars = b.config.PackerUserVars
 
 	// Accumulate any errors
 	errs := common.CheckUnusedConfig(md)
+	warnings := make([]string, 0)
 
 	if b.config.DiskName == "" {
 		b.config.DiskName = "disk"
@@ -92,6 +100,10 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 	if b.config.DiskTypeId == "" {
 		// Default is growable virtual disk split in 2GB files.
 		b.config.DiskTypeId = "1"
+
+		if b.config.RemoteType == "esx5" {
+			b.config.DiskTypeId = "zeroedthick"
+		}
 	}
 
 	if b.config.FloppyFiles == nil {
@@ -130,6 +142,18 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 		b.config.OutputDir = fmt.Sprintf("output-%s", b.config.PackerBuildName)
 	}
 
+	if b.config.RemoteUser == "" {
+		b.config.RemoteUser = "root"
+	}
+
+	if b.config.RemoteDatastore == "" {
+		b.config.RemoteDatastore = "datastore1"
+	}
+
+	if b.config.RemotePort == 0 {
+		b.config.RemotePort = 22
+	}
+
 	if b.config.SSHPort == 0 {
 		b.config.SSHPort = 22
 	}
@@ -157,6 +181,11 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 		"shutdown_timeout":    &b.config.RawShutdownTimeout,
 		"ssh_wait_timeout":    &b.config.RawSSHWaitTimeout,
 		"vmx_template_path":   &b.config.VMXTemplatePath,
+		"remote_type":         &b.config.RemoteType,
+		"remote_host":         &b.config.RemoteHost,
+		"remote_datastore":    &b.config.RemoteDatastore,
+		"remote_user":         &b.config.RemoteUser,
+		"remote_password":     &b.config.RemotePassword,
 	}
 
 	for n, ptr := range templates {
@@ -326,16 +355,30 @@ func (b *Builder) Prepare(raws ...interface{}) error {
 			errs, fmt.Errorf("vnc_port_min must be less than vnc_port_max"))
 	}
 
-	if errs != nil && len(errs.Errors) > 0 {
-		return errs
+	// Remote configuration validation
+	if b.config.RemoteType != "" {
+		if b.config.RemoteHost == "" {
+			errs = packer.MultiErrorAppend(errs,
+				fmt.Errorf("remote_host must be specified"))
+		}
 	}
 
-	return nil
+	// Warnings
+	if b.config.ShutdownCommand == "" {
+		warnings = append(warnings,
+			"A shutdown_command was not specified. Without a shutdown command, Packer\n"+
+				"will forcibly halt the virtual machine, which may result in data loss.")
+	}
+
+	if errs != nil && len(errs.Errors) > 0 {
+		return warnings, errs
+	}
+
+	return warnings, nil
 }
 
 func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packer.Artifact, error) {
-	// Initialize the driver that will handle our interaction with VMware
-	driver, err := NewDriver()
+	driver, err := NewDriver(&b.config)
 	if err != nil {
 		return nil, fmt.Errorf("Failed creating VMware driver: %s", err)
 	}
@@ -356,14 +399,19 @@ func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packe
 		&common.StepCreateFloppy{
 			Files: b.config.FloppyFiles,
 		},
+		&stepRemoteUpload{
+			Key:     "iso_path",
+			Message: "Uploading ISO to remote machine...",
+		},
 		&stepCreateDisk{},
 		&stepCreateVMX{},
+		&stepSuppressMessages{},
 		&stepHTTPServer{},
 		&stepConfigureVNC{},
 		&stepRun{},
 		&stepTypeBootCommand{},
 		&common.StepConnectSSH{
-			SSHAddress:     sshAddress,
+			SSHAddress:     driver.SSHAddress,
 			SSHConfig:      sshConfig,
 			SSHWaitTimeout: b.config.sshWaitTimeout,
 			NoPty:          b.config.SSHSkipRequestPty,
@@ -411,24 +459,22 @@ func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packe
 	}
 
 	// Compile the artifact list
-	files := make([]string, 0, 10)
-	visit := func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-
-		if !info.IsDir() {
-			files = append(files, path)
-		}
-
-		return nil
-	}
-
-	if err := filepath.Walk(b.config.OutputDir, visit); err != nil {
+	files, err := state.Get("dir").(OutputDir).ListFiles()
+	if err != nil {
 		return nil, err
 	}
 
-	return &Artifact{b.config.OutputDir, files}, nil
+	// Set the proper builder ID
+	builderId := BuilderId
+	if b.config.RemoteType != "" {
+		builderId = BuilderIdESX
+	}
+
+	return &Artifact{
+		builderId: builderId,
+		dir:       b.config.OutputDir,
+		f:         files,
+	}, nil
 }
 
 func (b *Builder) Cancel() {

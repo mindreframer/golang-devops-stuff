@@ -1,6 +1,76 @@
-## 0.4.0 (unreleased)
+## 0.4.1 (unreleased)
 
+BUG FIXES:
 
+* core: Don't change background color on CLI anymore, making things look
+  a tad nicer in some terminals.
+
+## 0.4.0 (November 19, 2013)
+
+FEATURES:
+
+* Docker builder: build and export Docker containers, easily provisioned
+  with any of the Packer built-in provisioners.
+* QEMU builder: builds a new VM compatible with KVM or Xen using QEMU.
+* Remote ESXi builder: builds a VMware VM using ESXi remotely using only
+  SSH to an ESXi machine directly.
+* vSphere post-processor: Can upload VMware artifacts to vSphere
+* Vagrant post-processor can now make DigitalOcean provider boxes. [GH-504]
+
+IMPROVEMENTS:
+
+* builder/amazon/all: Can now specify a list of multiple security group
+  IDs to apply. [GH-499]
+* builder/amazon/all: AWS API requests are now retried when a temporary
+  network error occurs as well as 500 errors. [GH-559]
+* builder/virtualbox: Use VBOX\_INSTALL\_PATH env var on Windows to find
+  VBoxManage. [GH-628]
+* post-processor/vagrant: skips gzip compression when compression_level=0
+* provisioner/chef-solo: Encrypted data bag support [GH-625]
+
+BUG FIXES:
+
+* builder/amazon/chroot: Copying empty directories works. [GH-588]
+* builder/amazon/chroot: Chroot commands work with shell provisioners. [GH-581]
+* builder/amazon/chroot: Don't choose a mount point that is a partition of
+  an already mounted device. [GH-635]
+* builder/virtualbox: Ctrl-C interrupts during waiting for boot. [GH-618]
+* builder/vmware: VMX modifications are now case-insensitive. [GH-608]
+* builder/vmware: VMware Fusion won't ask for VM upgrade.
+* builder/vmware: Ctrl-C interrupts during waiting for boot. [GH-618]
+* provisioner/chef-solo: Output is slightly prettier and more informative.
+
+## 0.3.11 (November 4, 2013)
+
+FEATURES:
+
+* builder/amazon/ebs: Ability to specify which availability zone to create
+  instance in. [GH-536]
+
+IMPROVEMENTS:
+
+* core: builders can now give warnings during validation. warnings won't
+  fail the build but may hint at potential future problems.
+* builder/digitalocean: Can now specify a droplet name
+* builder/virtualbox: Can now disable guest addition download entirely
+  by setting "guest_additions_mode" to "disable" [GH-580]
+* builder/virtualbox,vmware: ISO urls can now be https [GH-587]
+* builder/virtualbox,vmware: Warning if shutdown command is not specified,
+  since it is a common case of data loss.
+
+BUG FIXES:
+
+* core: Won't panic when writing to a bad pipe. [GH-560]
+* builder/amazon/all: Properly scrub access key and secret key from logs.
+  [GH-554]
+* builder/openstack: Properly scrub password from logs [GH-554]
+* builder/virtualbox: No panic if SSH host port min/max is the same. [GH-594]
+* builder/vmware: checks if `ifconfig` is in `/sbin` [GH-591]
+* builder/vmware: Host IP lookup works for non-C locales. [GH-592]
+* common/uuid: Use cryptographically secure PRNG when generating
+  UUIDs. [GH-552]
+* communicator/ssh: File uploads that exceed the size of memory no longer
+  cause crashes. [GH-561]
 
 ## 0.3.10 (October 20, 2013)
 

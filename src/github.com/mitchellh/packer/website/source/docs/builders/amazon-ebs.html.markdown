@@ -97,6 +97,10 @@ Optional:
   access. Note that if this is specified, you must be sure the security
   group allows access to the `ssh_port` given below.
 
+* `security_group_ids` (array of string) - A list of security groups as
+  described above. Note that if this is specified, you must omit the
+  security_group_id.
+
 * `ssh_port` (int) - The port that SSH will be available on. This defaults
   to port 22.
 
@@ -119,6 +123,9 @@ Optional:
 
 * `vpc_id` (string) - If launching into a VPC subnet, Packer needs the
   VPC ID in order to create a temporary security group within the VPC.
+
+* `avail_zone` (string) - Destination availability zone to launch instance in.
+  Leave this empty to allow Amazon to auto-assign.
 
 ## Basic Example
 
