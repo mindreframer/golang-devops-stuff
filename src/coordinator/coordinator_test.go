@@ -42,11 +42,17 @@ const (
 
 type DatastoreMock struct {
 	datastore.Datastore
-	Series *protocol.Series
+	Series          *protocol.Series
+	DroppedDatabase string
 }
 
 func (self *DatastoreMock) WriteSeriesData(database string, series *protocol.Series) error {
 	self.Series = series
+	return nil
+}
+
+func (self *DatastoreMock) DropDatabase(database string) error {
+	self.DroppedDatabase = database
 	return nil
 }
 
@@ -240,11 +246,11 @@ func (self *UserSuite) BenchmarkHashing(c *C) {
 	}
 }
 
-func (self *CoordinatorSuite) TestAutomaitcDbCreations(c *C) {
+func (self *CoordinatorSuite) TestAutomaticDbCreations(c *C) {
 	servers := startAndVerifyCluster(1, c)
 	defer clean(servers...)
 
-	coordinator := NewCoordinatorImpl(nil, servers[0], servers[0].clusterConfig)
+	coordinator := NewCoordinatorImpl(&DatastoreMock{}, servers[0], servers[0].clusterConfig)
 
 	time.Sleep(REPLICATION_LAG)
 
@@ -267,6 +273,7 @@ func (self *CoordinatorSuite) TestAutomaitcDbCreations(c *C) {
 
 	// if the db is dropped it should remove the users as well
 	c.Assert(coordinator.DropDatabase(root, "db1"), IsNil)
+	c.Assert(coordinator.datastore.(*DatastoreMock).DroppedDatabase, Equals, "db1")
 	_, err = coordinator.AuthenticateDbUser("db1", "db_user", "pass")
 	c.Assert(err, ErrorMatches, ".*Invalid.*")
 }
@@ -295,6 +302,7 @@ func (self *CoordinatorSuite) TestAdminOperations(c *C) {
 
 	// Can create other cluster admin
 	c.Assert(coordinator.CreateClusterAdminUser(root, "another_cluster_admin"), IsNil)
+	c.Assert(coordinator.CreateClusterAdminUser(root, ""), NotNil)
 	c.Assert(coordinator.ChangeClusterAdminPassword(root, "another_cluster_admin", "pass"), IsNil)
 	u, err := coordinator.AuthenticateClusterAdmin("another_cluster_admin", "pass")
 	c.Assert(err, IsNil)
@@ -307,6 +315,7 @@ func (self *CoordinatorSuite) TestAdminOperations(c *C) {
 
 	// can create db users
 	c.Assert(coordinator.CreateDbUser(root, "db1", "db_user"), IsNil)
+	c.Assert(coordinator.CreateDbUser(root, "db1", ""), NotNil)
 	c.Assert(coordinator.ChangeDbUserPassword(root, "db1", "db_user", "db_pass"), IsNil)
 	u, err = coordinator.AuthenticateDbUser("db1", "db_user", "db_pass")
 	c.Assert(err, IsNil)

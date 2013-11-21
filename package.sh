@@ -9,20 +9,45 @@ if [ $# -ne 1 ]; then
     exit 1
 fi
 
-admin_dir=/tmp/influx_admin_interface
+admin_dir=`mktemp -d`
 influxdb_version=$1
 rm -rf packages
 mkdir packages
+bundle install
 
 function package_admin_interface {
-    [ -d $admin_dir ] || git clone https://github.com/influxdb/influxdb-js.git $admin_dir
-    rvm rvmrc trust /tmp/influx_admin_interface/.rvmrc
     pushd $admin_dir
-    git checkout .
-    git pull --rebase
+    git clone https://github.com/influxdb/influxdb-admin.git .
+    rvm rvmrc trust ./.rvmrc
 
+    gem install bundler
     bundle install
     bundle exec middleman build
+    popd
+}
+
+function packae_source {
+    # make sure we revert the changes we made to the levigo
+    # source packages are used by MacOSX which should be using
+    # dynamic linking
+    pushd src/github.com/jmhodges/levigo/
+    git checkout .
+    popd
+
+    rm -f server
+    git ls-files --others  | egrep -v 'github|launchpad|code.google' > /tmp/influxdb.ignored
+    echo "pkg/*" >> /tmp/influxdb.ignored
+    echo "packages/*" >> /tmp/influxdb.ignored
+    echo "build/*" >> /tmp/influxdb.ignored
+    echo "out_rpm/*" >> /tmp/influxdb.ignored
+    tar_file=influxdb-$influxdb_version.src.tar.gz
+    tar -czf packages/$tar_file --exclude-vcs -X /tmp/influxdb.ignored *
+    pushd packages
+    # put all files in influxdb
+    mkdir influxdb
+    tar -xzf $tar_file -C influxdb
+    rm $tar_file
+    tar -czf $tar_file influxdb
     popd
 }
 
@@ -39,8 +64,6 @@ function package_files {
 
     mv server build/influxdb
 
-    cp config.json.sample build/config.json
-
     # cp -R src/admin/site/ build/admin/
     mkdir build/admin
     cp -R $admin_dir/build/* build/admin/
@@ -52,6 +75,21 @@ function package_files {
     tar -czf $tar_file build/*
 
     mv $tar_file packages/
+
+    # the tar file should use "./assets" but the deb and rpm packages should use "/opt/influxdb/current/admin"
+    cat > build/config.json <<EOF
+{
+  "AdminHttpPort":  8083,
+  "AdminAssetsDir": "/opt/influxdb/current/admin",
+  "ApiHttpPort":    8086,
+  "RaftServerPort": 8090,
+  "SeedServers":    [],
+  "DataDir":        "/opt/influxdb/shared/data/db",
+  "RaftDir":        "/opt/influxdb/shared/data/raft"
+}
+EOF
+    rm build/*.bak
+    rm build/scripts/*.bak
 }
 
 function build_packages {
@@ -79,7 +117,7 @@ function build_packages {
 function setup_version {
     echo "Changing version from dev to $influxdb_version"
     sha1=`git rev-list --max-count=1 HEAD`
-    sed -i.bak -e "s/version = \"dev\"/version = \"$influxdb_version\"/" -e "s/gitSha = \"\"/gitSha = \"$sha1\"/" src/server/server.go
+    sed -i.bak -e "s/version = \"dev\"/version = \"$influxdb_version\"/" -e "s/gitSha\s*=\s*\"HEAD\"/gitSha = \"$sha1\"/" src/server/server.go
     sed -i.bak -e "s/REPLACE_VERSION/$influxdb_version/" scripts/post_install.sh
 }
 
@@ -99,5 +137,7 @@ function revert_version {
 
 setup_version
 UPDATE=on ./build.sh && package_files amd64 && build_packages amd64
-revert_version
+# we need to build to make sure all the dependencies are downloaded
 [ $on_linux == yes ] && CGO_ENABLED=1 GOARCH=386 UPDATE=on ./build.sh && package_files 386 && build_packages 386
+packae_source
+revert_version

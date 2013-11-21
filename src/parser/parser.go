@@ -7,6 +7,7 @@ import "C"
 import (
 	"common"
 	"fmt"
+	"math"
 	"reflect"
 	"regexp"
 	"time"
@@ -20,6 +21,10 @@ type From struct {
 type Operation int
 
 type ValueType int
+
+const (
+	DEFAULT_LIMIT = 10000
+)
 
 const (
 	ValueRegex        ValueType = C.VALUE_REGEX
@@ -57,9 +62,21 @@ const (
 	FromClauseInnerJoin FromClauseType = C.FROM_INNER_JOIN
 )
 
+type TableName struct {
+	Name  *Value
+	Alias string
+}
+
+func (self *TableName) GetAlias() string {
+	if self.Alias != "" {
+		return self.Alias
+	}
+	return self.Name.Name
+}
+
 type FromClause struct {
 	Type  FromClauseType
-	Names []*Value
+	Names []*TableName
 }
 
 type Expression struct {
@@ -118,6 +135,7 @@ func (self *WhereCondition) GetLeftWhereCondition() (*WhereCondition, bool) {
 }
 
 type Query struct {
+	queryString   string
 	ColumnNames   []*Value
 	FromClause    *FromClause
 	Condition     *WhereCondition
@@ -126,6 +144,10 @@ type Query struct {
 	Ascending     bool
 	startTime     time.Time
 	endTime       time.Time
+}
+
+func (self *Query) GetQueryString() string {
+	return self.queryString
 }
 
 func (self *Query) GetColumnNames() []*Value {
@@ -208,8 +230,37 @@ func GetValue(value *C.value) (*Value, error) {
 	return v, err
 }
 
+func GetTableName(name *C.table_name) (*TableName, error) {
+	value, err := GetValue(name.name)
+	if err != nil {
+		return nil, err
+	}
+
+	table := &TableName{Name: value}
+	if name.alias != nil {
+		table.Alias = C.GoString(name.alias)
+	}
+
+	return table, nil
+}
+
+func GetTableNameArray(array *C.table_name_array) ([]*TableName, error) {
+	var names []*C.table_name
+	setupSlice((*reflect.SliceHeader)((unsafe.Pointer(&names))), unsafe.Pointer(array.elems), array.size)
+
+	tableNamesSlice := make([]*TableName, 0, array.size)
+	for _, name := range names {
+		tableName, err := GetTableName(name)
+		if err != nil {
+			return nil, err
+		}
+		tableNamesSlice = append(tableNamesSlice, tableName)
+	}
+	return tableNamesSlice, nil
+}
+
 func GetFromClause(fromClause *C.from_clause) (*FromClause, error) {
-	arr, err := GetValueArray(fromClause.names)
+	arr, err := GetTableNameArray(fromClause.names)
 	if err != nil {
 		return nil, err
 	}
@@ -307,7 +358,12 @@ func ParseQuery(query string) (*Query, error) {
 		return nil, err
 	}
 
-	goQuery := &Query{nil, nil, nil, nil, int(q.limit), q.ascending != 0, time.Unix(0, 0), time.Now()}
+	limit := q.limit
+	if limit == -1 {
+		limit = DEFAULT_LIMIT
+	}
+
+	goQuery := &Query{query, nil, nil, nil, nil, int(limit), q.ascending != 0, time.Unix(0, 0), time.Now()}
 
 	var err error
 
@@ -360,7 +416,7 @@ func ParseQuery(query string) (*Query, error) {
 	if startTime.Unix() > 0 {
 		goQuery.startTime = startTime
 	} else if goQuery.endTime.Unix() > 0 {
-		goQuery.startTime = goQuery.endTime.Add(-1 * time.Hour)
+		goQuery.startTime = time.Unix(math.MinInt64, 0)
 	}
 
 	return goQuery, nil

@@ -4,6 +4,7 @@ import (
 	log "code.google.com/p/log4go"
 	"common"
 	"coordinator"
+	"encoding/base64"
 	"encoding/json"
 	"engine"
 	"fmt"
@@ -65,6 +66,7 @@ func (self *HttpServer) Serve(listener net.Listener) {
 	// Write points to the given database
 	self.registerEndpoint(p, "post", "/db/:db/series", self.writePoints)
 	self.registerEndpoint(p, "get", "/dbs", self.listDatabases)
+	self.registerEndpoint(p, "get", "/db", self.listDatabases)
 	self.registerEndpoint(p, "post", "/db", self.createDatabase)
 	self.registerEndpoint(p, "del", "/db/:name", self.dropDatabase)
 
@@ -123,17 +125,19 @@ func (self *AllPointsWriter) yield(series *protocol.Series) error {
 func (self *AllPointsWriter) done() {
 	data, err := serializeMultipleSeries(self.memSeries, self.precision)
 	if err != nil {
-		self.w.Write([]byte(err.Error()))
 		self.w.WriteHeader(libhttp.StatusInternalServerError)
+		self.w.Write([]byte(err.Error()))
 		return
 	}
-	self.w.Write(data)
+	self.w.Header().Add("content-type", "application/json")
 	self.w.WriteHeader(libhttp.StatusOK)
+	self.w.Write(data)
 }
 
 type ChunkWriter struct {
-	w         libhttp.ResponseWriter
-	precision TimePrecision
+	w                libhttp.ResponseWriter
+	precision        TimePrecision
+	wroteContentType bool
 }
 
 func (self *ChunkWriter) yield(series *protocol.Series) error {
@@ -141,8 +145,12 @@ func (self *ChunkWriter) yield(series *protocol.Series) error {
 	if err != nil {
 		return err
 	}
-	self.w.Write(data)
+	if !self.wroteContentType {
+		self.wroteContentType = true
+		self.w.Header().Add("content-type", "application/json")
+	}
 	self.w.WriteHeader(libhttp.StatusOK)
+	self.w.Write(data)
 	self.w.(libhttp.Flusher).Flush()
 	return nil
 }
@@ -185,26 +193,26 @@ func (self *HttpServer) query(w libhttp.ResponseWriter, r *libhttp.Request) {
 
 		precision, err := TimePrecisionFromString(r.URL.Query().Get("time_precision"))
 		if err != nil {
-			w.WriteHeader(libhttp.StatusBadRequest)
-			w.Write([]byte(err.Error()))
+			return libhttp.StatusBadRequest, err.Error()
 		}
 
 		var writer Writer
 		if r.URL.Query().Get("chunked") == "true" {
-			writer = &ChunkWriter{w, precision}
+			writer = &ChunkWriter{w, precision, false}
 		} else {
 			writer = &AllPointsWriter{map[string]*protocol.Series{}, w, precision}
 		}
 		err = self.engine.RunQuery(user, db, query, writer.yield)
 		if err != nil {
-			return libhttp.StatusInternalServerError, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 
 		writer.done()
 		return libhttp.StatusOK, nil
 	})
-	w.WriteHeader(statusCode)
-	if len(body) > 0 {
+
+	if statusCode != libhttp.StatusOK {
+		w.WriteHeader(statusCode)
 		w.Write(body)
 	}
 }
@@ -222,8 +230,7 @@ func removeTimestampFieldDefinition(fields []string) []string {
 		return fields
 	}
 
-	fields[len(fields)-1], fields[timestampIdx] = fields[timestampIdx], fields[len(fields)-1]
-	return fields[:len(fields)-1]
+	return append(fields[:timestampIdx], fields[timestampIdx+1:]...)
 }
 
 func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*protocol.Series, error) {
@@ -235,33 +242,37 @@ func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*pr
 		for idx, field := range s.Columns {
 			value := point[idx]
 			if field == "time" {
-				_timestamp := int64(value.(float64))
-				switch precision {
-				case SecondPrecision:
-					_timestamp *= 1000
-					fallthrough
-				case MillisecondPrecision:
-					_timestamp *= 1000
-				}
+				switch value.(type) {
+				case float64:
+					_timestamp := int64(value.(float64))
+					switch precision {
+					case SecondPrecision:
+						_timestamp *= 1000
+						fallthrough
+					case MillisecondPrecision:
+						_timestamp *= 1000
+					}
 
-				timestamp = &_timestamp
-				continue
+					timestamp = &_timestamp
+					continue
+				default:
+					return nil, fmt.Errorf("time field must be float but is %T (%v)", value, value)
+				}
 			}
 
 			switch v := value.(type) {
 			case string:
 				values = append(values, &protocol.FieldValue{StringValue: &v})
-
 			case float64:
 				if i := int64(v); float64(i) == v {
 					values = append(values, &protocol.FieldValue{Int64Value: &i})
 				} else {
 					values = append(values, &protocol.FieldValue{DoubleValue: &v})
 				}
-				continue
 			case bool:
 				values = append(values, &protocol.FieldValue{BoolValue: &v})
-				continue
+			case nil:
+				values = append(values, nil)
 			default:
 				// if we reached this line then the dynamic type didn't match
 				return nil, fmt.Errorf("Unknown type %T", value)
@@ -281,6 +292,15 @@ func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*pr
 		Points: points,
 	}
 	return series, nil
+}
+
+func errorToStatusCode(err error) int {
+	switch err.(type) {
+	case common.AuthorizationError:
+		return libhttp.StatusUnauthorized
+	default:
+		return libhttp.StatusBadRequest
+	}
 }
 
 func (self *HttpServer) writePoints(w libhttp.ResponseWriter, r *libhttp.Request) {
@@ -314,8 +334,9 @@ func (self *HttpServer) writePoints(w libhttp.ResponseWriter, r *libhttp.Request
 			}
 
 			err = self.coordinator.WriteSeriesData(user, db, series)
+
 			if err != nil {
-				return libhttp.StatusUnauthorized, err.Error()
+				return errorToStatusCode(err), err.Error()
 			}
 		}
 		return libhttp.StatusOK, nil
@@ -328,8 +349,7 @@ func (self *HttpServer) writePoints(w libhttp.ResponseWriter, r *libhttp.Request
 }
 
 type createDatabaseRequest struct {
-	Name   string `json:"name"`
-	ApiKey string `json:apiKey"`
+	Name string `json:"name"`
 }
 
 type Database struct {
@@ -340,17 +360,13 @@ func (self *HttpServer) listDatabases(w libhttp.ResponseWriter, r *libhttp.Reque
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		dbNames, err := self.coordinator.ListDatabases(u)
 		if err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		databases := make([]*Database, 0, len(dbNames))
 		for _, db := range dbNames {
 			databases = append(databases, &Database{db})
 		}
-		body, err := json.Marshal(databases)
-		if err != nil {
-			return libhttp.StatusInternalServerError, err.Error()
-		}
-		return libhttp.StatusOK, body
+		return libhttp.StatusOK, databases
 	})
 }
 
@@ -367,7 +383,7 @@ func (self *HttpServer) createDatabase(w libhttp.ResponseWriter, r *libhttp.Requ
 		}
 		err = self.coordinator.CreateDatabase(user, createRequest.Name)
 		if err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusCreated, nil
 	})
@@ -378,7 +394,7 @@ func (self *HttpServer) dropDatabase(w libhttp.ResponseWriter, r *libhttp.Reques
 		name := r.URL.Query().Get(":name")
 		err := self.coordinator.DropDatabase(user, name)
 		if err != nil {
-			return libhttp.StatusBadRequest, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusNoContent, nil
 	})
@@ -409,7 +425,15 @@ func serializeSeries(memSeries map[string]*protocol.Series, precision TimePrecis
 	serializedSeries := []*SerializedSeries{}
 
 	for _, series := range memSeries {
-		columns := []string{"time", "sequence_number"}
+		includeSequenceNumber := true
+		if len(series.Points) > 0 && series.Points[0].SequenceNumber == nil {
+			includeSequenceNumber = false
+		}
+
+		columns := []string{"time"}
+		if includeSequenceNumber {
+			columns = append(columns, "sequence_number")
+		}
 		for _, field := range series.Fields {
 			columns = append(columns, field)
 		}
@@ -425,7 +449,10 @@ func serializeSeries(memSeries map[string]*protocol.Series, precision TimePrecis
 				timestamp /= 1000
 			}
 
-			rowValues := []interface{}{timestamp, *row.SequenceNumber}
+			rowValues := []interface{}{timestamp}
+			if includeSequenceNumber {
+				rowValues = append(rowValues, *row.SequenceNumber)
+			}
 			for _, value := range row.Values {
 				if value != nil {
 					rowValues = append(rowValues, value.GetValue())
@@ -447,35 +474,72 @@ func serializeSeries(memSeries map[string]*protocol.Series, precision TimePrecis
 
 // // cluster admins management interface
 
-func toBytes(body interface{}) ([]byte, error) {
+func toBytes(body interface{}) ([]byte, string, error) {
 	if body == nil {
-		return nil, nil
+		return nil, "text/plain", nil
 	}
 	switch x := body.(type) {
 	case string:
-		return []byte(x), nil
+		return []byte(x), "text/plain", nil
 	case []byte:
-		return x, nil
+		return x, "text/plain", nil
 	default:
-		return json.Marshal(body)
+		body, err := json.Marshal(body)
+		return body, "application/json", err
 	}
 }
 
-func yieldUser(user common.User, yield func(common.User) (int, interface{})) (int, []byte) {
+func yieldUser(user common.User, yield func(common.User) (int, interface{})) (int, string, []byte) {
 	statusCode, body := yield(user)
-	bodyContent, err := toBytes(body)
+	bodyContent, contentType, err := toBytes(body)
 	if err != nil {
-		return libhttp.StatusInternalServerError, []byte(err.Error())
+		return libhttp.StatusInternalServerError, "text/plain", []byte(err.Error())
 	}
 
-	return statusCode, bodyContent
+	return statusCode, contentType, bodyContent
+}
+
+func getUsernameAndPassword(r *libhttp.Request) (string, string, error) {
+	q := r.URL.Query()
+	username, password := q.Get("u"), q.Get("p")
+
+	if username != "" && password != "" {
+		return username, password, nil
+	}
+
+	auth := r.Header.Get("Authorization")
+	if auth == "" {
+		return "", "", nil
+	}
+
+	fields := strings.Split(auth, " ")
+	if len(fields) != 2 {
+		return "", "", fmt.Errorf("Bad auth header")
+	}
+
+	bs, err := base64.StdEncoding.DecodeString(fields[1])
+	if err != nil {
+		return "", "", fmt.Errorf("Bad encoding")
+	}
+
+	fields = strings.Split(string(bs), ":")
+	if len(fields) != 2 {
+		return "", "", fmt.Errorf("Bad auth value")
+	}
+
+	return fields[0], fields[1], nil
 }
 
 func (self *HttpServer) tryAsClusterAdmin(w libhttp.ResponseWriter, r *libhttp.Request, yield func(common.User) (int, interface{})) {
-	username := r.URL.Query().Get("u")
-	password := r.URL.Query().Get("p")
+	username, password, err := getUsernameAndPassword(r)
+	if err != nil {
+		w.WriteHeader(libhttp.StatusBadRequest)
+		w.Write([]byte(err.Error()))
+		return
+	}
 
 	if username == "" {
+		w.Header().Add("WWW-Authenticate", "Basic realm=\"influxdb\"")
 		w.WriteHeader(libhttp.StatusUnauthorized)
 		w.Write([]byte("Invalid username/password"))
 		return
@@ -483,11 +547,16 @@ func (self *HttpServer) tryAsClusterAdmin(w libhttp.ResponseWriter, r *libhttp.R
 
 	user, err := self.userManager.AuthenticateClusterAdmin(username, password)
 	if err != nil {
+		w.Header().Add("WWW-Authenticate", "Basic realm=\"influxdb\"")
 		w.WriteHeader(libhttp.StatusUnauthorized)
 		w.Write([]byte(err.Error()))
 		return
 	}
-	statusCode, body := yieldUser(user, yield)
+	statusCode, contentType, body := yieldUser(user, yield)
+	if statusCode == libhttp.StatusUnauthorized {
+		w.Header().Add("WWW-Authenticate", "Basic realm=\"influxdb\"")
+	}
+	w.Header().Add("content-type", contentType)
 	w.WriteHeader(statusCode)
 	if len(body) > 0 {
 		w.Write(body)
@@ -495,7 +564,8 @@ func (self *HttpServer) tryAsClusterAdmin(w libhttp.ResponseWriter, r *libhttp.R
 }
 
 type NewUser struct {
-	Name     string `json:"username"`
+	Username string `json:"username"`
+	Name     string `json:"name"`
 	Password string `json:"password"`
 }
 
@@ -511,7 +581,7 @@ func (self *HttpServer) listClusterAdmins(w libhttp.ResponseWriter, r *libhttp.R
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		names, err := self.userManager.ListClusterAdmins(u)
 		if err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		users := make([]*User, 0, len(names))
 		for _, name := range names {
@@ -543,11 +613,16 @@ func (self *HttpServer) createClusterAdmin(w libhttp.ResponseWriter, r *libhttp.
 	}
 
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
-		if err := self.userManager.CreateClusterAdminUser(u, newUser.Name); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+		username := newUser.Name
+		if username == "" {
+			username = newUser.Username
 		}
-		if err := self.userManager.ChangeClusterAdminPassword(u, newUser.Name, newUser.Password); err != nil {
-			return libhttp.StatusInternalServerError, err.Error()
+		if err := self.userManager.CreateClusterAdminUser(u, username); err != nil {
+			errorStr := err.Error()
+			return errorToStatusCode(err), errorStr
+		}
+		if err := self.userManager.ChangeClusterAdminPassword(u, username, newUser.Password); err != nil {
+			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusOK, nil
 	})
@@ -558,7 +633,7 @@ func (self *HttpServer) deleteClusterAdmin(w libhttp.ResponseWriter, r *libhttp.
 
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		if err := self.userManager.DeleteClusterAdminUser(u, newUser); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusOK, nil
 	})
@@ -579,7 +654,7 @@ func (self *HttpServer) updateClusterAdmin(w libhttp.ResponseWriter, r *libhttp.
 
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		if err := self.userManager.ChangeClusterAdminPassword(u, newUser, updateUser.Password); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusOK, nil
 	})
@@ -598,25 +673,39 @@ func (self *HttpServer) authenticateDbUser(w libhttp.ResponseWriter, r *libhttp.
 }
 
 func (self *HttpServer) tryAsDbUser(w libhttp.ResponseWriter, r *libhttp.Request, yield func(common.User) (int, interface{})) (int, []byte) {
-	username := r.URL.Query().Get("u")
-	password := r.URL.Query().Get("p")
+	username, password, err := getUsernameAndPassword(r)
+	if err != nil {
+		return libhttp.StatusBadRequest, []byte(err.Error())
+	}
+
 	db := r.URL.Query().Get(":db")
 
 	if username == "" {
+		w.Header().Add("WWW-Authenticate", "Basic realm=\"influxdb\"")
 		return libhttp.StatusUnauthorized, []byte("Invalid username/password")
 	}
 
 	user, err := self.userManager.AuthenticateDbUser(db, username, password)
 	if err != nil {
+		w.Header().Add("WWW-Authenticate", "Basic realm=\"influxdb\"")
 		return libhttp.StatusUnauthorized, []byte(err.Error())
 	}
 
-	return yieldUser(user, yield)
+	statusCode, contentType, v := yieldUser(user, yield)
+	if statusCode == libhttp.StatusUnauthorized {
+		w.Header().Add("WWW-Authenticate", "Basic realm=\"influxdb\"")
+	}
+	w.Header().Add("content-type", contentType)
+	return statusCode, v
 }
 
 func (self *HttpServer) tryAsDbUserAndClusterAdmin(w libhttp.ResponseWriter, r *libhttp.Request, yield func(common.User) (int, interface{})) {
 	statusCode, body := self.tryAsDbUser(w, r, yield)
 	if statusCode == libhttp.StatusUnauthorized {
+		// tryAsDbUser will set this header, since we're retrying
+		// we should delete the header and let tryAsClusterAdmin
+		// set it properly
+		w.Header().Del("WWW-Authenticate")
 		self.tryAsClusterAdmin(w, r, yield)
 		return
 	}
@@ -634,8 +723,9 @@ func (self *HttpServer) listDbUsers(w libhttp.ResponseWriter, r *libhttp.Request
 	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		names, err := self.userManager.ListDbUsers(u, db)
 		if err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
+
 		users := make([]*User, 0, len(names))
 		for _, name := range names {
 			users = append(users, &User{name})
@@ -663,10 +753,14 @@ func (self *HttpServer) createDbUser(w libhttp.ResponseWriter, r *libhttp.Reques
 	db := r.URL.Query().Get(":db")
 
 	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
-		if err := self.userManager.CreateDbUser(u, db, newUser.Name); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+		username := newUser.Name
+		if username == "" {
+			username = newUser.Username
 		}
-		if err := self.userManager.ChangeDbUserPassword(u, db, newUser.Name, newUser.Password); err != nil {
+		if err := self.userManager.CreateDbUser(u, db, username); err != nil {
+			return errorToStatusCode(err), err.Error()
+		}
+		if err := self.userManager.ChangeDbUserPassword(u, db, username, newUser.Password); err != nil {
 			return libhttp.StatusUnauthorized, err.Error()
 		}
 		return libhttp.StatusOK, nil
@@ -679,7 +773,7 @@ func (self *HttpServer) deleteDbUser(w libhttp.ResponseWriter, r *libhttp.Reques
 
 	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		if err := self.userManager.DeleteDbUser(u, db, newUser); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusOK, nil
 	})
@@ -693,8 +787,8 @@ func (self *HttpServer) updateDbUser(w libhttp.ResponseWriter, r *libhttp.Reques
 		return
 	}
 
-	updateUser := &UpdateUser{}
-	err = json.Unmarshal(body, updateUser)
+	updateUser := make(map[string]interface{})
+	err = json.Unmarshal(body, &updateUser)
 	if err != nil {
 		w.WriteHeader(libhttp.StatusBadRequest)
 		w.Write([]byte(err.Error()))
@@ -705,8 +799,26 @@ func (self *HttpServer) updateDbUser(w libhttp.ResponseWriter, r *libhttp.Reques
 	db := r.URL.Query().Get(":db")
 
 	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
-		if err := self.userManager.ChangeDbUserPassword(u, db, newUser, updateUser.Password); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+		if pwd, ok := updateUser["password"]; ok {
+			newPassword, ok := pwd.(string)
+			if !ok {
+				return libhttp.StatusBadRequest, "password must be string"
+			}
+
+			if err := self.userManager.ChangeDbUserPassword(u, db, newUser, newPassword); err != nil {
+				return errorToStatusCode(err), err.Error()
+			}
+		}
+
+		if admin, ok := updateUser["admin"]; ok {
+			isAdmin, ok := admin.(bool)
+			if !ok {
+				return libhttp.StatusBadRequest, "admin must be boolean"
+			}
+
+			if err := self.userManager.SetDbAdmin(u, db, newUser, isAdmin); err != nil {
+				return errorToStatusCode(err), err.Error()
+			}
 		}
 		return libhttp.StatusOK, nil
 	})
@@ -726,7 +838,7 @@ func (self *HttpServer) commonSetDbAdmin(w libhttp.ResponseWriter, r *libhttp.Re
 
 	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		if err := self.userManager.SetDbAdmin(u, db, newUser, isAdmin); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusOK, nil
 	})
