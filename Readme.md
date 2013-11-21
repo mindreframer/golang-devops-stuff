@@ -166,6 +166,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       A tool to tunnel TCP over HTTP, written in Go
        20 commits, last change: 2013-09-22 17:01:00, 54 stars, 13 forks
 
+    oleiade/trousseau:
+      Networked and encrypted key-value database
+       48 commits, last change: 2013-11-20 22:46:10, 162 stars, 9 forks
+
     petar/GoTeleport:
       Teleport Transport: End-to-end resilience to network outages
        6 commits, last change: 2013-08-30 10:54:44, 92 stars, 0 forks
