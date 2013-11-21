@@ -15,6 +15,9 @@ type Registry interface {
 	// Get the metric by the given name or nil if none is registered.
 	Get(string) interface{}
 
+	// Gets an existing metric or creates and registers a new one.
+	GetOrRegister(string, interface{}) interface{}
+
 	// Register the given metric under the given name.
 	Register(string, interface{})
 
@@ -51,14 +54,23 @@ func (r *StandardRegistry) Get(name string) interface{} {
 	return r.metrics[name]
 }
 
+// Gets an existing metric or creates and registers a new one. Threadsafe
+// alternative to calling Get and Register on failure.
+func (r *StandardRegistry) GetOrRegister(name string, i interface{}) interface{} {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	if metric, ok := r.metrics[name]; ok {
+		return metric
+	}
+	r.register(name, i)
+	return i
+}
+
 // Register the given metric under the given name.
 func (r *StandardRegistry) Register(name string, i interface{}) {
-	switch i.(type) {
-	case Counter, Gauge, Healthcheck, Histogram, Meter, Timer:
-		r.mutex.Lock()
-		defer r.mutex.Unlock()
-		r.metrics[name] = i
-	}
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+	r.register(name, i)
 }
 
 // Run all registered healthchecks.
@@ -77,6 +89,13 @@ func (r *StandardRegistry) Unregister(name string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 	delete(r.metrics, name)
+}
+
+func (r *StandardRegistry) register(name string, i interface{}) {
+	switch i.(type) {
+	case Counter, Gauge, Healthcheck, Histogram, Meter, Timer:
+		r.metrics[name] = i
+	}
 }
 
 func (r *StandardRegistry) registered() map[string]interface{} {
@@ -99,6 +118,12 @@ func Each(f func(string, interface{})) {
 // Get the metric by the given name or nil if none is registered.
 func Get(name string) interface{} {
 	return DefaultRegistry.Get(name)
+}
+
+// Gets an existing metric or creates and registers a new one. Threadsafe
+// alternative to calling Get and Register on failure.
+func GetOrRegister(name string, i interface{}) interface{} {
+	return DefaultRegistry.GetOrRegister(name, i)
 }
 
 // Register the given metric under the given name.
