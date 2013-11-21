@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	. "github.com/cloudfoundry/hm9000/store"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -13,31 +14,31 @@ import (
 
 var _ = Describe("Crash Count", func() {
 	var (
-		store       Store
-		etcdAdapter storeadapter.StoreAdapter
-		conf        config.Config
-		crashCount1 models.CrashCount
-		crashCount2 models.CrashCount
-		crashCount3 models.CrashCount
+		store        Store
+		storeAdapter storeadapter.StoreAdapter
+		conf         config.Config
+		crashCount1  models.CrashCount
+		crashCount2  models.CrashCount
+		crashCount3  models.CrashCount
 	)
 
 	BeforeEach(func() {
 		var err error
 		conf, err = config.DefaultConfig()
 		Ω(err).ShouldNot(HaveOccured())
-		etcdAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), conf.StoreMaxConcurrentRequests)
-		err = etcdAdapter.Connect()
+		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
+		err = storeAdapter.Connect()
 		Ω(err).ShouldNot(HaveOccured())
 
 		crashCount1 = models.CrashCount{AppGuid: models.Guid(), AppVersion: models.Guid(), InstanceIndex: 1, CrashCount: 17}
 		crashCount2 = models.CrashCount{AppGuid: models.Guid(), AppVersion: models.Guid(), InstanceIndex: 4, CrashCount: 17}
 		crashCount3 = models.CrashCount{AppGuid: models.Guid(), AppVersion: models.Guid(), InstanceIndex: 3, CrashCount: 17}
 
-		store = NewStore(conf, etcdAdapter, fakelogger.NewFakeLogger())
+		store = NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 	})
 
 	AfterEach(func() {
-		etcdAdapter.Disconnect()
+		storeAdapter.Disconnect()
 	})
 
 	Describe("Saving crash state", func() {
@@ -49,20 +50,20 @@ var _ = Describe("Crash Count", func() {
 		It("stores the passed in crash state", func() {
 			expectedTTL := uint64(conf.MaximumBackoffDelay().Seconds()) * 2
 
-			node, err := etcdAdapter.Get("/apps/" + crashCount1.AppGuid + "-" + crashCount1.AppVersion + "/crashes/" + crashCount1.StoreKey())
+			node, err := storeAdapter.Get("/v1/apps/crashes/" + crashCount1.AppGuid + "," + crashCount1.AppVersion + "/1")
 			Ω(err).ShouldNot(HaveOccured())
 			Ω(node).Should(Equal(storeadapter.StoreNode{
-				Key:   "/apps/" + crashCount1.AppGuid + "-" + crashCount1.AppVersion + "/crashes/" + crashCount1.StoreKey(),
+				Key:   "/v1/apps/crashes/" + crashCount1.AppGuid + "," + crashCount1.AppVersion + "/1",
 				Value: crashCount1.ToJSON(),
-				TTL:   expectedTTL - 1,
+				TTL:   expectedTTL,
 			}))
 
-			node, err = etcdAdapter.Get("/apps/" + crashCount2.AppGuid + "-" + crashCount2.AppVersion + "/crashes/" + crashCount2.StoreKey())
+			node, err = storeAdapter.Get("/v1/apps/crashes/" + crashCount2.AppGuid + "," + crashCount2.AppVersion + "/4")
 			Ω(err).ShouldNot(HaveOccured())
 			Ω(node).Should(Equal(storeadapter.StoreNode{
-				Key:   "/apps/" + crashCount2.AppGuid + "-" + crashCount2.AppVersion + "/crashes/" + crashCount2.StoreKey(),
+				Key:   "/v1/apps/crashes/" + crashCount2.AppGuid + "," + crashCount2.AppVersion + "/4",
 				Value: crashCount2.ToJSON(),
-				TTL:   expectedTTL - 1,
+				TTL:   expectedTTL,
 			}))
 		})
 	})

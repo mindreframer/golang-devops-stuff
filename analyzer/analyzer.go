@@ -56,8 +56,12 @@ func (analyzer *Analyzer) Analyze() error {
 
 	for _, app := range apps {
 		startMessages, stopMessages, crashCounts := newAppAnalyzer(app, analyzer.timeProvider.Time(), existingPendingStartMessages, existingPendingStopMessages, analyzer.logger, analyzer.conf).analyzeApp()
-		allStartMessages = append(allStartMessages, startMessages...)
-		allStopMessages = append(allStopMessages, stopMessages...)
+		for _, startMessage := range startMessages {
+			allStartMessages = append(allStartMessages, startMessage)
+		}
+		for _, stopMessage := range stopMessages {
+			allStopMessages = append(allStopMessages, stopMessage)
+		}
 		allCrashCounts = append(allCrashCounts, crashCounts...)
 	}
 

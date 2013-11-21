@@ -1,6 +1,7 @@
 package phd
 
 import (
+	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
@@ -34,14 +35,14 @@ var _ = Describe("Detailed Store Performance", func() {
 							storeRunner = storerunner.NewETCDClusterRunner(5001, nodes)
 							storeRunner.Start()
 
-							storeAdapter = storeadapter.NewETCDStoreAdapter(storeRunner.NodeURLS(), concurrency)
+							storeAdapter = storeadapter.NewETCDStoreAdapter(storeRunner.NodeURLS(), workerpool.NewWorkerPool(concurrency))
 							err := storeAdapter.Connect()
 							Ω(err).ShouldNot(HaveOccured())
 						} else if storeType == "Zookeeper" {
 							storeRunner = storerunner.NewZookeeperClusterRunner(2181, nodes)
 							storeRunner.Start()
 
-							storeAdapter = storeadapter.NewZookeeperStoreAdapter(storeRunner.NodeURLS(), concurrency, &timeprovider.RealTimeProvider{}, time.Second)
+							storeAdapter = storeadapter.NewZookeeperStoreAdapter(storeRunner.NodeURLS(), workerpool.NewWorkerPool(concurrency), &timeprovider.RealTimeProvider{}, time.Second)
 							err := storeAdapter.Connect()
 							Ω(err).ShouldNot(HaveOccured())
 						}

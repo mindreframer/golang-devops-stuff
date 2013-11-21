@@ -111,7 +111,8 @@ func (zk *ZookeeperClusterRunner) deleteRecursively(client *zkClient.Conn, key s
 }
 
 func (zk *ZookeeperClusterRunner) FastForwardTime(seconds int) {
-	//TODO: someday...
+	//nothing to do here.  FastForwardTime is only present to fast-forward TTLs.
+	//Since TTLs are implemented by the driver, and time is always injected in, we are fine.
 }
 
 func (zk *ZookeeperClusterRunner) writeConfig(index int) {

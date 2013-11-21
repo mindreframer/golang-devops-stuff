@@ -8,23 +8,22 @@ import (
 )
 
 var _ = Describe("Stopping Duplicate Instances", func() {
+	var dea appfixture.DeaFixture
 	var a appfixture.AppFixture
 
 	Context("when there are multiple instances on the same index", func() {
 		var instance0, instance1, duplicateInstance1 appfixture.Instance
 		var heartbeat models.Heartbeat
 		BeforeEach(func() {
-			a = appfixture.NewAppFixture()
+			dea = appfixture.NewDeaFixture()
+			a = dea.GetApp(0)
 
 			instance0 = a.InstanceAtIndex(0)
 			instance1 = a.InstanceAtIndex(1)
 			duplicateInstance1 = a.InstanceAtIndex(1)
 			duplicateInstance1.InstanceGuid = models.Guid()
 
-			heartbeat = models.Heartbeat{
-				DeaGuid:            "abc",
-				InstanceHeartbeats: []models.InstanceHeartbeat{instance0.Heartbeat(), instance1.Heartbeat(), duplicateInstance1.Heartbeat()},
-			}
+			heartbeat = dea.HeartbeatWith(instance0.Heartbeat(), instance1.Heartbeat(), duplicateInstance1.Heartbeat())
 			simulator.SetCurrentHeartbeats(heartbeat)
 
 			simulator.SetDesiredState(a.DesiredState(2))
@@ -36,10 +35,10 @@ var _ = Describe("Stopping Duplicate Instances", func() {
 			Ω(startStopListener.Stops).Should(BeEmpty())
 		})
 
-		Context("after a grace period", func() {
+		Context("after four grace periods", func() {
 			Context("if both instances are still running", func() {
 				BeforeEach(func() {
-					simulator.Tick(simulator.GracePeriod)
+					simulator.Tick(simulator.GracePeriod * 4)
 				})
 
 				It("should stop one of them", func() {
@@ -63,14 +62,10 @@ var _ = Describe("Stopping Duplicate Instances", func() {
 							remainingInstance = instance1
 						}
 
-						heartbeat = models.Heartbeat{
-							DeaGuid:            "abc",
-							InstanceHeartbeats: []models.InstanceHeartbeat{instance0.Heartbeat(), remainingInstance.Heartbeat()},
-						}
+						heartbeat = dea.HeartbeatWith(instance0.Heartbeat(), remainingInstance.Heartbeat())
 						simulator.SetCurrentHeartbeats(heartbeat)
-						simulator.Tick(simulator.TicksToExpireHeartbeat)
 						startStopListener.Reset()
-						simulator.Tick(1)
+						simulator.Tick(simulator.GracePeriod * 2) //after a long time
 					})
 
 					It("should not stop the other instance", func() {
@@ -81,14 +76,10 @@ var _ = Describe("Stopping Duplicate Instances", func() {
 
 			Context("if only one instance is still running", func() {
 				BeforeEach(func() {
-					heartbeat = models.Heartbeat{
-						DeaGuid:            "abc",
-						InstanceHeartbeats: []models.InstanceHeartbeat{instance0.Heartbeat(), instance1.Heartbeat()},
-					}
+					heartbeat = dea.HeartbeatWith(instance0.Heartbeat(), instance1.Heartbeat())
 					simulator.SetCurrentHeartbeats(heartbeat)
-					simulator.Tick(simulator.TicksToExpireHeartbeat)
 					startStopListener.Reset()
-					simulator.Tick(simulator.GracePeriod)
+					simulator.Tick(simulator.GracePeriod * 5) //after a long time
 				})
 
 				It("should not stop any instances", func() {

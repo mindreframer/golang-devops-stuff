@@ -1,38 +1,21 @@
 package md_test
 
 import (
-	"github.com/cloudfoundry/hm9000/helpers/timeprovider"
 	"github.com/cloudfoundry/hm9000/testhelpers/startstoplistener"
 	. "github.com/onsi/ginkgo"
 	ginkgoConfig "github.com/onsi/ginkgo/config"
 	. "github.com/onsi/gomega"
 	"os"
 	"os/exec"
-	"strconv"
-	"time"
-
-	"github.com/cloudfoundry/hm9000/config"
-	"github.com/cloudfoundry/hm9000/storeadapter"
-	"github.com/cloudfoundry/hm9000/testhelpers/desiredstateserver"
-	"github.com/cloudfoundry/hm9000/testhelpers/natsrunner"
-	"github.com/cloudfoundry/hm9000/testhelpers/storerunner"
 	"os/signal"
 	"testing"
 )
 
 var (
-	stateServer               *desiredstateserver.DesiredStateServer
-	storeRunner               storerunner.StoreRunner
-	storeAdapter              storeadapter.StoreAdapter
-	natsRunner                *natsrunner.NATSRunner
-	conf                      config.Config
-	cliRunner                 *CLIRunner
-	startStopListener         *startstoplistener.StartStopListener
-	simulator                 *Simulator
-	desiredStateServerPort    int
-	desiredStateServerBaseUrl string
-	natsPort                  int
-	metricsServerPort         int
+	coordinator       *MDCoordinator
+	simulator         *Simulator
+	cliRunner         *CLIRunner
+	startStopListener *startstoplistener.StartStopListener
 )
 
 func TestMd(t *testing.T) {
@@ -47,72 +30,32 @@ func TestMd(t *testing.T) {
 		os.Exit(1)
 	}
 
-	desiredStateServerPort = 6001 + ginkgoConfig.GinkgoConfig.ParallelNode
-	desiredStateServerBaseUrl = "http://127.0.0.1:" + strconv.Itoa(desiredStateServerPort)
-	natsPort = 4223 + ginkgoConfig.GinkgoConfig.ParallelNode
+	coordinator = NewMDCoordinator(ginkgoConfig.GinkgoConfig.ParallelNode, ginkgoConfig.DefaultReporterConfig.Verbose)
+	coordinator.StartNats()
+	coordinator.StartDesiredStateServer()
+	coordinator.StartStartStopListener()
 
-	metricsServerPort = 7879 + ginkgoConfig.GinkgoConfig.ParallelNode
+	//run the suite for Cassandra...
+	coordinator.StartCassandra()
+	RunSpecs(t, "MCAT Cassandra MD Suite")
+	coordinator.StopStore()
 
-	natsRunner = natsrunner.NewNATSRunner(natsPort)
-	natsRunner.Start()
-
-	stateServer = desiredstateserver.NewDesiredStateServer()
-	go stateServer.SpinUp(desiredStateServerPort)
-
-	conf, err = config.DefaultConfig()
-	Ω(err).ShouldNot(HaveOccured())
-
-	//for now, run the suite for ETCD...
-	startEtcd()
-	startStopListener = startstoplistener.NewStartStopListener(natsRunner.MessageBus, conf)
-
-	cliRunner = NewCLIRunner(storeRunner.NodeURLS(), desiredStateServerBaseUrl, natsPort, metricsServerPort, ginkgoConfig.DefaultReporterConfig.Verbose)
-
-	RunSpecs(t, "MCAT Md Suite (ETCD)")
-
-	storeAdapter.Disconnect()
-	stopAllExternalProcesses()
+	//run the suite for ETCD...
+	coordinator.StartETCD()
+	RunSpecs(t, "MCAT ETCD MD Suite")
+	coordinator.StopStore()
 
 	//...and then for zookeeper
-	// startZookeeper()
+	coordinator.StartZooKeeper()
+	RunSpecs(t, "MCAT ZooKeeper MD Suite")
+	coordinator.StopStore()
 
-	// RunSpecs(t, "Md Suite (Zookeeper)")
-
-	// storeAdapter.Disconnect()
-	// storeRunner.Stop()
+	coordinator.StopAllExternalProcesses()
 }
 
 var _ = BeforeEach(func() {
-	storeRunner.Reset()
-	startStopListener.Reset()
-	simulator = NewSimulator(conf, storeRunner, stateServer, cliRunner, natsRunner.MessageBus)
+	cliRunner, simulator, startStopListener = coordinator.PrepForNextTest()
 })
-
-func stopAllExternalProcesses() {
-	storeRunner.Stop()
-	natsRunner.Stop()
-	cliRunner.Cleanup()
-}
-
-func startEtcd() {
-	etcdPort := 5000 + (ginkgoConfig.GinkgoConfig.ParallelNode-1)*10
-	storeRunner = storerunner.NewETCDClusterRunner(etcdPort, 1)
-	storeRunner.Start()
-
-	storeAdapter = storeadapter.NewETCDStoreAdapter(storeRunner.NodeURLS(), conf.StoreMaxConcurrentRequests)
-	err := storeAdapter.Connect()
-	Ω(err).ShouldNot(HaveOccured())
-}
-
-func startZookeeper() {
-	zookeeperPort := 2181 + (ginkgoConfig.GinkgoConfig.ParallelNode-1)*10
-	storeRunner = storerunner.NewZookeeperClusterRunner(zookeeperPort, 1)
-	storeRunner.Start()
-
-	storeAdapter = storeadapter.NewZookeeperStoreAdapter(storeRunner.NodeURLS(), conf.StoreMaxConcurrentRequests, &timeprovider.RealTimeProvider{}, time.Second)
-	err := storeAdapter.Connect()
-	Ω(err).ShouldNot(HaveOccured())
-}
 
 func registerSignalHandler() {
 	go func() {
@@ -121,7 +64,7 @@ func registerSignalHandler() {
 
 		select {
 		case <-c:
-			stopAllExternalProcesses()
+			coordinator.StopAllExternalProcesses()
 			os.Exit(0)
 		}
 	}()

@@ -1,6 +1,7 @@
 package httpclient
 
 import (
+	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
@@ -18,6 +19,9 @@ func NewHttpClient(timeout time.Duration) HttpClient {
 
 	transport := &http.Transport{
 		Dial: dialFunc,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 	}
 
 	return &RealHttpClient{

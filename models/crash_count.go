@@ -25,7 +25,6 @@ func NewCrashCountFromJSON(encoded []byte) (CrashCount, error) {
 func (crashCount CrashCount) ToJSON() []byte {
 	result, _ := json.Marshal(crashCount)
 	return result
-	return nil
 }
 
 func (crashCount CrashCount) StoreKey() string {

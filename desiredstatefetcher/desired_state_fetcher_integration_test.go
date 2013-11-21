@@ -1,6 +1,7 @@
-package md_test
+package desiredstatefetcher_test
 
 import (
+	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/desiredstatefetcher"
 	"github.com/cloudfoundry/hm9000/helpers/httpclient"
 	"github.com/cloudfoundry/hm9000/helpers/timeprovider"
@@ -8,21 +9,26 @@ import (
 	storepackage "github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/testhelpers/appfixture"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
+	"github.com/cloudfoundry/hm9000/testhelpers/fakemetricsaccountant"
+	"github.com/cloudfoundry/hm9000/testhelpers/fakestoreadapter"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
 
 var _ = Describe("Fetching from CC and storing the result in the Store", func() {
 	var (
-		fetcher    *desiredstatefetcher.DesiredStateFetcher
-		a1         appfixture.AppFixture
-		a2         appfixture.AppFixture
-		a3         appfixture.AppFixture
-		store      storepackage.Store
-		resultChan chan desiredstatefetcher.DesiredStateFetcherResult
+		fetcher      *desiredstatefetcher.DesiredStateFetcher
+		a1           appfixture.AppFixture
+		a2           appfixture.AppFixture
+		a3           appfixture.AppFixture
+		store        storepackage.Store
+		resultChan   chan desiredstatefetcher.DesiredStateFetcherResult
+		conf         config.Config
+		storeAdapter *fakestoreadapter.FakeStoreAdapter
 	)
 
 	BeforeEach(func() {
+		storeAdapter = fakestoreadapter.New()
 		resultChan = make(chan desiredstatefetcher.DesiredStateFetcherResult, 1)
 		a1 = appfixture.NewAppFixture()
 		a2 = appfixture.NewAppFixture()
@@ -34,11 +40,11 @@ var _ = Describe("Fetching from CC and storing the result in the Store", func() 
 			a3.DesiredState(1),
 		})
 
-		conf.CCBaseURL = desiredStateServerBaseUrl
+		conf, _ = config.DefaultConfig()
 
 		store = storepackage.NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 
-		fetcher = desiredstatefetcher.New(conf, store, httpclient.NewHttpClient(conf.FetcherNetworkTimeout()), &timeprovider.RealTimeProvider{})
+		fetcher = desiredstatefetcher.New(conf, store, fakemetricsaccountant.New(), httpclient.NewHttpClient(conf.FetcherNetworkTimeout()), &timeprovider.RealTimeProvider{}, fakelogger.NewFakeLogger())
 		fetcher.Fetch(resultChan)
 	})
 
@@ -50,14 +56,14 @@ var _ = Describe("Fetching from CC and storing the result in the Store", func() 
 			return desired
 		}, 1, 0.1).ShouldNot(BeEmpty())
 
-		Ω(desired).Should(HaveKey(a1.AppGuid + "-" + a1.AppVersion))
-		Ω(desired).Should(HaveKey(a2.AppGuid + "-" + a2.AppVersion))
-		Ω(desired).Should(HaveKey(a3.AppGuid + "-" + a3.AppVersion))
+		Ω(desired).Should(HaveKey(a1.AppGuid + "," + a1.AppVersion))
+		Ω(desired).Should(HaveKey(a2.AppGuid + "," + a2.AppVersion))
+		Ω(desired).Should(HaveKey(a3.AppGuid + "," + a3.AppVersion))
 	})
 
 	It("bumps the freshness", func() {
 		Eventually(func() error {
-			_, err := storeAdapter.Get(conf.DesiredFreshnessKey)
+			_, err := storeAdapter.Get("/v1" + conf.DesiredFreshnessKey)
 			return err
 		}, 1, 0.1).ShouldNot(HaveOccured())
 	})
@@ -91,7 +97,7 @@ var _ = Describe("Fetching from CC and storing the result in the Store", func() 
 			desired, err := store.GetDesiredState()
 			Ω(err).ShouldNot(HaveOccured())
 			Ω(desired).Should(HaveLen(1))
-			Ω(desired).Should(HaveKey(a3.AppGuid + "-" + a3.AppVersion))
+			Ω(desired).Should(HaveKey(a3.AppGuid + "," + a3.AppVersion))
 		})
 	})
 })

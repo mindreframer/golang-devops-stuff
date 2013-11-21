@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"github.com/cloudfoundry/hm9000/config"
+	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	"github.com/cloudfoundry/hm9000/models"
 	. "github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/storeadapter"
@@ -14,71 +15,81 @@ import (
 
 var _ = Describe("Apps", func() {
 	var (
-		store       Store
-		etcdAdapter storeadapter.StoreAdapter
-		conf        config.Config
+		store        Store
+		storeAdapter storeadapter.StoreAdapter
+		conf         config.Config
 
-		fixture1   appfixture.AppFixture
-		fixture2   appfixture.AppFixture
-		fixture3   appfixture.AppFixture
+		dea        appfixture.DeaFixture
+		app1       appfixture.AppFixture
+		app2       appfixture.AppFixture
+		app3       appfixture.AppFixture
+		app4       appfixture.AppFixture
 		crashCount []models.CrashCount
 	)
 
 	conf, _ = config.DefaultConfig()
 
 	BeforeEach(func() {
-		etcdAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), conf.StoreMaxConcurrentRequests)
-		err := etcdAdapter.Connect()
+		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
+		err := storeAdapter.Connect()
 		Ω(err).ShouldNot(HaveOccured())
 
-		store = NewStore(conf, etcdAdapter, fakelogger.NewFakeLogger())
+		store = NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 
-		fixture1 = appfixture.NewAppFixture()
-		fixture2 = appfixture.NewAppFixture()
-		fixture3 = appfixture.NewAppFixture()
+		dea = appfixture.NewDeaFixture()
+		app1 = dea.GetApp(0)
+		app2 = dea.GetApp(1)
+		app3 = dea.GetApp(2)
+		app4 = dea.GetApp(3)
 
 		actualState := []models.InstanceHeartbeat{
-			fixture1.InstanceAtIndex(0).Heartbeat(),
-			fixture1.InstanceAtIndex(1).Heartbeat(),
-			fixture1.InstanceAtIndex(2).Heartbeat(),
-			fixture2.InstanceAtIndex(0).Heartbeat(),
+			app1.InstanceAtIndex(0).Heartbeat(),
+			app1.InstanceAtIndex(1).Heartbeat(),
+			app1.InstanceAtIndex(2).Heartbeat(),
+			app2.InstanceAtIndex(0).Heartbeat(),
 		}
 
 		desiredState := []models.DesiredAppState{
-			fixture1.DesiredState(1),
-			fixture3.DesiredState(1),
+			app1.DesiredState(1),
+			app3.DesiredState(1),
 		}
 
 		crashCount = []models.CrashCount{
-			models.CrashCount{
-				AppGuid:       fixture1.AppGuid,
-				AppVersion:    fixture1.AppVersion,
+			{
+				AppGuid:       app1.AppGuid,
+				AppVersion:    app1.AppVersion,
 				InstanceIndex: 1,
 				CrashCount:    12,
 			},
-			models.CrashCount{
-				AppGuid:       fixture1.AppGuid,
-				AppVersion:    fixture1.AppVersion,
+			{
+				AppGuid:       app1.AppGuid,
+				AppVersion:    app1.AppVersion,
 				InstanceIndex: 2,
 				CrashCount:    17,
 			},
-			models.CrashCount{
-				AppGuid:       fixture2.AppGuid,
-				AppVersion:    fixture2.AppVersion,
+			{
+				AppGuid:       app2.AppGuid,
+				AppVersion:    app2.AppVersion,
 				InstanceIndex: 0,
 				CrashCount:    3,
 			},
+			{
+				AppGuid:       app4.AppGuid,
+				AppVersion:    app4.AppVersion,
+				InstanceIndex: 1,
+				CrashCount:    8,
+			},
 		}
 
-		store.SaveActualState(actualState...)
-		store.SaveDesiredState(desiredState...)
+		store.SyncHeartbeats(dea.HeartbeatWith(actualState...))
+		store.SyncDesiredState(desiredState...)
 		store.SaveCrashCounts(crashCount...)
 	})
 
 	Describe("AppKey", func() {
 		It("should concatenate the app guid and app version appropriately", func() {
 			key := store.AppKey("abc", "123")
-			Ω(key).Should(Equal("abc-123"))
+			Ω(key).Should(Equal("abc,123"))
 		})
 	})
 
@@ -89,27 +100,27 @@ var _ = Describe("Apps", func() {
 				Ω(err).ShouldNot(HaveOccured())
 
 				Ω(apps).Should(HaveLen(3))
-				Ω(apps).Should(HaveKey(fixture1.AppGuid + "-" + fixture1.AppVersion))
-				Ω(apps).Should(HaveKey(fixture2.AppGuid + "-" + fixture2.AppVersion))
-				Ω(apps).Should(HaveKey(fixture3.AppGuid + "-" + fixture3.AppVersion))
+				Ω(apps).Should(HaveKey(app1.AppGuid + "," + app1.AppVersion))
+				Ω(apps).Should(HaveKey(app2.AppGuid + "," + app2.AppVersion))
+				Ω(apps).Should(HaveKey(app3.AppGuid + "," + app3.AppVersion))
 
-				a1 := apps[fixture1.AppGuid+"-"+fixture1.AppVersion]
-				Ω(a1.Desired).Should(EqualDesiredState(fixture1.DesiredState(1)))
+				a1 := apps[app1.AppGuid+","+app1.AppVersion]
+				Ω(a1.Desired).Should(EqualDesiredState(app1.DesiredState(1)))
 				Ω(a1.InstanceHeartbeats).Should(HaveLen(3))
-				Ω(a1.InstanceHeartbeats).Should(ContainElement(fixture1.InstanceAtIndex(0).Heartbeat()))
-				Ω(a1.InstanceHeartbeats).Should(ContainElement(fixture1.InstanceAtIndex(1).Heartbeat()))
-				Ω(a1.InstanceHeartbeats).Should(ContainElement(fixture1.InstanceAtIndex(2).Heartbeat()))
+				Ω(a1.InstanceHeartbeats).Should(ContainElement(app1.InstanceAtIndex(0).Heartbeat()))
+				Ω(a1.InstanceHeartbeats).Should(ContainElement(app1.InstanceAtIndex(1).Heartbeat()))
+				Ω(a1.InstanceHeartbeats).Should(ContainElement(app1.InstanceAtIndex(2).Heartbeat()))
 				Ω(a1.CrashCounts[1]).Should(Equal(crashCount[0]))
 				Ω(a1.CrashCounts[2]).Should(Equal(crashCount[1]))
 
-				a2 := apps[fixture2.AppGuid+"-"+fixture2.AppVersion]
+				a2 := apps[app2.AppGuid+","+app2.AppVersion]
 				Ω(a2.Desired).Should(BeZero())
 				Ω(a2.InstanceHeartbeats).Should(HaveLen(1))
-				Ω(a2.InstanceHeartbeats).Should(ContainElement(fixture2.InstanceAtIndex(0).Heartbeat()))
+				Ω(a2.InstanceHeartbeats).Should(ContainElement(app2.InstanceAtIndex(0).Heartbeat()))
 				Ω(a2.CrashCounts[0]).Should(Equal(crashCount[2]))
 
-				a3 := apps[fixture3.AppGuid+"-"+fixture3.AppVersion]
-				Ω(a3.Desired).Should(EqualDesiredState(fixture3.DesiredState(1)))
+				a3 := apps[app3.AppGuid+","+app3.AppVersion]
+				Ω(a3.Desired).Should(EqualDesiredState(app3.DesiredState(1)))
 				Ω(a3.InstanceHeartbeats).Should(HaveLen(0))
 				Ω(a3.CrashCounts).Should(BeEmpty())
 			})
@@ -117,8 +128,8 @@ var _ = Describe("Apps", func() {
 
 		Context("when there is an empty app directory", func() {
 			It("should ignore that app directory", func() {
-				etcdAdapter.Set([]storeadapter.StoreNode{storeadapter.StoreNode{
-					Key:   "/apps/foo-bar/empty",
+				storeAdapter.Set([]storeadapter.StoreNode{{
+					Key:   "/apps/actual/foo-bar",
 					Value: []byte("foo"),
 				}})
 
@@ -131,17 +142,46 @@ var _ = Describe("Apps", func() {
 
 	Describe("GetApp", func() {
 		Context("when there are no store errors", func() {
-			Context("when the app is found", func() {
+			Context("when the app has desired and actual state", func() {
 				It("should return the app", func() {
-					app, err := store.GetApp(fixture1.AppGuid, fixture1.AppVersion)
+					app, err := store.GetApp(app1.AppGuid, app1.AppVersion)
 					Ω(err).ShouldNot(HaveOccured())
-					Ω(app.Desired).Should(EqualDesiredState(fixture1.DesiredState(1)))
+					Ω(app.Desired).Should(EqualDesiredState(app1.DesiredState(1)))
 					Ω(app.InstanceHeartbeats).Should(HaveLen(3))
-					Ω(app.InstanceHeartbeats).Should(ContainElement(fixture1.InstanceAtIndex(0).Heartbeat()))
-					Ω(app.InstanceHeartbeats).Should(ContainElement(fixture1.InstanceAtIndex(1).Heartbeat()))
-					Ω(app.InstanceHeartbeats).Should(ContainElement(fixture1.InstanceAtIndex(2).Heartbeat()))
+					Ω(app.InstanceHeartbeats).Should(ContainElement(app1.InstanceAtIndex(0).Heartbeat()))
+					Ω(app.InstanceHeartbeats).Should(ContainElement(app1.InstanceAtIndex(1).Heartbeat()))
+					Ω(app.InstanceHeartbeats).Should(ContainElement(app1.InstanceAtIndex(2).Heartbeat()))
 					Ω(app.CrashCounts[1]).Should(Equal(crashCount[0]))
 					Ω(app.CrashCounts[2]).Should(Equal(crashCount[1]))
+				})
+			})
+
+			Context("when the app has desired state only", func() {
+				It("should return the app", func() {
+					app, err := store.GetApp(app3.AppGuid, app3.AppVersion)
+					Ω(err).ShouldNot(HaveOccured())
+					Ω(app.Desired).Should(EqualDesiredState(app3.DesiredState(1)))
+					Ω(app.InstanceHeartbeats).Should(BeEmpty())
+					Ω(app.CrashCounts).Should(BeEmpty())
+				})
+			})
+
+			Context("when the app has actual state only", func() {
+				It("should return the app", func() {
+					app, err := store.GetApp(app2.AppGuid, app2.AppVersion)
+					Ω(err).ShouldNot(HaveOccured())
+					Ω(app.Desired).Should(BeZero())
+					Ω(app.InstanceHeartbeats).Should(HaveLen(1))
+					Ω(app.InstanceHeartbeats).Should(ContainElement(app2.InstanceAtIndex(0).Heartbeat()))
+					Ω(app.CrashCounts[0]).Should(Equal(crashCount[2]))
+				})
+			})
+
+			Context("when the app has crash counts only", func() {
+				It("should return the app not found error", func() {
+					app, err := store.GetApp(app4.AppGuid, app4.AppVersion)
+					Ω(err).Should(Equal(AppNotFoundError))
+					Ω(app).Should(BeZero())
 				})
 			})
 
@@ -155,10 +195,12 @@ var _ = Describe("Apps", func() {
 
 			Context("when the app directory is empty", func() {
 				It("should return the app not found error", func() {
-					etcdAdapter.Set([]storeadapter.StoreNode{storeadapter.StoreNode{
-						Key:   "/apps/foo-bar/empty",
+					storeAdapter.Set([]storeadapter.StoreNode{{
+						Key:   "/apps/actual/foo-bar/baz",
 						Value: []byte("foo"),
 					}})
+
+					storeAdapter.Delete("/apps/actual/foo-bar/baz")
 
 					app, err := store.GetApp("foo", "bar")
 					Ω(err).Should(Equal(AppNotFoundError))

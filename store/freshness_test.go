@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"github.com/cloudfoundry/hm9000/config"
+	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	"github.com/cloudfoundry/hm9000/models"
 	. "github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/storeadapter"
@@ -15,19 +16,19 @@ import (
 
 var _ = Describe("Freshness", func() {
 	var (
-		store       Store
-		etcdAdapter storeadapter.StoreAdapter
-		conf        config.Config
+		store        Store
+		storeAdapter storeadapter.StoreAdapter
+		conf         config.Config
 	)
 
 	conf, _ = config.DefaultConfig()
 
 	BeforeEach(func() {
-		etcdAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), conf.StoreMaxConcurrentRequests)
-		err := etcdAdapter.Connect()
+		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
+		err := storeAdapter.Connect()
 		Ω(err).ShouldNot(HaveOccured())
 
-		store = NewStore(conf, etcdAdapter, fakelogger.NewFakeLogger())
+		store = NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 	})
 
 	Describe("Bumping freshness", func() {
@@ -40,7 +41,7 @@ var _ = Describe("Freshness", func() {
 
 			Context("when the key is missing", func() {
 				BeforeEach(func() {
-					_, err := etcdAdapter.Get(key)
+					_, err := storeAdapter.Get(key)
 					Ω(err).Should(Equal(storeadapter.ErrorKeyNotFound))
 
 					err = bump(store, timestamp)
@@ -48,7 +49,7 @@ var _ = Describe("Freshness", func() {
 				})
 
 				It("should create the key with the current timestamp and a TTL", func() {
-					value, err := etcdAdapter.Get(key)
+					value, err := storeAdapter.Get(key)
 
 					Ω(err).ShouldNot(HaveOccured())
 
@@ -56,7 +57,7 @@ var _ = Describe("Freshness", func() {
 					json.Unmarshal(value.Value, &freshnessTimestamp)
 
 					Ω(freshnessTimestamp.Timestamp).Should(Equal(timestamp.Unix()))
-					Ω(value.TTL).Should(BeNumerically("==", ttl-1))
+					Ω(value.TTL).Should(BeNumerically("==", ttl))
 					Ω(value.Key).Should(Equal(key))
 				})
 			})
@@ -70,11 +71,11 @@ var _ = Describe("Freshness", func() {
 				})
 
 				It("should bump the key's TTL but not change the timestamp", func() {
-					value, err := etcdAdapter.Get(key)
+					value, err := storeAdapter.Get(key)
 
 					Ω(err).ShouldNot(HaveOccured())
 
-					Ω(value.TTL).Should(BeNumerically("==", ttl-1))
+					Ω(value.TTL).Should(BeNumerically("==", ttl))
 
 					var freshnessTimestamp models.FreshnessTimestamp
 					json.Unmarshal(value.Value, &freshnessTimestamp)
@@ -86,11 +87,11 @@ var _ = Describe("Freshness", func() {
 		}
 
 		Context("the actual state", func() {
-			bumpingFreshness(conf.ActualFreshnessKey, conf.ActualFreshnessTTL(), Store.BumpActualFreshness)
+			bumpingFreshness("/v1"+conf.ActualFreshnessKey, conf.ActualFreshnessTTL(), Store.BumpActualFreshness)
 		})
 
 		Context("the desired state", func() {
-			bumpingFreshness(conf.DesiredFreshnessKey, conf.DesiredFreshnessTTL(), Store.BumpDesiredFreshness)
+			bumpingFreshness("/v1"+conf.DesiredFreshnessKey, conf.DesiredFreshnessTTL(), Store.BumpDesiredFreshness)
 		})
 	})
 
@@ -151,9 +152,9 @@ var _ = Describe("Freshness", func() {
 
 		Context("when the store returns an error", func() {
 			BeforeEach(func() {
-				err := etcdAdapter.Set([]storeadapter.StoreNode{
-					storeadapter.StoreNode{
-						Key:   "/desired-fresh/mwahaha",
+				err := storeAdapter.Set([]storeadapter.StoreNode{
+					{
+						Key:   "/v1/desired-fresh/mwahaha",
 						Value: []byte("i'm a directory...."),
 					},
 				})
@@ -200,9 +201,9 @@ var _ = Describe("Freshness", func() {
 
 			Context("if the freshness key fails to parse", func() {
 				BeforeEach(func() {
-					etcdAdapter.Set([]storeadapter.StoreNode{
-						storeadapter.StoreNode{
-							Key:   "/actual-fresh",
+					storeAdapter.Set([]storeadapter.StoreNode{
+						{
+							Key:   "/v1/actual-fresh",
 							Value: []byte("ß"),
 						},
 					})
@@ -218,9 +219,9 @@ var _ = Describe("Freshness", func() {
 
 		Context("when the store returns an error", func() {
 			BeforeEach(func() {
-				err := etcdAdapter.Set([]storeadapter.StoreNode{
-					storeadapter.StoreNode{
-						Key:   "/actual-fresh/mwahaha",
+				err := storeAdapter.Set([]storeadapter.StoreNode{
+					{
+						Key:   "/v1/actual-fresh/mwahaha",
 						Value: []byte("i'm a directory...."),
 					},
 				})

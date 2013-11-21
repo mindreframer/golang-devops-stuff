@@ -10,6 +10,7 @@ import (
 	"github.com/cloudfoundry/hm9000/testhelpers/appfixture"
 	. "github.com/cloudfoundry/hm9000/testhelpers/custommatchers"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
+	"github.com/cloudfoundry/hm9000/testhelpers/fakemetricsaccountant"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakestoreadapter"
 
 	"github.com/cloudfoundry/hm9000/testhelpers/fakehttpclient"
@@ -33,19 +34,22 @@ func (b *brokenReader) Close() error {
 
 var _ = Describe("DesiredStateFetcher", func() {
 	var (
-		conf         config.Config
-		fetcher      *DesiredStateFetcher
-		httpClient   *fakehttpclient.FakeHttpClient
-		timeProvider *faketimeprovider.FakeTimeProvider
-		store        storepackage.Store
-		storeAdapter *fakestoreadapter.FakeStoreAdapter
-		resultChan   chan DesiredStateFetcherResult
+		conf              config.Config
+		fetcher           *DesiredStateFetcher
+		httpClient        *fakehttpclient.FakeHttpClient
+		timeProvider      *faketimeprovider.FakeTimeProvider
+		store             storepackage.Store
+		storeAdapter      *fakestoreadapter.FakeStoreAdapter
+		resultChan        chan DesiredStateFetcherResult
+		metricsAccountant *fakemetricsaccountant.FakeMetricsAccountant
 	)
 
 	BeforeEach(func() {
 		var err error
 		conf, err = config.DefaultConfig()
 		Ω(err).ShouldNot(HaveOccured())
+
+		metricsAccountant = fakemetricsaccountant.New()
 
 		resultChan = make(chan DesiredStateFetcherResult, 1)
 		timeProvider = &faketimeprovider.FakeTimeProvider{
@@ -56,14 +60,14 @@ var _ = Describe("DesiredStateFetcher", func() {
 		storeAdapter = fakestoreadapter.New()
 		store = storepackage.NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 
-		fetcher = New(conf, store, httpClient, timeProvider)
+		fetcher = New(conf, store, metricsAccountant, httpClient, timeProvider, fakelogger.NewFakeLogger())
 		fetcher.Fetch(resultChan)
 	})
 
 	Describe("Fetching with an invalid URL", func() {
 		BeforeEach(func() {
 			conf.CCBaseURL = "http://example.com/#%ZZ"
-			fetcher = New(conf, store, httpClient, timeProvider)
+			fetcher = New(conf, store, metricsAccountant, httpClient, timeProvider, fakelogger.NewFakeLogger())
 			fetcher.Fetch(resultChan)
 		})
 
@@ -121,26 +125,42 @@ var _ = Describe("DesiredStateFetcher", func() {
 
 		Context("when a response with desired state is received", func() {
 			var (
-				a1         appfixture.AppFixture
-				a2         appfixture.AppFixture
-				stoppedApp appfixture.AppFixture
-				deletedApp appfixture.AppFixture
+				a1                appfixture.AppFixture
+				a2                appfixture.AppFixture
+				stoppedApp        appfixture.AppFixture
+				pendingStagingApp appfixture.AppFixture
+				failedToStageApp  appfixture.AppFixture
+				deletedApp        appfixture.AppFixture
+
+				pendingStagingDesiredState models.DesiredAppState
 			)
 
 			BeforeEach(func() {
 				deletedApp = appfixture.NewAppFixture()
-				store.SaveDesiredState(deletedApp.DesiredState(1))
+				store.SyncDesiredState(deletedApp.DesiredState(1))
 
 				a1 = appfixture.NewAppFixture()
 				a2 = appfixture.NewAppFixture()
+
 				stoppedApp = appfixture.NewAppFixture()
 				stoppedDesiredState := stoppedApp.DesiredState(1)
 				stoppedDesiredState.State = models.AppStateStopped
+
+				pendingStagingApp = appfixture.NewAppFixture()
+				pendingStagingDesiredState = pendingStagingApp.DesiredState(1)
+				pendingStagingDesiredState.PackageState = models.AppPackageStatePending
+
+				failedToStageApp = appfixture.NewAppFixture()
+				failedStagingDesiredState := failedToStageApp.DesiredState(1)
+				failedStagingDesiredState.PackageState = models.AppPackageStateFailed
+
 				response = DesiredStateServerResponse{
 					Results: map[string]models.DesiredAppState{
-						a1.AppGuid:         a1.DesiredState(1),
-						a2.AppGuid:         a2.DesiredState(1),
-						stoppedApp.AppGuid: stoppedDesiredState,
+						a1.AppGuid:                a1.DesiredState(1),
+						a2.AppGuid:                a2.DesiredState(1),
+						stoppedApp.AppGuid:        stoppedDesiredState,
+						pendingStagingApp.AppGuid: pendingStagingDesiredState,
+						failedToStageApp.AppGuid:  failedStagingDesiredState,
 					},
 					BulkToken: BulkToken{
 						Id: 5,
@@ -191,11 +211,16 @@ var _ = Describe("DesiredStateFetcher", func() {
 					Ω(fresh).Should(BeTrue())
 				})
 
-				It("should store any desired state that is in the STARTED appstate, and delete any stale data", func() {
+				It("should store any desired state that is in the STARTED appstate and STAGED package state, and delete any stale data", func() {
 					desired, _ := store.GetDesiredState()
-					Ω(desired).Should(HaveLen(2))
+					Ω(desired).Should(HaveLen(3))
 					Ω(desired).Should(ContainElement(EqualDesiredState(a1.DesiredState(1))))
 					Ω(desired).Should(ContainElement(EqualDesiredState(a2.DesiredState(1))))
+					Ω(desired).Should(ContainElement(EqualDesiredState(pendingStagingDesiredState)))
+				})
+
+				It("should track the time taken to sync desired state", func() {
+					Ω(metricsAccountant.TrackedDesiredStateSyncTime).ShouldNot(BeZero())
 				})
 
 				It("should send a succesful result down the result channel", func(done Done) {

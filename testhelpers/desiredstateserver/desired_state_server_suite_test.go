@@ -12,7 +12,6 @@ import (
 
 	"net/http"
 	"testing"
-	"time"
 )
 
 type UserCountResponse struct {
@@ -129,28 +128,22 @@ var _ = Describe("making requests", func() {
 					AppGuid:           "abc",
 					AppVersion:        "123",
 					NumberOfInstances: 2,
-					Memory:            1024,
 					State:             AppStateStarted,
 					PackageState:      AppPackageStateStaged,
-					UpdatedAt:         time.Unix(1377886048, 0),
 				}
 				app2 = DesiredAppState{
 					AppGuid:           "def",
 					AppVersion:        "456",
 					NumberOfInstances: 3,
-					Memory:            1024,
 					State:             AppStateStopped,
 					PackageState:      AppPackageStatePending,
-					UpdatedAt:         time.Unix(1377886048, 0),
 				}
 				app3 = DesiredAppState{
 					AppGuid:           "cba",
 					AppVersion:        "789",
 					NumberOfInstances: 2,
-					Memory:            1024,
 					State:             AppStateStopped,
 					PackageState:      AppPackageStatePending,
-					UpdatedAt:         time.Unix(1377886048, 0),
 				}
 			})
 

@@ -1,11 +1,11 @@
 package models_test
 
 import (
-	"time"
 	. "github.com/cloudfoundry/hm9000/models"
 	"github.com/cloudfoundry/hm9000/testhelpers/appfixture"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
+	"time"
 )
 
 var _ = Describe("App", func() {
@@ -133,6 +133,30 @@ var _ = Describe("App", func() {
 		})
 	})
 
+	Describe("IsStaged", func() {
+		Context("when the app is desired", func() {
+			BeforeEach(func() {
+				desired = fixture.DesiredState(1)
+			})
+			It("should be true only when the package state is staged", func() {
+				desired.PackageState = AppPackageStateStaged
+				Ω(app().IsStaged()).Should(BeTrue())
+
+				desired.PackageState = AppPackageStatePending
+				Ω(app().IsStaged()).Should(BeFalse())
+
+				desired.PackageState = AppPackageStateFailed
+				Ω(app().IsStaged()).Should(BeFalse())
+			})
+		})
+
+		Context("when the app is not desired", func() {
+			It("should be false", func() {
+				Ω(app().IsStaged()).Should(BeFalse())
+			})
+		})
+	})
+
 	Describe("IsIndexDesired", func() {
 		It("should be true if the index is less than the number of desired instances", func() {
 			Ω(app().IsIndexDesired(0)).Should(BeFalse())
@@ -236,6 +260,34 @@ var _ = Describe("App", func() {
 		})
 	})
 
+	Describe("HeartbeatsByIndex", func() {
+		It("returns all of the heartbeats grouped by index", func() {
+			Ω(app().HeartbeatsByIndex()).Should(BeEmpty())
+
+			instanceHeartbeats = []InstanceHeartbeat{
+				heartbeat(0, InstanceStateCrashed),
+				heartbeat(1, InstanceStateRunning),
+				heartbeat(1, InstanceStateCrashed),
+				heartbeat(2, InstanceStateStarting),
+				heartbeat(2, InstanceStateCrashed),
+			}
+
+			Ω(app().HeartbeatsByIndex()).Should(Equal(map[int][]InstanceHeartbeat{
+				0: {
+					heartbeat(0, InstanceStateCrashed),
+				},
+				1: {
+					heartbeat(1, InstanceStateRunning),
+					heartbeat(1, InstanceStateCrashed),
+				},
+				2: {
+					heartbeat(2, InstanceStateStarting),
+					heartbeat(2, InstanceStateCrashed),
+				},
+			}))
+		})
+	})
+
 	Describe("HasStartingOrRunningInstanceAtIndex", func() {
 		It("should return true if there are starting or running instances at the passed in index", func() {
 			Ω(app().HasStartingOrRunningInstanceAtIndex(1)).Should(BeFalse())
@@ -250,6 +302,62 @@ var _ = Describe("App", func() {
 			Ω(app().HasStartingOrRunningInstanceAtIndex(0)).Should(BeFalse())
 			Ω(app().HasStartingOrRunningInstanceAtIndex(1)).Should(BeTrue())
 			Ω(app().HasStartingOrRunningInstanceAtIndex(2)).Should(BeTrue())
+		})
+	})
+
+	Describe("HasStartingInstanceAtIndex", func() {
+		It("should return true if there are starting instances at the passed in index", func() {
+			Ω(app().HasStartingInstanceAtIndex(1)).Should(BeFalse())
+			instanceHeartbeats = []InstanceHeartbeat{
+				heartbeat(0, InstanceStateCrashed),
+				heartbeat(1, InstanceStateRunning),
+				heartbeat(1, InstanceStateCrashed),
+				heartbeat(2, InstanceStateStarting),
+				heartbeat(2, InstanceStateCrashed),
+			}
+			Ω(app().HasStartingInstanceAtIndex(0)).Should(BeFalse())
+			Ω(app().HasStartingInstanceAtIndex(1)).Should(BeFalse())
+			Ω(app().HasStartingInstanceAtIndex(2)).Should(BeTrue())
+		})
+	})
+
+	Describe("HasRunningInstanceAtIndex", func() {
+		It("should return true if there are running instances at the passed in index", func() {
+			Ω(app().HasRunningInstanceAtIndex(1)).Should(BeFalse())
+			instanceHeartbeats = []InstanceHeartbeat{
+				heartbeat(0, InstanceStateCrashed),
+				heartbeat(1, InstanceStateRunning),
+				heartbeat(1, InstanceStateCrashed),
+				heartbeat(2, InstanceStateStarting),
+				heartbeat(2, InstanceStateCrashed),
+			}
+			Ω(app().HasRunningInstanceAtIndex(0)).Should(BeFalse())
+			Ω(app().HasRunningInstanceAtIndex(1)).Should(BeTrue())
+			Ω(app().HasRunningInstanceAtIndex(2)).Should(BeFalse())
+		})
+	})
+
+	Describe("EvacuatingInstancesAtIndex", func() {
+		It("should return true if there are evacuating instances at the passed in index", func() {
+			instances := app().EvacuatingInstancesAtIndex(1)
+			Ω(instances).Should(BeEmpty())
+
+			instanceHeartbeats = []InstanceHeartbeat{
+				heartbeat(0, InstanceStateCrashed),
+				heartbeat(1, InstanceStateRunning),
+				heartbeat(1, InstanceStateEvacuating),
+				heartbeat(1, InstanceStateEvacuating),
+				heartbeat(2, InstanceStateStarting),
+				heartbeat(2, InstanceStateCrashed),
+			}
+
+			instances = app().EvacuatingInstancesAtIndex(0)
+			Ω(instances).Should(BeEmpty())
+
+			instances = app().EvacuatingInstancesAtIndex(1)
+			Ω(instances).Should(HaveLen(2))
+			Ω(instances[0]).Should(Equal(heartbeat(1, InstanceStateEvacuating)))
+			Ω(instances[1]).Should(Equal(heartbeat(1, InstanceStateEvacuating)))
 		})
 	})
 

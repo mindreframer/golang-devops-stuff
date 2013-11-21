@@ -106,4 +106,45 @@ var _ = Describe("WorkerPool", func() {
 			})
 		})
 	})
+
+	Describe("Measuring capacity", func() {
+		It("should track the ...", func() {
+			dt := time.Duration(0.1 * float64(time.Second))
+
+			pool.StartTrackingUsage()
+			called := make(chan bool, 1)
+			pool.ScheduleWork(func() {
+				time.Sleep(dt)
+				called <- true
+			})
+
+			<-called
+			time.Sleep(dt)
+
+			usage, duration := pool.MeasureUsage()
+
+			Ω(duration.Seconds()).Should(BeNumerically("~", 0.2, 0.05))
+			Ω(usage).Should(BeNumerically("~", 0.25, 0.05)) //one of two workers was occupied for half the time:
+
+			//now do it again, but occupy two workers
+
+			called = make(chan bool, 1)
+			pool.ScheduleWork(func() {
+				time.Sleep(dt)
+				called <- true
+			})
+
+			pool.ScheduleWork(func() {
+				time.Sleep(dt)
+				called <- true
+			})
+
+			<-called
+			time.Sleep(dt)
+
+			usage, duration = pool.MeasureUsage()
+			Ω(duration.Seconds()).Should(BeNumerically("~", 0.2, 0.05))
+			Ω(usage).Should(BeNumerically("~", 0.5, 0.05)) //both workers were occupied for half the time:
+		})
+	})
 })

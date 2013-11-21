@@ -9,7 +9,7 @@ type AppFixture struct {
 	AppVersion string
 
 	instances map[int]Instance
-	deaGuid   string
+	DeaGuid   string
 }
 
 type Instance struct {
@@ -17,6 +17,7 @@ type Instance struct {
 	InstanceIndex int
 	AppGuid       string
 	AppVersion    string
+	DeaGuid       string
 }
 
 func NewAppFixture() AppFixture {
@@ -28,18 +29,18 @@ func newAppForDeaGuid(deaGuid string) AppFixture {
 		AppGuid:    Guid(),
 		AppVersion: Guid(),
 		instances:  make(map[int]Instance, 0),
-		deaGuid:    deaGuid,
+		DeaGuid:    deaGuid,
 	}
 }
 
 func (app AppFixture) CrashedInstanceHeartbeatAtIndex(index int) InstanceHeartbeat {
 	return InstanceHeartbeat{
 		State:         InstanceStateCrashed,
-		CCPartition:   "default",
 		AppGuid:       app.AppGuid,
 		AppVersion:    app.AppVersion,
 		InstanceGuid:  Guid(),
 		InstanceIndex: index,
+		DeaGuid:       app.DeaGuid,
 	}
 }
 
@@ -51,6 +52,7 @@ func (app AppFixture) InstanceAtIndex(index int) Instance {
 			InstanceIndex: index,
 			AppGuid:       app.AppGuid,
 			AppVersion:    app.AppVersion,
+			DeaGuid:       app.DeaGuid,
 		}
 	}
 
@@ -62,7 +64,6 @@ func (app AppFixture) DesiredState(numberOfInstances int) DesiredAppState {
 		AppGuid:           app.AppGuid,
 		AppVersion:        app.AppVersion,
 		NumberOfInstances: numberOfInstances,
-		Memory:            1024,
 		State:             AppStateStarted,
 		PackageState:      AppPackageStateStaged,
 	}
@@ -70,17 +71,17 @@ func (app AppFixture) DesiredState(numberOfInstances int) DesiredAppState {
 
 func (instance Instance) Heartbeat() InstanceHeartbeat {
 	return InstanceHeartbeat{
-		CCPartition:   "default",
 		AppGuid:       instance.AppGuid,
 		AppVersion:    instance.AppVersion,
 		InstanceGuid:  instance.InstanceGuid,
 		InstanceIndex: instance.InstanceIndex,
 		State:         InstanceStateRunning,
+		DeaGuid:       instance.DeaGuid,
 	}
 }
 
-func (instance Instance) DropletExited(reason DropletExitedReason) DropletExitedMessage {
-	droplet_exited := DropletExitedMessage{
+func (instance Instance) DropletExited(reason DropletExitedReason) DropletExited {
+	droplet_exited := DropletExited{
 		CCPartition:     "default",
 		AppGuid:         instance.AppGuid,
 		AppVersion:      instance.AppVersion,
@@ -100,7 +101,7 @@ func (app AppFixture) Heartbeat(instances int) Heartbeat {
 	}
 
 	return Heartbeat{
-		DeaGuid:            app.deaGuid,
+		DeaGuid:            app.DeaGuid,
 		InstanceHeartbeats: instanceHeartbeats,
 	}
 }

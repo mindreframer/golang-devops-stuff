@@ -4,11 +4,16 @@ import (
 	"fmt"
 	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/helpers/httpclient"
+	"github.com/cloudfoundry/hm9000/helpers/logger"
+	"github.com/cloudfoundry/hm9000/helpers/metricsaccountant"
 	"github.com/cloudfoundry/hm9000/helpers/timeprovider"
 	"github.com/cloudfoundry/hm9000/models"
 	"github.com/cloudfoundry/hm9000/store"
 	"io/ioutil"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 )
 
 type DesiredStateFetcherResult struct {
@@ -21,24 +26,30 @@ type DesiredStateFetcherResult struct {
 const initialBulkToken = "{}"
 
 type DesiredStateFetcher struct {
-	config       config.Config
-	httpClient   httpclient.HttpClient
-	store        store.Store
-	timeProvider timeprovider.TimeProvider
-	cache        map[string]models.DesiredAppState
+	config            config.Config
+	httpClient        httpclient.HttpClient
+	store             store.Store
+	metricsAccountant metricsaccountant.MetricsAccountant
+	timeProvider      timeprovider.TimeProvider
+	cache             map[string]models.DesiredAppState
+	logger            logger.Logger
 }
 
 func New(config config.Config,
 	store store.Store,
+	metricsAccountant metricsaccountant.MetricsAccountant,
 	httpClient httpclient.HttpClient,
-	timeProvider timeprovider.TimeProvider) *DesiredStateFetcher {
+	timeProvider timeprovider.TimeProvider,
+	logger logger.Logger) *DesiredStateFetcher {
 
 	return &DesiredStateFetcher{
-		config:       config,
-		httpClient:   httpClient,
-		store:        store,
-		timeProvider: timeProvider,
-		cache:        map[string]models.DesiredAppState{},
+		config:            config,
+		httpClient:        httpClient,
+		store:             store,
+		metricsAccountant: metricsAccountant,
+		timeProvider:      timeProvider,
+		cache:             map[string]models.DesiredAppState{},
+		logger:            logger,
 	}
 }
 
@@ -95,7 +106,9 @@ func (fetcher *DesiredStateFetcher) fetchBatch(authorization string, token strin
 		}
 
 		if len(response.Results) == 0 {
+			tSync := time.Now()
 			err = fetcher.syncStore()
+			fetcher.metricsAccountant.TrackDesiredStateSyncTime(time.Since(tSync))
 			if err != nil {
 				resultChan <- DesiredStateFetcherResult{Message: "Failed to sync desired state to the store", Error: err}
 				return
@@ -115,6 +128,16 @@ func (fetcher *DesiredStateFetcher) bulkURL(batchSize int, bulkToken string) str
 	return fmt.Sprintf("%s/bulk/apps?batch_size=%d&bulk_token=%s", fetcher.config.CCBaseURL, batchSize, bulkToken)
 }
 
+func (fetcher *DesiredStateFetcher) guids(desiredStates []models.DesiredAppState) string {
+	result := make([]string, len(desiredStates))
+
+	for i, desired := range desiredStates {
+		result[i] = desired.AppGuid
+	}
+
+	return strings.Join(result, ",")
+}
+
 func (fetcher *DesiredStateFetcher) syncStore() error {
 	desiredStates := make([]models.DesiredAppState, len(fetcher.cache))
 	i := 0
@@ -122,30 +145,21 @@ func (fetcher *DesiredStateFetcher) syncStore() error {
 		desiredStates[i] = desiredState
 		i++
 	}
-	err := fetcher.store.SaveDesiredState(desiredStates...)
+	err := fetcher.store.SyncDesiredState(desiredStates...)
 	if err != nil {
+		fetcher.logger.Error("Failed to Sync Desired State", err, map[string]string{
+			"Number of Entries": strconv.Itoa(len(desiredStates)),
+			"Desireds":          fetcher.guids(desiredStates),
+		})
 		return err
 	}
 
-	storedDesiredState, err := fetcher.store.GetDesiredState()
-	if err != nil {
-		return err
-	}
-
-	statesToDelete := make([]models.DesiredAppState, 0)
-	for _, desiredState := range storedDesiredState {
-		_, present := fetcher.cache[desiredState.StoreKey()]
-		if !present {
-			statesToDelete = append(statesToDelete, desiredState)
-		}
-	}
-
-	return fetcher.store.DeleteDesiredState(statesToDelete...)
+	return nil
 }
 
 func (fetcher *DesiredStateFetcher) cacheResponse(response DesiredStateServerResponse) {
 	for _, desiredState := range response.Results {
-		if desiredState.State == models.AppStateStarted {
+		if desiredState.State == models.AppStateStarted && (desiredState.PackageState == models.AppPackageStateStaged || desiredState.PackageState == models.AppPackageStatePending) {
 			fetcher.cache[desiredState.StoreKey()] = desiredState
 		}
 	}

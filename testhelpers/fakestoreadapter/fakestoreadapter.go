@@ -173,29 +173,28 @@ func (adapter *FakeStoreAdapter) listContainerNode(key string, container *contai
 	}
 }
 
-func (adapter *FakeStoreAdapter) Delete(key string) error {
-	if adapter.DeleteErrInjector != nil && adapter.DeleteErrInjector.KeyRegexp.MatchString(key) {
-		return adapter.DeleteErrInjector.Error
-	}
-
-	components := adapter.keyComponents(key)
-	container := adapter.rootNode
-	parentNode := adapter.rootNode
-	for _, component := range components {
-		var exists bool
-		parentNode = container
-		container, exists = container.nodes[component]
-		if !exists {
-			return storeadapter.ErrorKeyNotFound
+func (adapter *FakeStoreAdapter) Delete(keys ...string) error {
+	for _, key := range keys {
+		if adapter.DeleteErrInjector != nil && adapter.DeleteErrInjector.KeyRegexp.MatchString(key) {
+			return adapter.DeleteErrInjector.Error
 		}
+
+		components := adapter.keyComponents(key)
+		container := adapter.rootNode
+		parentNode := adapter.rootNode
+		for _, component := range components {
+			var exists bool
+			parentNode = container
+			container, exists = container.nodes[component]
+			if !exists {
+				return storeadapter.ErrorKeyNotFound
+			}
+		}
+
+		delete(parentNode.nodes, components[len(components)-1])
 	}
 
-	if container.dir {
-		return storeadapter.ErrorNodeIsDirectory
-	} else {
-		delete(parentNode.nodes, components[len(components)-1])
-		return nil
-	}
+	return nil
 }
 
 func (adapter *FakeStoreAdapter) keyComponents(key string) (components []string) {

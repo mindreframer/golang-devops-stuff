@@ -27,10 +27,10 @@ type ZookeeperStoreAdapter struct {
 	connectionTimeout time.Duration
 }
 
-func NewZookeeperStoreAdapter(urls []string, maxConcurrentRequests int, timeProvider timeprovider.TimeProvider, connectionTimeout time.Duration) *ZookeeperStoreAdapter {
+func NewZookeeperStoreAdapter(urls []string, workerPool *workerpool.WorkerPool, timeProvider timeprovider.TimeProvider, connectionTimeout time.Duration) *ZookeeperStoreAdapter {
 	return &ZookeeperStoreAdapter{
 		urls:              urls,
-		workerPool:        workerpool.NewWorkerPool(maxConcurrentRequests),
+		workerPool:        workerPool,
 		timeProvider:      timeProvider,
 		connectionTimeout: connectionTimeout,
 	}
@@ -67,7 +67,7 @@ func (adapter *ZookeeperStoreAdapter) Set(nodes []StoreNode) error {
 			}
 
 			if exists {
-				_, err = adapter.client.Set(node.Key, adapter.encode(node.Value, node.TTL), -1)
+				_, err = adapter.client.Set(node.Key, adapter.encode(node.Value, node.TTL, adapter.timeProvider.Time()), -1)
 			} else {
 				err = adapter.createNode(node)
 			}
@@ -165,25 +165,57 @@ func (adapter *ZookeeperStoreAdapter) ListRecursively(key string) (StoreNode, er
 	}, nil
 }
 
-func (adapter *ZookeeperStoreAdapter) Delete(key string) error {
-	exists, stat, err := adapter.client.Exists(key)
-	if adapter.isTimeoutError(err) {
-		return ErrorTimeout
+func (adapter *ZookeeperStoreAdapter) Delete(keys ...string) error {
+	//TODO: this can be optimized if we choose to go with zookeeper (can use the worker pool)
+	var finalErr error
+	for _, key := range keys {
+		exists, stat, err := adapter.client.Exists(key)
+		if adapter.isTimeoutError(err) {
+			return ErrorTimeout
+		}
+
+		if err != nil {
+			if finalErr == nil {
+				finalErr = ErrorKeyNotFound
+			}
+			continue
+		}
+
+		if !exists {
+			if finalErr == nil {
+				finalErr = ErrorKeyNotFound
+			}
+			continue
+		}
+
+		if stat.NumChildren > 0 {
+			nodeKeys, _, err := adapter.client.Children(key)
+
+			if err != nil {
+				if finalErr == nil {
+					finalErr = err
+				}
+				continue
+			}
+
+			for _, child := range nodeKeys {
+				err := adapter.Delete(adapter.combineKeys(key, child))
+				if err != nil {
+					if finalErr == nil {
+						finalErr = err
+					}
+					continue
+				}
+			}
+		}
+
+		err = adapter.client.Delete(key, -1)
+		if finalErr == nil {
+			finalErr = err
+		}
 	}
 
-	if err != nil {
-		return err
-	}
-
-	if !exists {
-		return ErrorKeyNotFound
-	}
-
-	if stat.NumChildren > 0 {
-		return ErrorNodeIsDirectory
-	}
-
-	return adapter.client.Delete(key, -1)
+	return finalErr
 }
 
 func (adapter *ZookeeperStoreAdapter) isMissingKeyError(err error) bool {
@@ -194,21 +226,28 @@ func (adapter *ZookeeperStoreAdapter) isTimeoutError(err error) bool {
 	return err == zk.ErrConnectionClosed
 }
 
-func (adapter *ZookeeperStoreAdapter) encode(data []byte, TTL uint64) []byte {
-	return []byte(fmt.Sprintf("%d,%s", TTL, string(data)))
+func (adapter *ZookeeperStoreAdapter) encode(data []byte, TTL uint64, updateTime time.Time) []byte {
+	return []byte(fmt.Sprintf("%d,%d,%s", updateTime.Unix(), TTL, string(data)))
 }
 
-func (adapter *ZookeeperStoreAdapter) decode(input []byte) (data []byte, TTL uint64, err error) {
-	arr := strings.SplitN(string(input), ",", 2)
-	if len(arr) != 2 {
-		return []byte{}, 0, fmt.Errorf("Expected an encoded string of the form TTL,data, got %s", string(input))
+func (adapter *ZookeeperStoreAdapter) decode(input []byte) (data []byte, TTL uint64, updateTime time.Time, err error) {
+	arr := strings.SplitN(string(input), ",", 3)
+	if len(arr) != 3 {
+		return []byte{}, 0, time.Time{}, fmt.Errorf("Expected an encoded string of the form updateTime,TTL,data got %s", string(input))
 	}
-	TTL, err = strconv.ParseUint(arr[0], 10, 64)
-	return []byte(arr[1]), TTL, err
+	updateTimeInSeconds, err := strconv.ParseInt(arr[0], 10, 64)
+	if err != nil {
+		return []byte{}, 0, time.Time{}, err
+	}
+	TTL, err = strconv.ParseUint(arr[1], 10, 64)
+	if err != nil {
+		return []byte{}, 0, time.Time{}, err
+	}
+	return []byte(arr[2]), TTL, time.Unix(updateTimeInSeconds, 0), err
 }
 
 func (adapter *ZookeeperStoreAdapter) getWithTTLPolicy(key string) fetchedNode {
-	data, stat, err := adapter.client.Get(key)
+	data, _, err := adapter.client.Get(key)
 
 	if adapter.isTimeoutError(err) {
 		return fetchedNode{err: ErrorTimeout}
@@ -230,14 +269,13 @@ func (adapter *ZookeeperStoreAdapter) getWithTTLPolicy(key string) fetchedNode {
 		}}
 	}
 
-	value, TTL, err := adapter.decode(data)
+	value, TTL, updateTime, err := adapter.decode(data)
 	if err != nil {
 		return fetchedNode{err: ErrorInvalidFormat}
 	}
 
 	if TTL > 0 {
-		creationTime := time.Unix(int64(float64(stat.Ctime)/1000.0), 0)
-		elapsedTime := int64(math.Floor(adapter.timeProvider.Time().Sub(creationTime).Seconds()))
+		elapsedTime := int64(math.Floor(adapter.timeProvider.Time().Sub(updateTime).Seconds()))
 		remainingTTL := int64(TTL) - elapsedTime
 		if remainingTTL > 0 {
 			if remainingTTL < int64(TTL) {
@@ -279,7 +317,7 @@ func (adapter *ZookeeperStoreAdapter) createNode(node StoreNode) error {
 	if node.Dir {
 		_, err = adapter.client.Create(node.Key, []byte{}, 0, zk.WorldACL(zk.PermAll))
 	} else {
-		_, err = adapter.client.Create(node.Key, adapter.encode(node.Value, node.TTL), 0, zk.WorldACL(zk.PermAll))
+		_, err = adapter.client.Create(node.Key, adapter.encode(node.Value, node.TTL, adapter.timeProvider.Time()), 0, zk.WorldACL(zk.PermAll))
 	}
 
 	if err == zk.ErrNodeExists {

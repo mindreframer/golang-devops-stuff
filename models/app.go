@@ -59,7 +59,7 @@ func (a *App) ToJSON() []byte {
 func (a *App) LogDescription() map[string]string {
 	var desired string
 	if a.IsDesired() {
-		desired = fmt.Sprintf(`{"NumberOfInstances":%d,"Memory":%d,"State":"%s","PackageState":"%s"}`, a.Desired.NumberOfInstances, a.Desired.Memory, a.Desired.State, a.Desired.PackageState)
+		desired = fmt.Sprintf(`{"NumberOfInstances":%d,"State":"%s","PackageState":"%s"}`, a.Desired.NumberOfInstances, a.Desired.State, a.Desired.PackageState)
 	} else {
 		desired = "None"
 	}
@@ -81,6 +81,10 @@ func (a *App) LogDescription() map[string]string {
 		"InstanceHeartbeats": "[" + strings.Join(instanceHeartbeats, ",") + "]",
 		"CrashCounts":        "[" + strings.Join(crashCounts, ",") + "]",
 	}
+}
+
+func (a *App) IsStaged() bool {
+	return a.Desired.PackageState == AppPackageStateStaged
 }
 
 func (a *App) IsDesired() bool {
@@ -142,6 +146,46 @@ func (a *App) StartingOrRunningInstancesAtIndex(index int) (instances []Instance
 	}
 
 	return instances
+}
+
+func (a *App) HeartbeatsByIndex() (heartbeatsByIndex map[int][]InstanceHeartbeat) {
+	heartbeatsByIndex = make(map[int][]InstanceHeartbeat)
+
+	for _, heartbeat := range a.InstanceHeartbeats {
+		heartbeatsByIndex[heartbeat.InstanceIndex] = append(heartbeatsByIndex[heartbeat.InstanceIndex], heartbeat)
+	}
+
+	return
+}
+
+func (a *App) EvacuatingInstancesAtIndex(index int) (instances []InstanceHeartbeat) {
+	for _, heartbeat := range a.InstanceHeartbeats {
+		if heartbeat.IsEvacuating() && heartbeat.InstanceIndex == index {
+			instances = append(instances, heartbeat)
+		}
+	}
+
+	return
+}
+
+func (a *App) HasRunningInstanceAtIndex(index int) bool {
+	for _, heartbeat := range a.InstanceHeartbeatsAtIndex(index) {
+		if heartbeat.IsRunning() {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (a *App) HasStartingInstanceAtIndex(index int) bool {
+	for _, heartbeat := range a.InstanceHeartbeatsAtIndex(index) {
+		if heartbeat.IsStarting() {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (a *App) HasStartingOrRunningInstanceAtIndex(index int) bool {
@@ -210,7 +254,7 @@ func (a *App) NumberOfCrashedInstances() (count int) {
 
 func (a *App) NumberOfCrashedIndices() (count int) {
 	a.verifyInstanceHeartbeatsByIndexIsReady()
-	for index, _ := range a.instanceHeartbeatsByIndex {
+	for index := range a.instanceHeartbeatsByIndex {
 		if a.HasCrashedInstanceAtIndex(index) && !a.HasStartingOrRunningInstanceAtIndex(index) {
 			count++
 		}
