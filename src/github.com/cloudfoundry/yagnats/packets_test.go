@@ -66,21 +66,21 @@ func (s *YSuite) TestSubEncodeWithNoQueue(c *C) {
 }
 
 func (s *YSuite) TestPubEncode(c *C) {
-	packet := &PubPacket{Subject: "some.subject", Payload: "sup?"}
+	packet := &PubPacket{Subject: "some.subject", Payload: []byte("sup?")}
 	c.Assert(string(packet.Encode()), Equals, "PUB some.subject 4\r\nsup?\r\n")
 }
 
 func (s *YSuite) TestPubEncodeWithReplyTo(c *C) {
-	packet := &PubPacket{Subject: "some.subject", ReplyTo: "some.reply", Payload: "sup?"}
+	packet := &PubPacket{Subject: "some.subject", ReplyTo: "some.reply", Payload: []byte("sup?")}
 	c.Assert(string(packet.Encode()), Equals, "PUB some.subject some.reply 4\r\nsup?\r\n")
 }
 
 func (s *YSuite) TestMsgEncode(c *C) {
-	packet := &MsgPacket{Subject: "some.subject", SubID: 42, Payload: "sup?"}
+	packet := &MsgPacket{Subject: "some.subject", SubID: 42, Payload: []byte("sup?")}
 	c.Assert(string(packet.Encode()), Equals, "MSG some.subject 42 4\r\nsup?\r\n")
 }
 
 func (s *YSuite) TestMsgEncodeWithReplyTo(c *C) {
-	packet := &MsgPacket{Subject: "some.subject", SubID: 42, ReplyTo: "some.reply", Payload: "sup?"}
+	packet := &MsgPacket{Subject: "some.subject", SubID: 42, ReplyTo: "some.reply", Payload: []byte("sup?")}
 	c.Assert(string(packet.Encode()), Equals, "MSG some.subject 42 some.reply 4\r\nsup?\r\n")
 }

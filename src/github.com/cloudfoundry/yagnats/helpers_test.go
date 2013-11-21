@@ -99,7 +99,7 @@ func waitUntilNatsDown(port int) error {
 type fakeConn struct {
 	ReadBuffer  *bytes.Buffer
 	WriteBuffer *bytes.Buffer
-	WriteChan   chan string
+	WriteChan   chan []byte
 	Closed      bool
 
 	sync.RWMutex
@@ -125,7 +125,7 @@ func (f *fakeConn) Write(b []byte) (n int, err error) {
 	}
 
 	if f.WriteChan != nil {
-		f.WriteChan <- string(b)
+		f.WriteChan <- b
 	}
 
 	return f.WriteBuffer.Write(b)

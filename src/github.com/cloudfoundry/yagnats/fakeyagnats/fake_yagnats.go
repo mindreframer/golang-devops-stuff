@@ -17,6 +17,7 @@ type FakeYagnats struct {
 	SubscribeError   error
 	UnsubscribeError error
 
+	OnPing       func() bool
 	PingResponse bool
 
 	counter int
@@ -47,6 +48,10 @@ func (f *FakeYagnats) Reset() {
 }
 
 func (f *FakeYagnats) Ping() bool {
+	if f.OnPing != nil {
+		return f.OnPing()
+	}
+
 	return f.PingResponse
 }
 
@@ -60,15 +65,15 @@ func (f *FakeYagnats) Disconnect() {
 	return
 }
 
-func (f *FakeYagnats) Publish(subject, payload string) error {
-	return f.PublishWithReplyTo(subject, payload, "")
+func (f *FakeYagnats) Publish(subject string, payload []byte) error {
+	return f.PublishWithReplyTo(subject, "", payload)
 }
 
-func (f *FakeYagnats) PublishWithReplyTo(subject, payload, reply string) error {
+func (f *FakeYagnats) PublishWithReplyTo(subject, reply string, payload []byte) error {
 	message := yagnats.Message{
 		Subject: subject,
-		Payload: payload,
 		ReplyTo: reply,
+		Payload: payload,
 	}
 
 	f.PublishedMessages[subject] = append(f.PublishedMessages[subject], message)

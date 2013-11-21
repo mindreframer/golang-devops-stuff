@@ -81,7 +81,7 @@ var PARSERS = map[string]Parser{
 			Subject: matches[1],
 			SubID:   subID,
 			ReplyTo: matches[4],
-			Payload: string(payload),
+			Payload: payload,
 		}, nil
 	},
 }

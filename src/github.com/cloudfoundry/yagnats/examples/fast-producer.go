@@ -24,7 +24,7 @@ func main() {
 	bigbyte := make([]byte, 512000)
 	go func() {
 		for {
-			client.Publish("foo", string(bigbyte))
+			client.Publish("foo", bigbyte)
 		}
 	}()
 
