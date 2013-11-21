@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -42,7 +43,7 @@ type Server struct {
 	p *os.Process
 }
 
-func (self *Server) WriteData(data interface{}) error {
+func (self *Server) WriteData(data interface{}, extraQueryParams ...string) error {
 	bs := []byte{}
 	switch x := data.(type) {
 	case string:
@@ -55,7 +56,12 @@ func (self *Server) WriteData(data interface{}) error {
 		}
 	}
 
-	resp, err := http.Post("http://localhost:8086/db/db1/series?u=user&p=pass", "application/json", bytes.NewBuffer(bs))
+	extraQueryParam := strings.Join(extraQueryParams, "&")
+	if extraQueryParam != "" {
+		extraQueryParam = "&" + extraQueryParam
+	}
+	resp, err := http.Post(fmt.Sprintf("http://localhost:8086/db/db1/series?u=user&p=pass%s", extraQueryParam),
+		"application/json", bytes.NewBuffer(bs))
 	if err != nil {
 		return err
 	}
@@ -69,6 +75,7 @@ func (self *Server) WriteData(data interface{}) error {
 	}
 	return nil
 }
+
 func (self *Server) RunQuery(query string) ([]byte, error) {
 	encodedQuery := url.QueryEscape(query)
 	resp, err := http.Get(fmt.Sprintf("http://localhost:8086/db/db1/series?u=user&p=pass&q=%s", encodedQuery))
@@ -133,12 +140,12 @@ func (self *IntegrationSuite) createUser() error {
 	return nil
 }
 
-var cleanData = flag.Bool("clean-data", false, "Clean data before running the benchmark tests")
+var noCleanData = flag.Bool("no-clean-data", false, "Clean data before running the benchmark tests")
 var wroteData = true
 
 func (self *IntegrationSuite) SetUpSuite(c *C) {
 
-	if *cleanData {
+	if !*noCleanData {
 		wroteData = false
 		err := os.RemoveAll("/tmp/influxdb")
 		c.Assert(err, IsNil)
@@ -148,7 +155,7 @@ func (self *IntegrationSuite) SetUpSuite(c *C) {
 	err := self.server.start()
 	c.Assert(err, IsNil)
 
-	if *cleanData {
+	if !*noCleanData {
 		err = self.createUser()
 		c.Assert(err, IsNil)
 	}
@@ -209,6 +216,210 @@ func (self *IntegrationSuite) TestWriting(c *C) {
 	self.writeData(c)
 }
 
+func (self *IntegrationSuite) TestMedians(c *C) {
+	for i := 0; i < 3; i++ {
+		err := self.server.WriteData(fmt.Sprintf(`
+[
+  {
+     "name": "test_medians",
+     "columns": ["cpu", "host"],
+     "points": [[%d, "hosta"], [%d, "hostb"]]
+  }
+]
+`, 60+i*10, 70+i*10))
+		c.Assert(err, IsNil)
+		time.Sleep(1 * time.Second)
+	}
+	bs, err := self.server.RunQuery("select median(cpu) from test_medians group by host;")
+	c.Assert(err, IsNil)
+	data := []*h.SerializedSeries{}
+	err = json.Unmarshal(bs, &data)
+	c.Assert(data, HasLen, 1)
+	c.Assert(data[0].Name, Equals, "test_medians")
+	c.Assert(data[0].Columns, HasLen, 3)
+	c.Assert(data[0].Points, HasLen, 2)
+	c.Assert(data[0].Points[0][1], Equals, 80.0)
+	c.Assert(data[0].Points[1][1], Equals, 70.0)
+}
+
+// issue #34
+func (self *IntegrationSuite) TestAscendingQueries(c *C) {
+	err := self.server.WriteData(`
+[
+  {
+     "name": "test_ascending",
+     "columns": ["host"],
+     "points": [["hosta"]]
+  }
+]`)
+	time.Sleep(1 * time.Second)
+	for i := 0; i < 3; i++ {
+		err := self.server.WriteData(fmt.Sprintf(`
+[
+  {
+     "name": "test_ascending",
+     "columns": ["cpu", "host"],
+     "points": [[%d, "hosta"], [%d, "hostb"]]
+  }
+]
+`, 60+i*10, 70+i*10))
+		c.Assert(err, IsNil)
+		time.Sleep(1 * time.Second)
+	}
+	c.Assert(err, IsNil)
+	bs, err := self.server.RunQuery("select host, cpu from test_ascending order asc")
+	c.Assert(err, IsNil)
+	data := []*h.SerializedSeries{}
+	err = json.Unmarshal(bs, &data)
+	c.Assert(data, HasLen, 1)
+	c.Assert(data[0].Name, Equals, "test_ascending")
+	c.Assert(data[0].Columns, HasLen, 4)
+	c.Assert(data[0].Points, HasLen, 7)
+	for i := 1; i < 7; i++ {
+		c.Assert(data[0].Points[i][3], NotNil)
+	}
+}
+
+// issue #55
+func (self *IntegrationSuite) TestFilterWithLimit(c *C) {
+	for i := 0; i < 3; i++ {
+		err := self.server.WriteData(fmt.Sprintf(`
+[
+  {
+     "name": "test_ascending",
+     "columns": ["cpu", "host"],
+     "points": [[%d, "hosta"], [%d, "hostb"]]
+  }
+]
+`, 60+i*10, 70+i*10))
+		c.Assert(err, IsNil)
+		time.Sleep(1 * time.Second)
+	}
+	bs, err := self.server.RunQuery("select host, cpu from test_ascending where host == 'hostb' order asc limit 1")
+	c.Assert(err, IsNil)
+	data := []*h.SerializedSeries{}
+	err = json.Unmarshal(bs, &data)
+	c.Assert(data, HasLen, 1)
+	c.Assert(data[0].Name, Equals, "test_ascending")
+	c.Assert(data[0].Columns, HasLen, 4)
+	c.Assert(data[0].Points, HasLen, 1)
+}
+
+// issue #36
+func (self *IntegrationSuite) TestInnerJoin(c *C) {
+	for i := 0; i < 3; i++ {
+		host := "hosta"
+		if i%2 == 0 {
+			host = "hostb"
+		}
+
+		err := self.server.WriteData(fmt.Sprintf(`
+[
+  {
+     "name": "test_join",
+     "columns": ["cpu", "host"],
+     "points": [[%d, "%s"]]
+  }
+]
+`, 60+i*10, host))
+		c.Assert(err, IsNil)
+		time.Sleep(1 * time.Second)
+	}
+	bs, err := self.server.RunQuery("select * from test_join as f1 inner join test_join as f2 where f1.host == 'hostb'")
+	c.Assert(err, IsNil)
+	data := []*h.SerializedSeries{}
+	err = json.Unmarshal(bs, &data)
+	c.Assert(data, HasLen, 1)
+	c.Assert(data[0].Name, Equals, "f1_join_f2")
+	c.Assert(data[0].Columns, HasLen, 6)
+	c.Assert(data[0].Points, HasLen, 2)
+}
+
+func (self *IntegrationSuite) TestCountWithGroupBy(c *C) {
+	for i := 0; i < 20; i++ {
+		err := self.server.WriteData(fmt.Sprintf(`
+[
+  {
+     "name": "test_count",
+     "columns": ["cpu", "host"],
+     "points": [[%d, "hosta"], [%d, "hostb"]]
+  }
+]
+`, 60+i*10, 70+i*10))
+		c.Assert(err, IsNil)
+		time.Sleep(1 * time.Second)
+	}
+	bs, err := self.server.RunQuery("select count(cpu) from test_count group by host limit 10")
+	c.Assert(err, IsNil)
+	data := []*h.SerializedSeries{}
+	err = json.Unmarshal(bs, &data)
+	c.Assert(data, HasLen, 1)
+	c.Assert(data[0].Name, Equals, "test_count")
+	c.Assert(data[0].Columns, HasLen, 3)
+	c.Assert(data[0].Points, HasLen, 2)
+	// count should be 3
+	c.Assert(data[0].Points[0][1], Equals, 5.0)
+	c.Assert(data[0].Points[1][1], Equals, 5.0)
+}
+
+// test for issue #30
+func (self *IntegrationSuite) TestHttpPostWithTime(c *C) {
+	err := self.server.WriteData(`
+[
+  {
+    "name": "test_post_with_time",
+    "columns": ["time", "val1", "val2"],
+    "points":[[1384118307, "v1", 2]]
+  }
+]`, "time_precision=s")
+	c.Assert(err, IsNil)
+	bs, err := self.server.RunQuery("select * from test_post_with_time where time > now() - 20d")
+	c.Assert(err, IsNil)
+	data := []*h.SerializedSeries{}
+	err = json.Unmarshal(bs, &data)
+	c.Assert(data, HasLen, 1)
+	c.Assert(data[0].Name, Equals, "test_post_with_time")
+	c.Assert(data[0].Columns, HasLen, 4)
+	c.Assert(data[0].Points, HasLen, 1)
+	// count should be 3
+	values := make(map[string]interface{})
+	for idx, value := range data[0].Points[0] {
+		values[data[0].Columns[idx]] = value
+	}
+	c.Assert(values["val1"], Equals, "v1")
+	c.Assert(values["val2"], Equals, 2.0)
+}
+
+// test for issue #41
+func (self *IntegrationSuite) TestDbDelete(c *C) {
+	err := self.server.WriteData(`
+[
+  {
+    "name": "test_deletetions",
+    "columns": ["val1", "val2"],
+    "points":[["v1", 2]]
+  }
+]`, "time_precision=s")
+	c.Assert(err, IsNil)
+	bs, err := self.server.RunQuery("select val1 from test_deletetions")
+	c.Assert(err, IsNil)
+	data := []*h.SerializedSeries{}
+	err = json.Unmarshal(bs, &data)
+	c.Assert(data, HasLen, 1)
+
+	req, err := http.NewRequest("DELETE", "http://localhost:8086/db/db1?u=root&p=root", nil)
+	c.Assert(err, IsNil)
+	resp, err := http.DefaultClient.Do(req)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, http.StatusNoContent)
+	// recreate the database and the user
+	c.Assert(self.createUser(), IsNil)
+
+	// this shouldn't return any data
+	bs, err = self.server.RunQuery("select val1 from test_deletetions")
+	c.Assert(err, ErrorMatches, ".*Field val1 doesn't exist.*")
+}
+
 func (self *IntegrationSuite) TestReading(c *C) {
 	if !*benchmark {
 		c.Skip("Benchmarking is disabled")
@@ -234,7 +445,7 @@ func (self *IntegrationSuite) TestReading(c *C) {
 		c.Assert(err, IsNil)
 
 		c.Assert(data, HasLen, 1)
-		c.Assert(data[0].Columns, HasLen, r[0]+2)                   // time, sequence nuber and the requested columns
+		c.Assert(data[0].Columns, HasLen, r[0]+2)                   // time, sequence number and the requested columns
 		c.Assert(len(data[0].Points), checkers.InRange, r[1], r[2]) // values between 0.5 and 0.65 should be about 100,000
 
 		fmt.Printf("Took %s to execute %s\n", elapsedTime, q)

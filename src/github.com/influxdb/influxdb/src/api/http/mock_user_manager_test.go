@@ -22,15 +22,29 @@ func (self *MockUserManager) AuthenticateDbUser(db, username, password string) (
 	if username == "fail_auth" {
 		return nil, fmt.Errorf("Invalid username/password")
 	}
+
+	if username != "dbuser" {
+		return nil, fmt.Errorf("Invalid username/password")
+	}
+
 	return nil, nil
 }
 func (self *MockUserManager) AuthenticateClusterAdmin(username, password string) (common.User, error) {
 	if username == "fail_auth" {
 		return nil, fmt.Errorf("Invalid username/password")
 	}
+
+	if username != "root" {
+		return nil, fmt.Errorf("Invalid username/password")
+	}
+
 	return nil, nil
 }
 func (self *MockUserManager) CreateClusterAdminUser(request common.User, username string) error {
+	if username == "" {
+		return fmt.Errorf("Invalid empty username")
+	}
+
 	self.ops = append(self.ops, &Operation{"cluster_admin_add", username, "", false})
 	return nil
 }
@@ -43,6 +57,10 @@ func (self *MockUserManager) ChangeClusterAdminPassword(requester common.User, u
 	return nil
 }
 func (self *MockUserManager) CreateDbUser(request common.User, db, username string) error {
+	if username == "" {
+		return fmt.Errorf("Invalid empty username")
+	}
+
 	self.ops = append(self.ops, &Operation{"db_user_add", username, "", false})
 	return nil
 }

@@ -39,6 +39,7 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
   value_array*          value_array;
   value*                v;
   from_clause*          from_clause;
+  query*                query;
   struct {
     int limit;
     char ascending;
@@ -59,10 +60,11 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
 %lex-param   {void *scanner}
 
 // define types of tokens (terminals)
-%token          SELECT FROM WHERE EQUAL GROUP BY FIRST LAST LIMIT ORDER ASC DESC MERGE INNER JOIN
-%token <string> STRING_VALUE INT_VALUE FLOAT_VALUE TABLE_NAME SIMPLE_NAME REGEX_OP REGEX_STRING INSENSITIVE_REGEX_STRING DURATION
+%token          SELECT FROM WHERE EQUAL GROUP BY LIMIT ORDER ASC DESC MERGE INNER JOIN AS
+%token <string> STRING_VALUE INT_VALUE FLOAT_VALUE TABLE_NAME SIMPLE_NAME REGEX_OP
+%token <string>  NEGATION_REGEX_OP REGEX_STRING INSENSITIVE_REGEX_STRING DURATION
 
-// define the precendence of these operators
+// define the precedence of these operators
 %left  OR
 %left  AND
 %nonassoc <string> OPERATION_EQUAL OPERATION_NE OPERATION_GT OPERATION_LT OPERATION_LE OPERATION_GE
@@ -73,7 +75,7 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
 %type <from_clause>     FROM_CLAUSE
 %type <condition>       WHERE_CLAUSE
 %type <value_array>     COLUMN_NAMES
-%type <string>          BOOL_OPERATION
+%type <string>          BOOL_OPERATION ALIAS_CLAUSE
 %type <condition>       CONDITION
 %type <bool_expression> BOOL_EXPRESSION
 %type <value_array>     VALUES
@@ -84,9 +86,10 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
 %type <integer>         LIMIT_CLAUSE
 %type <character>       ORDER_CLAUSE
 %type <limit_and_order> LIMIT_AND_ORDER_CLAUSES
+%type <query>           QUERY
 
 // the initial token
-%start                  QUERY
+%start                  QUERIES
 
 // destructors are used to free up memory in case of an error
 %destructor { free_value($$); } <v>
@@ -95,28 +98,50 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
 %destructor { free($$); } <string>
 %destructor { free_expression($$); } <expression>
 %destructor { if ($$) free_value_array($$); } <value_array>
+%destructor { close_query($$); free($$); } <query>
 
 // grammar
 %%
-QUERY:
-        SELECT COLUMN_NAMES FROM_CLAUSE GROUP_BY_CLAUSE WHERE_CLAUSE LIMIT_AND_ORDER_CLAUSES ';'
+QUERIES:
+        QUERY
         {
-          q->c = $2;
-          q->from_clause = $3;
-          q->group_by = $4;
-          q->where_condition = $5;
-          q->limit = $6.limit;
-          q->ascending = $6.ascending;
+          *q = *$1;
+          free($1);
         }
         |
-        SELECT COLUMN_NAMES FROM_CLAUSE WHERE_CLAUSE GROUP_BY_CLAUSE LIMIT_AND_ORDER_CLAUSES ';'
+        QUERY ';'
         {
-          q->c = $2;
-          q->from_clause = $3;
-          q->where_condition = $4;
-          q->group_by = $5;
-          q->limit = $6.limit;
-          q->ascending = $6.ascending;
+          *q = *$1;
+          free($1);
+        }
+        |
+        QUERY ';' QUERIES
+        {
+          *q = *$1;
+          free($1);
+        }
+
+QUERY:
+        SELECT COLUMN_NAMES FROM_CLAUSE GROUP_BY_CLAUSE WHERE_CLAUSE LIMIT_AND_ORDER_CLAUSES
+        {
+          $$ = calloc(1, sizeof(query));
+          $$->c = $2;
+          $$->from_clause = $3;
+          $$->group_by = $4;
+          $$->where_condition = $5;
+          $$->limit = $6.limit;
+          $$->ascending = $6.ascending;
+        }
+        |
+        SELECT COLUMN_NAMES FROM_CLAUSE WHERE_CLAUSE GROUP_BY_CLAUSE LIMIT_AND_ORDER_CLAUSES
+        {
+          $$ = calloc(1, sizeof(query));
+          $$->c = $2;
+          $$->from_clause = $3;
+          $$->where_condition = $4;
+          $$->group_by = $5;
+          $$->limit = $6.limit;
+          $$->ascending = $6.ascending;
         }
 
 LIMIT_AND_ORDER_CLAUSES:
@@ -155,7 +180,7 @@ LIMIT_CLAUSE:
         }
         |
         {
-          $$ = 0;
+          $$ = -1;
         }
 
 VALUES:
@@ -189,36 +214,69 @@ GROUP_BY_CLAUSE:
 COLUMN_NAMES:
         VALUES
 
+ALIAS_CLAUSE:
+        AS SIMPLE_TABLE_VALUE
+        {
+          $$ = $2->name;
+          free($2);
+        }
+        |
+        {
+          $$ = NULL;
+        }
+
 FROM_CLAUSE:
         FROM TABLE_VALUE
         {
           $$ = malloc(sizeof(from_clause));
-          $$->names = malloc(sizeof(value_array));
-          $$->names->elems = malloc(sizeof(value*));
+          $$->names = malloc(sizeof(table_name_array));
+          $$->names->elems = malloc(sizeof(table_name*));
           $$->names->size = 1;
-          $$->names->elems[0] = $2;
+          $$->names->elems[0] = malloc(sizeof(table_name));
+          $$->names->elems[0]->name = $2;
+          $$->names->elems[0]->alias = NULL;
+          $$->from_clause_type = FROM_ARRAY;
+        }
+        |
+        FROM SIMPLE_TABLE_VALUE
+        {
+          $$ = malloc(sizeof(from_clause));
+          $$->names = malloc(sizeof(table_name_array));
+          $$->names->elems = malloc(sizeof(table_name*));
+          $$->names->size = 1;
+          $$->names->elems[0] = malloc(sizeof(table_name));
+          $$->names->elems[0]->name = $2;
+          $$->names->elems[0]->alias = NULL;
           $$->from_clause_type = FROM_ARRAY;
         }
         |
         FROM SIMPLE_TABLE_VALUE MERGE SIMPLE_TABLE_VALUE
         {
           $$ = malloc(sizeof(from_clause));
-          $$->names = malloc(sizeof(value_array));
-          $$->names->elems = malloc(2 * sizeof(value*));
+          $$->names = malloc(sizeof(table_name_array));
+          $$->names->elems = malloc(2 * sizeof(table_name*));
           $$->names->size = 2;
-          $$->names->elems[0] = $2;
-          $$->names->elems[1] = $4;
+          $$->names->elems[0] = malloc(sizeof(table_name));
+          $$->names->elems[0]->name = $2;
+          $$->names->elems[0]->alias = NULL;
+          $$->names->elems[1] = malloc(sizeof(table_name));
+          $$->names->elems[1]->name = $4;
+          $$->names->elems[1]->alias = NULL;
           $$->from_clause_type = FROM_MERGE;
         }
         |
-        FROM SIMPLE_TABLE_VALUE INNER JOIN SIMPLE_TABLE_VALUE
+        FROM SIMPLE_TABLE_VALUE ALIAS_CLAUSE INNER JOIN SIMPLE_TABLE_VALUE ALIAS_CLAUSE
         {
           $$ = malloc(sizeof(from_clause));
-          $$->names = malloc(sizeof(value_array));
+          $$->names = malloc(sizeof(table_name_array));
           $$->names->elems = malloc(2 * sizeof(value*));
           $$->names->size = 2;
-          $$->names->elems[0] = $2;
-          $$->names->elems[1] = $5;
+          $$->names->elems[0] = malloc(sizeof(table_name));
+          $$->names->elems[0]->name = $2;
+          $$->names->elems[0]->alias = $3;
+          $$->names->elems[1] = malloc(sizeof(table_name));
+          $$->names->elems[1]->name = $6;
+          $$->names->elems[1]->alias = $7;
           $$->from_clause_type = FROM_INNER_JOIN;
         }
 
@@ -361,6 +419,17 @@ BOOL_EXPRESSION:
           $$->right->op = '\0';
           $$->right->right = NULL;
         }
+        |
+        EXPRESSION NEGATION_REGEX_OP REGEX_VALUE
+        {
+          $$ = malloc(sizeof(bool_expression));
+          $$->left = $1;
+          $$->op = $2;
+          $$->right = malloc(sizeof(expression));
+          $$->right->left = $3;
+          $$->right->op = '\0';
+          $$->right->right = NULL;
+        }
 
 CONDITION:
         BOOL_EXPRESSION
@@ -415,8 +484,7 @@ void yy_delete_buffer(void *, void *);
 query
 parse_query(char *const query_s)
 {
-  query q;
-  q.error = NULL;
+  query q = {NULL, NULL, NULL, NULL, NULL};
   /* yydebug = 1; */
   void *scanner;
   yylex_init(&scanner);

@@ -25,10 +25,9 @@ static int yycolumn = 1;
 "merge"                   { return MERGE; }
 "inner"                   { return INNER; }
 "join"                    { return JOIN; }
-"first"                   { return FIRST; }
-"last"                    { return LAST; }
 "from"                    { return FROM; }
 "where"                   { return WHERE; }
+"as"                      { return AS; }
 "select"                  { return SELECT; }
 "limit"                   { return LIMIT; }
 "order"                   { return ORDER; }
@@ -45,7 +44,8 @@ static int yycolumn = 1;
 "and"                     { return AND; }
 "or"                      { return OR; }
 "=="                      { yylval->string = strdup(yytext); return OPERATION_EQUAL; }
-"~="                      { yylval->string = strdup(yytext); return REGEX_OP; }
+"=~"                      { yylval->string = strdup(yytext); return REGEX_OP; }
+"!~"                      { yylval->string = strdup(yytext); return NEGATION_REGEX_OP; }
 "!="                      { yylval->string = strdup(yytext); return OPERATION_NE; }
 "<"                       { yylval->string = strdup(yytext); return OPERATION_LT; }
 ">"                       { yylval->string = strdup(yytext); return OPERATION_GT; }

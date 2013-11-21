@@ -4,6 +4,7 @@ import (
 	. "checkers"
 	"common"
 	"encoding/json"
+	"fmt"
 	. "launchpad.net/gocheck"
 	"os"
 	"parser"
@@ -66,6 +67,128 @@ func executeQuery(user common.User, database, query string, db Datastore, c *C) 
 	return resultSeries
 }
 
+func (self *DatastoreSuite) TestPropagateErrorsProperly(c *C) {
+	cleanup(nil)
+	db := newDatastore(c)
+	defer cleanup(db)
+	mock := `
+  {
+    "points": [
+      {
+        "values": [
+          {
+            "int64_value": 3
+          }
+        ],
+        "sequence_number": 1
+      }
+    ],
+    "name": "foo",
+    "fields": ["value"]
+  }`
+	pointTime := time.Now().Unix()
+	series := stringToSeries(mock, pointTime, c)
+	err := db.WriteSeriesData("test", series)
+	c.Assert(err, IsNil)
+	q, err := parser.ParseQuery("select value from foo;")
+	c.Assert(err, IsNil)
+	yield := func(series *protocol.Series) error {
+		return fmt.Errorf("Whatever")
+	}
+	user := &MockUser{}
+	err = db.ExecuteQuery(user, "test", q, yield)
+	c.Assert(err, ErrorMatches, "Whatever")
+}
+
+func (self *DatastoreSuite) TestDeletingData(c *C) {
+	cleanup(nil)
+	db := newDatastore(c)
+	defer cleanup(db)
+	mock := `
+  {
+    "points": [
+      {
+        "values": [
+          {
+            "int64_value": 3
+          }
+        ],
+        "sequence_number": 1
+      }
+    ],
+    "name": "foo",
+    "fields": ["value"]
+  }`
+	pointTime := time.Now().Unix()
+	series := stringToSeries(mock, pointTime, c)
+	err := db.WriteSeriesData("test", series)
+	c.Assert(err, IsNil)
+	q, err := parser.ParseQuery("select value from foo;")
+	c.Assert(err, IsNil)
+	yield := func(series *protocol.Series) error {
+		if len(series.Points) > 0 {
+			panic("Series contains points")
+		}
+		return nil
+	}
+	c.Assert(db.DropDatabase("test"), IsNil)
+	user := &MockUser{}
+	err = db.ExecuteQuery(user, "test", q, yield)
+	c.Assert(err, ErrorMatches, ".*Field value doesn't exist.*")
+}
+
+func (self *DatastoreSuite) TestCanWriteAndRetrievePointsWithAlias(c *C) {
+	cleanup(nil)
+	db := newDatastore(c)
+	defer cleanup(db)
+	mock := `
+  {
+    "points": [
+      {
+        "values": [
+          {
+            "int64_value": 3
+          }
+        ],
+        "sequence_number": 1
+      },
+      {
+        "values": [
+          {
+            "int64_value": 2
+          }
+        ],
+        "sequence_number": 2
+      }
+    ],
+    "name": "foo",
+    "fields": ["value"]
+  }`
+	pointTime := time.Now().Unix()
+	series := stringToSeries(mock, pointTime, c)
+	err := db.WriteSeriesData("test", series)
+	c.Assert(err, IsNil)
+	q, errQ := parser.ParseQuery("select * from foo as f1 inner join foo as f2;")
+	c.Assert(errQ, IsNil)
+	resultSeries := map[string][]*protocol.Series{}
+	yield := func(series *protocol.Series) error {
+		resultSeries[*series.Name] = append(resultSeries[*series.Name], series)
+		return nil
+	}
+	user := &MockUser{}
+	err = db.ExecuteQuery(user, "test", q, yield)
+	c.Assert(err, IsNil)
+	// we should get the actual data and the end of series data
+	// indicator , i.e. a series with no points
+	c.Assert(resultSeries, HasLen, 2)
+	c.Assert(resultSeries["f1"], HasLen, 2)
+	c.Assert(resultSeries["f1"][0].Points, HasLen, 2)
+	c.Assert(resultSeries["f1"][1].Points, HasLen, 0)
+	c.Assert(resultSeries["f2"], HasLen, 2)
+	c.Assert(resultSeries["f2"][0].Points, HasLen, 2)
+	c.Assert(resultSeries["f2"][1].Points, HasLen, 0)
+}
+
 func (self *DatastoreSuite) TestCanWriteAndRetrievePoints(c *C) {
 	cleanup(nil)
 	db := newDatastore(c)
@@ -119,6 +242,7 @@ func (self *DatastoreSuite) TestCanWriteAndRetrievePoints(c *C) {
 	c.Assert(*resultSeries[0].Points[0].Values[0].Int64Value, Equals, int64(2))
 	c.Assert(*resultSeries[0].Points[1].Values[0].Int64Value, Equals, int64(3))
 	c.Assert(resultSeries[1].Points, HasLen, 0)
+	c.Assert(resultSeries[1].Fields, HasLen, 1)
 	c.Assert(resultSeries, Not(DeepEquals), series)
 }
 
@@ -386,6 +510,7 @@ func (self *DatastoreSuite) TestReturnsResultsInAscendingOrder(c *C) {
 	c.Assert(err, IsNil)
 	user := &MockUser{}
 	results := executeQuery(user, "foobar", "select name from user_things order asc;", db, c)
+	c.Assert(results, HasLen, 1)
 	c.Assert(results[0], DeepEquals, series)
 
 	mock = `{
@@ -405,6 +530,76 @@ func (self *DatastoreSuite) TestReturnsResultsInAscendingOrder(c *C) {
 
 	results = executeQuery(user, "foobar", "select name from user_things where time < now() - 30s order asc;", db, c)
 	c.Assert(results[0], DeepEquals, series)
+}
+
+func (self *DatastoreSuite) TestReturnsResultsInAscendingOrderWithNulls(c *C) {
+	cleanup(nil)
+	db := newDatastore(c)
+	defer cleanup(db)
+
+	minuteAgo := time.Now().Add(-time.Minute).Unix()
+	mock := `{
+    "points":[
+      {"values":[null, {"string_value": "dix"}],"sequence_number":1},
+      {"values":[{"string_value":"todd"}, {"string_value": "persen"}],"sequence_number":2}],
+      "name":"user_things",
+      "fields":["first_name", "last_name"]
+    }`
+	series := stringToSeries(mock, minuteAgo, c)
+	err := db.WriteSeriesData("foobar", series)
+	c.Assert(err, IsNil)
+	user := &MockUser{}
+	results := executeQuery(user, "foobar", "select first_name, last_name from user_things order asc;", db, c)
+	c.Assert(results, HasLen, 1)
+	c.Assert(results[0], DeepEquals, series)
+}
+
+func (self *DatastoreSuite) TestNullValues(c *C) {
+	cleanup(nil)
+	db := newDatastore(c)
+	defer cleanup(db)
+
+	minuteAgo := time.Now().Add(-time.Minute).Unix()
+	mock := `{
+    "points":[
+      {"values":[null, {"string_value": "dix"}],"sequence_number":1},
+      {"values":[{"string_value": "dix"}, null],"sequence_number":2},
+      {"values":[null, {"string_value": "dix"}],"sequence_number":3},
+      {"values":[{"string_value":"todd"}, null],"sequence_number":4}],
+      "name":"user_things",
+      "fields":["first_name", "last_name"]
+    }`
+	series := stringToSeries(mock, minuteAgo, c)
+	err := db.WriteSeriesData("foobar", series)
+	c.Assert(err, IsNil)
+	user := &MockUser{}
+	results := executeQuery(user, "foobar", "select * from user_things", db, c)
+	c.Assert(results, HasLen, 1)
+	c.Assert(results[0].Points, HasLen, 4)
+}
+
+func (self *DatastoreSuite) TestLimitShouldLimitPointsThatMatchTheFilter(c *C) {
+	cleanup(nil)
+	db := newDatastore(c)
+	defer cleanup(db)
+
+	minuteAgo := time.Now().Add(-time.Minute).Unix()
+	mock := `{
+    "points":[
+      {"values":[{"string_value": "paul"}, {"string_value": "dix"}],"sequence_number":1},
+      {"values":[{"string_value":"todd"}, {"string_value": "persen"}],"sequence_number":2}],
+      "name":"user_things",
+      "fields":["first_name", "last_name"]
+    }`
+	series := stringToSeries(mock, minuteAgo, c)
+	err := db.WriteSeriesData("foobar", series)
+	c.Assert(err, IsNil)
+	user := &MockUser{}
+	results := executeQuery(user, "foobar", "select last_name from user_things where first_name == 'paul' limit 1", db, c)
+	c.Assert(results, HasLen, 1)
+	c.Assert(results[0].Points, HasLen, 1)
+	c.Assert(results[0].Points[0].Values, HasLen, 1)
+	c.Assert(*results[0].Points[0].Values[0].StringValue, Equals, "dix")
 }
 
 func (self *DatastoreSuite) TestCanDeleteARangeOfData(c *C) {
@@ -582,7 +777,7 @@ func (self *DatastoreSuite) TestBreaksLargeResultsIntoMultipleBatches(c *C) {
 		c.Assert(err, IsNil)
 	}
 
-	q, errQ := parser.ParseQuery("select * from user_things;")
+	q, errQ := parser.ParseQuery("select * from user_things limit 0;")
 	c.Assert(errQ, IsNil)
 	resultSeries := make([]*protocol.Series, 0)
 	yield := func(series *protocol.Series) error {

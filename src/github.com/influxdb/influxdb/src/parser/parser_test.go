@@ -23,26 +23,32 @@ func ToValueArray(strings ...string) (values []*Value) {
 }
 
 func (self *QueryParserSuite) TestParseBasicSelectQuery(c *C) {
-	q, err := ParseQuery("select value from t where c == '5';")
-	c.Assert(err, IsNil)
+	for _, query := range []string{
+		"select value from t where c == '5';",
+		// semicolon is optional
+		"select value from t where c == '5'",
+	} {
+		q, err := ParseQuery(query)
+		c.Assert(err, IsNil)
 
-	c.Assert(q.Limit, Equals, 0)
+		c.Assert(q.GetQueryString(), Equals, query)
 
-	c.Assert(q.GetColumnNames(), DeepEquals, ToValueArray("value"))
-	w := q.GetWhereCondition()
+		c.Assert(q.GetColumnNames(), DeepEquals, ToValueArray("value"))
+		w := q.GetWhereCondition()
 
-	boolExpression, ok := w.GetBoolExpression()
-	c.Assert(ok, Equals, true)
+		boolExpression, ok := w.GetBoolExpression()
+		c.Assert(ok, Equals, true)
 
-	leftExpression := boolExpression.Left
-	rightExpression := boolExpression.Right
+		leftExpression := boolExpression.Left
+		rightExpression := boolExpression.Right
 
-	leftValue, ok := leftExpression.GetLeftValue() // simple value is an expression with one value, e.g. it doesn't combine value using arithmetic operations
-	rightValue, ok := rightExpression.GetLeftValue()
+		leftValue, ok := leftExpression.GetLeftValue() // simple value is an expression with one value, e.g. it doesn't combine value using arithmetic operations
+		rightValue, ok := rightExpression.GetLeftValue()
 
-	c.Assert(leftValue.Name, Equals, "c")
-	c.Assert(boolExpression.Operation, Equals, "==")
-	c.Assert(rightValue.Name, Equals, "5")
+		c.Assert(leftValue.Name, Equals, "c")
+		c.Assert(boolExpression.Operation, Equals, "==")
+		c.Assert(rightValue.Name, Equals, "5")
+	}
 }
 
 func (self *QueryParserSuite) TestSimpleFromClause(c *C) {
@@ -52,7 +58,7 @@ func (self *QueryParserSuite) TestSimpleFromClause(c *C) {
 	fromClause := q.GetFromClause()
 	c.Assert(fromClause.Type, Equals, FromClauseArray)
 	c.Assert(fromClause.Names, HasLen, 1)
-	c.Assert(fromClause.Names[0].Name, Equals, "t")
+	c.Assert(fromClause.Names[0].Name.Name, Equals, "t")
 }
 
 func (self *QueryParserSuite) TestParseFromWithMergedTable(c *C) {
@@ -61,8 +67,17 @@ func (self *QueryParserSuite) TestParseFromWithMergedTable(c *C) {
 	fromClause := q.GetFromClause()
 	c.Assert(fromClause.Type, Equals, FromClauseMerge)
 	c.Assert(fromClause.Names, HasLen, 2)
-	c.Assert(fromClause.Names[0].Name, Equals, "newsletter.signups")
-	c.Assert(fromClause.Names[1].Name, Equals, "user.signups")
+	c.Assert(fromClause.Names[0].Name.Name, Equals, "newsletter.signups")
+	c.Assert(fromClause.Names[1].Name.Name, Equals, "user.signups")
+}
+
+func (self *QueryParserSuite) TestMultipleAggregateFunctions(c *C) {
+	q, err := ParseQuery("select first(bar), last(bar) from foo")
+	c.Assert(err, IsNil)
+	columns := q.GetColumnNames()
+	c.Assert(columns, HasLen, 2)
+	c.Assert(columns[0].Name, Equals, "first")
+	c.Assert(columns[1].Name, Equals, "last")
 }
 
 func (self *QueryParserSuite) TestParseFromWithJoinedTable(c *C) {
@@ -71,8 +86,8 @@ func (self *QueryParserSuite) TestParseFromWithJoinedTable(c *C) {
 	fromClause := q.GetFromClause()
 	c.Assert(fromClause.Type, Equals, FromClauseInnerJoin)
 	c.Assert(fromClause.Names, HasLen, 2)
-	c.Assert(fromClause.Names[0].Name, Equals, "newsletter.signups")
-	c.Assert(fromClause.Names[1].Name, Equals, "user.signups")
+	c.Assert(fromClause.Names[0].Name.Name, Equals, "newsletter.signups")
+	c.Assert(fromClause.Names[1].Name.Name, Equals, "user.signups")
 }
 
 func (self *QueryParserSuite) TestParseSelectWithInsensitiveRegexTables(c *C) {
@@ -82,9 +97,9 @@ func (self *QueryParserSuite) TestParseSelectWithInsensitiveRegexTables(c *C) {
 	fromClause := q.GetFromClause()
 	c.Assert(fromClause.Type, Equals, FromClauseArray)
 	c.Assert(fromClause.Names, HasLen, 1)
-	c.Assert(fromClause.Names[0].Name, Equals, "users.*")
-	c.Assert(fromClause.Names[0].Type, Equals, ValueRegex)
-	c.Assert(fromClause.Names[0].IsCaseInsensitive, Equals, true)
+	c.Assert(fromClause.Names[0].Name.Name, Equals, "users.*")
+	c.Assert(fromClause.Names[0].Name.Type, Equals, ValueRegex)
+	c.Assert(fromClause.Names[0].Name.IsCaseInsensitive, Equals, true)
 }
 
 func (self *QueryParserSuite) TestParseSelectWithRegexTables(c *C) {
@@ -94,16 +109,14 @@ func (self *QueryParserSuite) TestParseSelectWithRegexTables(c *C) {
 	fromClause := q.GetFromClause()
 	c.Assert(fromClause.Type, Equals, FromClauseArray)
 	c.Assert(fromClause.Names, HasLen, 1)
-	c.Assert(fromClause.Names[0].Name, Equals, "users.*")
-	c.Assert(fromClause.Names[0].Type, Equals, ValueRegex)
-	c.Assert(fromClause.Names[0].IsCaseInsensitive, Equals, false)
+	c.Assert(fromClause.Names[0].Name.Name, Equals, "users.*")
+	c.Assert(fromClause.Names[0].Name.Type, Equals, ValueRegex)
+	c.Assert(fromClause.Names[0].Name.IsCaseInsensitive, Equals, false)
 }
 
 func (self *QueryParserSuite) TestMergeFromClause(c *C) {
 	q, err := ParseQuery("select value from t1 merge t2 where c == '5';")
 	c.Assert(err, IsNil)
-
-	c.Assert(q.Limit, Equals, 0)
 
 	c.Assert(q.GetColumnNames(), DeepEquals, ToValueArray("value"))
 	w := q.GetWhereCondition()
@@ -293,7 +306,7 @@ func (self *QueryParserSuite) TestParseWhereClausePrecedence(c *C) {
 	c.Assert(rightExpression.Right.Left, DeepEquals, &Value{"10.0", ValueFloat, false, nil, nil})
 }
 
-func (self *QueryParserSuite) TestParseWhereClauseParantheses(c *C) {
+func (self *QueryParserSuite) TestParseWhereClauseParentheses(c *C) {
 	q, err := ParseQuery("select value from cpu.idle where value > 90 and (other_value > 10 or value > 80) and other_value > 20;")
 	c.Assert(err, IsNil)
 
@@ -316,7 +329,6 @@ func (self *QueryParserSuite) TestParseSelectWithOrderByAndLimit(c *C) {
 
 	q, err = ParseQuery("select value from t order desc;")
 	c.Assert(err, IsNil)
-	c.Assert(q.Limit, Equals, 0)
 	c.Assert(q.Ascending, Equals, false)
 
 	q, err = ParseQuery("select value from t limit 20;")
@@ -349,19 +361,19 @@ func (self *QueryParserSuite) TestParseFromWithNestedFunctions2(c *C) {
 }
 
 func (self *QueryParserSuite) TestParseSelectWithInvalidRegex(c *C) {
-	_, err := ParseQuery("select email from users.events where email ~= /[/i and time>now()-2d;")
+	_, err := ParseQuery("select email from users.events where email =~ /[/i and time>now()-2d;")
 	c.Assert(err, ErrorMatches, ".*missing closing.*")
 }
 
 func (self *QueryParserSuite) TestParseSelectWithRegexCondition(c *C) {
-	q, err := ParseQuery("select email from users.events where email ~= /gmail\\.com/i and time>now()-2d;")
+	q, err := ParseQuery("select email from users.events where email =~ /gmail\\.com/i and time>now()-2d;")
 	c.Assert(err, IsNil)
 	w := q.GetWhereCondition()
 
 	// note: conditions that involve time are removed after the query is parsed
 	regexExpression, _ := w.GetBoolExpression()
 	c.Assert(regexExpression.Left.Left, DeepEquals, &Value{"email", ValueSimpleName, false, nil, nil})
-	c.Assert(regexExpression.Operation, Equals, "~=")
+	c.Assert(regexExpression.Operation, Equals, "=~")
 	expr, ok := regexExpression.Right.GetLeftValue()
 	c.Assert(ok, Equals, true)
 	c.Assert(expr.Type, Equals, ValueRegex)

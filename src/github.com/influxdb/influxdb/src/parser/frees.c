@@ -10,10 +10,26 @@ free_array(array *array)
   free(array->elems);
   free(array);
 }
+void free_table_name(table_name *name)
+{
+  free_value(name->name);
+  free(name->alias);
+  free(name);
+}
+void
+free_table_name_array(table_name_array *array)
+{
+  int i;
+  for (i = 0; i < array->size; i++)
+    free_table_name(array->elems[i]);
+  free(array->elems);
+  free(array);
+}
+
 void
 free_from_clause(from_clause *f)
 {
-  free_value_array(f->names);
+  free_table_name_array(f->names);
   free(f);
 }
 
@@ -78,13 +94,14 @@ free_error (error *error)
 void
 close_query (query *q)
 {
-  if (q->error) {
+   if (q->error) {
     free_error(q->error);
-    return;
-  }
+   }
 
-  // free the columns
-  free_value_array(q->c);
+  if (q->c) {
+    // free the columns
+    free_value_array(q->c);
+  }
 
   if (q->where_condition) {
     free_condition(q->where_condition);
@@ -94,6 +111,8 @@ close_query (query *q)
     free_value_array(q->group_by);
   }
 
-  // free the from clause
-  free_from_clause(q->from_clause);
+  if (q->from_clause) {
+    // free the from clause
+    free_from_clause(q->from_clause);
+  }
 }
