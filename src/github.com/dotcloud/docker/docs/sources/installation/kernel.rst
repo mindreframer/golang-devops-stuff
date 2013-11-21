@@ -25,6 +25,7 @@ If you cannot or do not want to use the "official" kernels,
 here is some technical background about the features (both optional and
 mandatory) that docker needs to run successfully.
 
+
 Linux version 3.8 or above
 --------------------------
 
@@ -38,6 +39,15 @@ The symptoms include:
   ``d_hash_and_lookup``;
 - kernel crash causing the machine to freeze for a few minutes, or even
   completely.
+
+Additionally, kernels prior 3.4 did not implement ``reboot_pid_ns``,
+which means that the ``reboot()`` syscall could reboot the host machine,
+instead of terminating the container. To work around that problem,
+LXC userland tools (since version 0.8) automatically drop the ``SYS_BOOT``
+capability when necessary. Still, if you run a pre-3.4 kernel with pre-0.8
+LXC tools, be aware that containers can reboot the whole host! This is
+not something that Docker wants to address in the short term, since you
+shouldn't use kernels prior 3.8 with Docker anyway.
 
 While it is still possible to use older kernels for development, it is
 really not advised to do so.
@@ -69,7 +79,7 @@ to run LXC containers. Note that 2.6.32 has some documented issues regarding
 network namespace setup and teardown; those issues are not a risk if you
 run containers in a private environment, but can lead to denial-of-service
 attacks if you want to run untrusted code in your containers. For more details,
-see `[LP#720095 <https://bugs.launchpad.net/ubuntu/+source/linux/+bug/720095>`_.
+see `LP#720095 <https://bugs.launchpad.net/ubuntu/+source/linux/+bug/720095>`_.
 
 Kernels 2.6.38, and every version since 3.2, have been deployed successfully
 to run containerized production workloads. Feature-wise, there is no huge

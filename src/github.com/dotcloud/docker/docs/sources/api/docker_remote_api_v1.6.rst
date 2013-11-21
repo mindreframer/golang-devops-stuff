@@ -121,8 +121,7 @@ Create a container
 		"AttachStdin":false,
 		"AttachStdout":true,
 		"AttachStderr":true,
-		"PortSpecs":null,
-		"Privileged": false,
+		"ExposedPorts":{},
 		"Tty":false,
 		"OpenStdin":false,
 		"StdinOnce":false,
@@ -135,7 +134,6 @@ Create a container
 		"Volumes":{},
 		"VolumesFrom":"",
 		"WorkingDir":""
-
 	   }
 	   
 	**Example response**:
@@ -151,10 +149,62 @@ Create a container
 	   }
 	
 	:jsonparam config: the container's configuration
+ 	:query name: container name to use
 	:statuscode 201: no error
 	:statuscode 404: no such container
 	:statuscode 406: impossible to attach (container not running)
 	:statuscode 500: server error
+
+	**More Complex Example request, in 2 steps.**
+	**First, use create to expose a Private Port, which can be bound back to a Public Port at startup**:
+
+	.. sourcecode:: http
+
+	   POST /containers/create HTTP/1.1
+	   Content-Type: application/json
+
+	   {
+		"Cmd":[
+			"/usr/sbin/sshd","-D"
+		],
+		"Image":"image-with-sshd",
+		"ExposedPorts":{"22/tcp":{}}
+		}
+
+	**Example response**:
+
+	.. sourcecode:: http
+
+	   HTTP/1.1 201 OK
+	   Content-Type: application/json
+
+	   {
+		"Id":"e90e34656806"
+		"Warnings":[]
+	   }
+
+	**Second, start (using the ID returned above) the image we just created, mapping the ssh port 22 to something on the host**:
+
+	.. sourcecode:: http
+
+	   POST /containers/e90e34656806/start HTTP/1.1
+	   Content-Type: application/json
+
+	   {
+		"PortBindings": { "22/tcp": [{ "HostPort": "11022" }]} 
+		}
+
+	**Example response**:
+
+	.. sourcecode:: http
+
+		HTTP/1.1 204 No Content
+		Content-Type: text/plain; charset=utf-8
+		Content-Length: 0
+
+	**Now you can ssh into your new container on port 11022.**
+
+
 
 
 Inspect a container
@@ -190,7 +240,7 @@ Inspect a container
 				"AttachStdin": false,
 				"AttachStdout": true,
 				"AttachStderr": true,
-				"PortSpecs": null,
+				"ExposedPorts": {},
 				"Tty": false,
 				"OpenStdin": false,
 				"StdinOnce": false,
@@ -361,7 +411,12 @@ Start a container
 
            {
                 "Binds":["/tmp:/tmp"],
-                "LxcConf":{"lxc.utsname":"docker"}
+                "LxcConf":{"lxc.utsname":"docker"},
+                "ContainerIDFile": "",
+                "Privileged": false,
+                "PortBindings": {"22/tcp": [{HostIp:"", HostPort:""}]},
+                "Links": [],
+                "PublishAllPorts": false
            }
 
         **Example response**:
@@ -794,7 +849,7 @@ Inspect an image
 				"AttachStdin":false,
 				"AttachStdout":false,
 				"AttachStderr":false,
-				"PortSpecs":null,
+				"ExposedPorts":{},
 				"Tty":true,
 				"OpenStdin":true,
 				"StdinOnce":false,
@@ -994,36 +1049,36 @@ Build an image from Dockerfile via stdin
 
 .. http:post:: /build
 
-   Build an image from Dockerfile via stdin
+    Build an image from Dockerfile via stdin
 
-   **Example request**:
+    **Example request**:
 
-   .. sourcecode:: http
+    .. sourcecode:: http
 
-      POST /build HTTP/1.1
+        POST /build HTTP/1.1
 
-      {{ STREAM }}
+        {{ STREAM }}
 
-   **Example response**:
+    **Example response**:
 
-   .. sourcecode:: http
+    .. sourcecode:: http
 
-      HTTP/1.1 200 OK
+        HTTP/1.1 200 OK
 
-      {{ STREAM }}
+        {{ STREAM }}
 
 
-       The stream must be a tar archive compressed with one of the following algorithms:
-       identity (no compression), gzip, bzip2, xz. The archive must include a file called
-       `Dockerfile` at its root. It may include any number of other files, which will be
-       accessible in the build context (See the ADD build command).
+    The stream must be a tar archive compressed with one of the following algorithms:
+    identity (no compression), gzip, bzip2, xz. The archive must include a file called
+    `Dockerfile` at its root. It may include any number of other files, which will be
+    accessible in the build context (See the ADD build command).
+    
+    The Content-type header should be set to "application/tar".
 
-       The Content-type header should be set to "application/tar".
-
-	:query t: repository name (and optionally a tag) to be applied to the resulting image in case of success
-	:query q: suppress verbose build output
+    :query t: repository name (and optionally a tag) to be applied to the resulting image in case of success
+    :query q: suppress verbose build output
     :query nocache: do not use the cache when building the image
-	:statuscode 200: no error
+    :statuscode 200: no error
     :statuscode 500: server error
 
 
@@ -1135,7 +1190,13 @@ Create a new image from a container's changes
 
     .. sourcecode:: http
 
-        POST /commit?container=44c004db4b17&m=message&repo=myrepo HTTP/1.1
+       POST /commit?container=44c004db4b17&m=message&repo=myrepo HTTP/1.1
+       Content-Type: application/json
+       
+       {
+           "Cmd": ["cat", "/world"],
+           "ExposedPorts":{"22/tcp":{}}
+       }
 
     **Example response**:
 
@@ -1151,7 +1212,6 @@ Create a new image from a container's changes
     :query tag: tag
     :query m: commit message
     :query author: author (eg. "John Hannibal Smith <hannibal@a-team.com>")
-    :query run: config automatically applied when the image is run. (ex: {"Cmd": ["cat", "/world"], "PortSpecs":["22"]})
     :statuscode 201: no error
     :statuscode 404: no such container
     :statuscode 500: server error

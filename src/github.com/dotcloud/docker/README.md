@@ -193,10 +193,9 @@ wrong or incomplete.
 *Brought to you courtesy of our legal counsel. For more context,
 please see the Notice document.*
 
-Transfers of Docker shall be in accordance with applicable export
-controls of any country and all other applicable legal requirements.
-Docker shall not be distributed or downloaded to or in Cuba, Iran,
-North Korea, Sudan or Syria and shall not be distributed or downloaded
-to any person on the Denied Persons List administered by the U.S.
-Department of Commerce.
+Use and transfer of Docker may be subject to certain restrictions by the
+United States and other governments.  
+It is your responsibility to ensure that your use and/or transfer does not
+violate applicable laws. 
 
+For more information, please see http://www.bis.doc.gov

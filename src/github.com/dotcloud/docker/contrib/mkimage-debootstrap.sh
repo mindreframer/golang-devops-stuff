@@ -15,6 +15,7 @@ usage() {
 	
 	echo >&2
 	echo >&2 'options: (not recommended)'
+	echo >&2 "  -p set an http_proxy for debootstrap"
 	echo >&2 "  -v $variant # change default debootstrap variant"
 	echo >&2 "  -i $include # change default package includes"
 	echo >&2 "  -d # strict debootstrap (do not apply any docker-specific tweaks)"
@@ -44,8 +45,11 @@ debianUnstable=sid
 # this should match the name found at http://releases.ubuntu.com/
 ubuntuLatestLTS=precise
 
-while getopts v:i:a:dst name; do
+while getopts v:i:a:p:dst name; do
 	case "$name" in
+		p)
+			http_proxy="$OPTARG"
+			;;
 		v)
 			variant="$OPTARG"
 			;;
@@ -117,7 +121,7 @@ set -x
 
 # bootstrap
 mkdir -p "$target"
-sudo debootstrap --verbose --variant="$variant" --include="$include" --arch="$arch" "$suite" "$target" "$mirror"
+sudo http_proxy=$http_proxy debootstrap --verbose --variant="$variant" --include="$include" --arch="$arch" "$suite" "$target" "$mirror"
 
 cd "$target"
 
@@ -185,10 +189,10 @@ if [ "$justTar" ]; then
 	touch "$repo"
 	
 	# fill the tarball
-	sudo tar -caf "$repo" .
+	sudo tar --numeric-owner -caf "$repo" .
 else
 	# create the image (and tag $repo:$suite)
-	sudo tar -c . | $docker import - $repo $suite
+	sudo tar --numeric-owner -c . | $docker import - $repo:$suite
 	
 	# test the image
 	$docker run -i -t $repo:$suite echo success
@@ -198,25 +202,25 @@ else
 			Debian)
 				if [ "$suite" = "$debianStable" -o "$suite" = 'stable' ] && [ -r etc/debian_version ]; then
 					# tag latest
-					$docker tag $repo:$suite $repo latest
+					$docker tag $repo:$suite $repo:latest
 					
 					if [ -r etc/debian_version ]; then
 						# tag the specific debian release version (which is only reasonable to tag on debian stable)
 						ver=$(cat etc/debian_version)
-						$docker tag $repo:$suite $repo $ver
+						$docker tag $repo:$suite $repo:$ver
 					fi
 				fi
 				;;
 			Ubuntu)
 				if [ "$suite" = "$ubuntuLatestLTS" ]; then
 					# tag latest
-					$docker tag $repo:$suite $repo latest
+					$docker tag $repo:$suite $repo:latest
 				fi
 				if [ -r etc/lsb-release ]; then
 					lsbRelease="$(. etc/lsb-release && echo "$DISTRIB_RELEASE")"
 					if [ "$lsbRelease" ]; then
 						# tag specific Ubuntu version number, if available (12.04, etc.)
-						$docker tag $repo:$suite $repo $lsbRelease
+						$docker tag $repo:$suite $repo:$lsbRelease
 					fi
 				fi
 				;;
