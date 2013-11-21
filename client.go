@@ -8,8 +8,8 @@ type NATSClient interface {
 	Ping() bool
 	Connect(connectionProvider ConnectionProvider) error
 	Disconnect()
-	Publish(subject, payload string) error
-	PublishWithReplyTo(subject, payload, reply string) error
+	Publish(subject string, payload []byte) error
+	PublishWithReplyTo(subject, reply string, payload []byte) error
 	Subscribe(subject string, callback Callback) (int, error)
 	SubscribeWithQueue(subject, queue string, callback Callback) (int, error)
 	Unsubscribe(subscription int) error
@@ -30,8 +30,8 @@ type Client struct {
 
 type Message struct {
 	Subject string
-	Payload string
 	ReplyTo string
+	Payload []byte
 }
 
 type Subscription struct {
@@ -83,7 +83,7 @@ func (c *Client) Disconnect() {
 	conn.Disconnect()
 }
 
-func (c *Client) Publish(subject, payload string) error {
+func (c *Client) Publish(subject string, payload []byte) error {
 	conn := <-c.connection
 
 	conn.Send(
@@ -96,14 +96,14 @@ func (c *Client) Publish(subject, payload string) error {
 	return conn.ErrOrOK()
 }
 
-func (c *Client) PublishWithReplyTo(subject, payload, reply string) error {
+func (c *Client) PublishWithReplyTo(subject, reply string, payload []byte) error {
 	conn := <-c.connection
 
 	conn.Send(
 		&PubPacket{
 			Subject: subject,
-			Payload: payload,
 			ReplyTo: reply,
+			Payload: payload,
 		},
 	)
 

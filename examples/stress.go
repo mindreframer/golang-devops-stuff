@@ -29,7 +29,7 @@ func main() {
 
 	go func() {
 		for {
-			client.Publish("foo", "hi")
+			client.Publish("foo", []byte("hi"))
 		}
 	}()
 

@@ -115,8 +115,8 @@ func (s *YSuite) TestClientSubscribe(c *C) {
 }
 
 func (s *YSuite) TestClientUnsubscribe(c *C) {
-	payload1 := make(chan string)
-	payload2 := make(chan string)
+	payload1 := make(chan []byte)
+	payload2 := make(chan []byte)
 
 	sid1, _ := s.Client.Subscribe("some.subject", func(msg *Message) {
 		payload1 <- msg.Payload
@@ -126,14 +126,14 @@ func (s *YSuite) TestClientUnsubscribe(c *C) {
 		payload2 <- msg.Payload
 	})
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload1, 500)
 	waitReceive(c, "hello!", payload2, 500)
 
 	s.Client.Unsubscribe(sid1)
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	select {
 	case <-payload1:
@@ -145,13 +145,13 @@ func (s *YSuite) TestClientUnsubscribe(c *C) {
 }
 
 func (s *YSuite) TestClientSubscribeAndUnsubscribe(c *C) {
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	sid1, _ := s.Client.Subscribe("some.subject", func(msg *Message) {
 		payload <- msg.Payload
 	})
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 
@@ -161,7 +161,7 @@ func (s *YSuite) TestClientSubscribeAndUnsubscribe(c *C) {
 		payload <- msg.Payload
 	})
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 
@@ -183,7 +183,7 @@ func (s *YSuite) TestClientAutoResubscribe(c *C) {
 		Password: "nats",
 	})
 
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	durableClient.Subscribe("some.subject", func(msg *Message) {
 		payload <- msg.Payload
@@ -196,7 +196,7 @@ func (s *YSuite) TestClientAutoResubscribe(c *C) {
 
 	waitUntilNatsUp(4213)
 
-	durableClient.Publish("some.subject", "hello!")
+	durableClient.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 }
@@ -205,11 +205,11 @@ func (s *YSuite) TestClientConnectCallback(c *C) {
 	doomedNats := startNats(4213)
 	defer stopCmd(doomedNats)
 
-	connectionChannel := make(chan string)
+	connectionChannel := make(chan []byte)
 
 	newClient := NewClient()
 	newClient.ConnectedCallback = func() {
-		connectionChannel <- "yo"
+		connectionChannel <- []byte("yo")
 	}
 
 	newClient.Connect(&ConnectionInfo{
@@ -225,11 +225,11 @@ func (s *YSuite) TestClientReconnectCallback(c *C) {
 	doomedNats := startNats(4213)
 	defer stopCmd(doomedNats)
 
-	connectionChannel := make(chan string)
+	connectionChannel := make(chan []byte)
 
 	durableClient := NewClient()
 	durableClient.ConnectedCallback = func() {
-		connectionChannel <- "yo"
+		connectionChannel <- []byte("yo")
 	}
 
 	durableClient.Connect(&ConnectionInfo{
@@ -256,11 +256,11 @@ func (s *YSuite) TestClientReconnectCallbackSelfPublish(c *C) {
 	doomedNats := startNats(4213)
 	defer stopCmd(doomedNats)
 
-	connectionChannel := make(chan string)
+	connectionChannel := make(chan []byte)
 
 	durableClient := NewClient()
 	durableClient.ConnectedCallback = func() {
-		durableClient.Publish("started", "hi")
+		durableClient.Publish("started", []byte("hi"))
 	}
 
 	durableClient.Connect(&ConnectionInfo{
@@ -277,7 +277,7 @@ func (s *YSuite) TestClientReconnectCallbackSelfPublish(c *C) {
 	}
 
 	durableClient.Subscribe("started", func(*Message) {
-		connectionChannel <- "yo"
+		connectionChannel <- []byte("yo")
 	})
 
 	stopCmd(doomedNats)
@@ -301,19 +301,19 @@ func (s *YSuite) TestClientSubscribeInvalidSubject(c *C) {
 }
 
 func (s *YSuite) TestClientUnsubscribeAll(c *C) {
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	s.Client.Subscribe("some.subject", func(msg *Message) {
 		payload <- msg.Payload
 	})
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 
 	s.Client.UnsubscribeAll("some.subject")
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	select {
 	case <-payload:
@@ -323,19 +323,19 @@ func (s *YSuite) TestClientUnsubscribeAll(c *C) {
 }
 
 func (s *YSuite) TestClientPubSub(c *C) {
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	s.Client.Subscribe("some.subject", func(msg *Message) {
 		payload <- msg.Payload
 	})
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 }
 
 func (s *YSuite) TestClientPubSubWithQueue(c *C) {
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	s.Client.SubscribeWithQueue("some.subject", "some-queue", func(msg *Message) {
 		payload <- msg.Payload
@@ -345,7 +345,7 @@ func (s *YSuite) TestClientPubSubWithQueue(c *C) {
 		payload <- msg.Payload
 	})
 
-	s.Client.Publish("some.subject", "hello!")
+	s.Client.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 
@@ -357,23 +357,23 @@ func (s *YSuite) TestClientPubSubWithQueue(c *C) {
 }
 
 func (s *YSuite) TestClientPublishWithReply(c *C) {
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	s.Client.Subscribe("some.request", func(msg *Message) {
-		s.Client.Publish(msg.ReplyTo, "response!")
+		s.Client.Publish(msg.ReplyTo, []byte("response!"))
 	})
 
 	s.Client.Subscribe("some.reply", func(msg *Message) {
 		payload <- msg.Payload
 	})
 
-	s.Client.PublishWithReplyTo("some.request", "hello!", "some.reply")
+	s.Client.PublishWithReplyTo("some.request", "some.reply", []byte("hello!"))
 
 	waitReceive(c, "response!", payload, 500)
 }
 
 func (s *YSuite) TestClientDisconnect(c *C) {
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	s.Client.Subscribe("some.subject", func(msg *Message) {
 		payload <- msg.Payload
@@ -388,7 +388,7 @@ func (s *YSuite) TestClientDisconnect(c *C) {
 		Password: "nats",
 	})
 
-	otherClient.Publish("some.subject", "hello!")
+	otherClient.Publish("some.subject", []byte("hello!"))
 
 	select {
 	case <-payload:
@@ -398,7 +398,7 @@ func (s *YSuite) TestClientDisconnect(c *C) {
 }
 
 func (s *YSuite) TestClientMessageWithoutSubscription(c *C) {
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	sid, err := s.Client.Subscribe("some.subject", func(msg *Message) {
 		payload <- msg.Payload
@@ -412,8 +412,8 @@ func (s *YSuite) TestClientMessageWithoutSubscription(c *C) {
 
 	delete(s.Client.subscriptions, sid)
 
-	s.Client.Publish("some.subject", "hello!")
-	s.Client.Publish("some.other.subject", "hello to other!")
+	s.Client.Publish("some.subject", []byte("hello!"))
+	s.Client.Publish("some.other.subject", []byte("hello to other!"))
 
 	waitReceive(c, "hello to other!", payload, 500)
 }
@@ -454,10 +454,10 @@ func (s *YSuite) TestClientMessageWhileResubscribing(c *C) {
 		},
 	})
 
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	client.Subscribe("foo", func(msg *Message) {
-		payload <- "resubscribed!"
+		payload <- []byte("resubscribed!")
 	})
 
 	client.Subscribe("bar", func(msg *Message) {
@@ -477,7 +477,7 @@ func (s *YSuite) TestClientPubSubWithQueueReconnectsWithQueue(c *C) {
 		Password: "nats",
 	})
 
-	payload := make(chan string)
+	payload := make(chan []byte)
 
 	durableClient.SubscribeWithQueue("some.subject", "some-queue", func(msg *Message) {
 		payload <- msg.Payload
@@ -487,7 +487,7 @@ func (s *YSuite) TestClientPubSubWithQueueReconnectsWithQueue(c *C) {
 		payload <- msg.Payload
 	})
 
-	durableClient.Publish("some.subject", "hello!")
+	durableClient.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 
@@ -505,7 +505,7 @@ func (s *YSuite) TestClientPubSubWithQueueReconnectsWithQueue(c *C) {
 
 	waitUntilNatsUp(4213)
 
-	durableClient.Publish("some.subject", "hello!")
+	durableClient.Publish("some.subject", []byte("hello!"))
 
 	waitReceive(c, "hello!", payload, 500)
 
@@ -516,10 +516,10 @@ func (s *YSuite) TestClientPubSubWithQueueReconnectsWithQueue(c *C) {
 	}
 }
 
-func waitReceive(c *C, expected string, from chan string, ms time.Duration) {
+func waitReceive(c *C, expected string, from chan []byte, ms time.Duration) {
 	select {
 	case msg := <-from:
-		c.Assert(msg, Equals, expected)
+		c.Assert(string(msg), Equals, expected)
 	case <-time.After(ms * time.Millisecond):
 		c.Error("Timed out waiting for message.")
 	}

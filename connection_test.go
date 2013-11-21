@@ -20,7 +20,7 @@ func (s *CSuite) TestConnectionPong(c *C) {
 	conn := &fakeConn{
 		ReadBuffer:  bytes.NewBuffer([]byte("PING\r\n")),
 		WriteBuffer: bytes.NewBuffer([]byte{}),
-		WriteChan:   make(chan string),
+		WriteChan:   make(chan []byte),
 	}
 
 	// fill in a fake connection
@@ -36,7 +36,7 @@ func (s *CSuite) TestConnectionUnexpectedError(c *C) {
 	conn := &fakeConn{
 		ReadBuffer:  bytes.NewBuffer([]byte("-ERR 'foo'\r\nPING\r\n")),
 		WriteBuffer: bytes.NewBuffer([]byte{}),
-		WriteChan:   make(chan string),
+		WriteChan:   make(chan []byte),
 	}
 
 	// fill in a fake connection
@@ -52,7 +52,7 @@ func (s *CSuite) TestConnectionUnexpectedPong(c *C) {
 	conn := &fakeConn{
 		ReadBuffer:  bytes.NewBuffer([]byte("PONG\r\nPING\r\n")),
 		WriteBuffer: bytes.NewBuffer([]byte{}),
-		WriteChan:   make(chan string),
+		WriteChan:   make(chan []byte),
 	}
 
 	// fill in a fake connection
@@ -68,7 +68,7 @@ func (s *CSuite) TestConnectionDisconnect(c *C) {
 	conn := &fakeConn{
 		ReadBuffer:  bytes.NewBuffer([]byte{}),
 		WriteBuffer: bytes.NewBuffer([]byte{}),
-		WriteChan:   make(chan string),
+		WriteChan:   make(chan []byte),
 		Closed:      false,
 	}
 
@@ -85,7 +85,7 @@ func (s *CSuite) TestConnectionErrOrOKReturnsErrorOnDisconnect(c *C) {
 	conn := &fakeConn{
 		ReadBuffer:  bytes.NewBuffer([]byte{}),
 		WriteBuffer: bytes.NewBuffer([]byte{}),
-		WriteChan:   make(chan string),
+		WriteChan:   make(chan []byte),
 	}
 
 	// fill in a fake connection
@@ -117,7 +117,7 @@ func (s *CSuite) TestConnectionOnMessageCallback(c *C) {
 	conn := &fakeConn{
 		ReadBuffer:  bytes.NewBuffer([]byte("MSG foo 1 5\r\nhello\r\n")),
 		WriteBuffer: bytes.NewBuffer([]byte{}),
-		WriteChan:   make(chan string),
+		WriteChan:   make(chan []byte),
 		Closed:      false,
 	}
 
@@ -135,8 +135,45 @@ func (s *CSuite) TestConnectionOnMessageCallback(c *C) {
 	select {
 	case msg := <-messages:
 		c.Assert(msg.SubID, Equals, 1)
-		c.Assert(msg.Payload, Equals, "hello")
+		c.Assert(string(msg.Payload), Equals, "hello")
 	case <-time.After(1 * time.Second):
 		c.Error("Did not receive message.")
 	}
+}
+
+func (s *CSuite) TestConnectionClusterReconnectsToRandomNode(c *C) {
+	hellos := 0
+	goodbyes := 0
+
+	for i := 0; i < 100; i++ {
+		node1 := &FakeConnectionProvider{
+			ReadBuffer:  "+OK\r\nMSG foo 1 5\r\nhello\r\n",
+			WriteBuffer: []byte{},
+		}
+
+		node2 := &FakeConnectionProvider{
+			ReadBuffer:  "+OK\r\nMSG foo 1 7\r\ngoodbye\r\n",
+			WriteBuffer: []byte{},
+		}
+
+		cluster := &ConnectionCluster{[]ConnectionProvider{node1, node2}}
+
+		conn, err := cluster.ProvideConnection()
+		c.Assert(err, IsNil)
+
+		conn.OnMessage(func(msg *MsgPacket) {
+			if string(msg.Payload) == "hello" {
+				hellos += 1
+			}
+
+			if string(msg.Payload) == "goodbye" {
+				goodbyes += 1
+			}
+		})
+
+		conn.ErrOrOK()
+	}
+
+	c.Assert(hellos, Not(Equals), 0)
+	c.Assert(goodbyes, Not(Equals), 0)
 }

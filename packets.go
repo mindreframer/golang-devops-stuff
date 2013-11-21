@@ -96,7 +96,7 @@ func (p *UnsubPacket) Encode() []byte {
 type PubPacket struct {
 	Subject string
 	ReplyTo string
-	Payload string
+	Payload []byte
 }
 
 func (p *PubPacket) Encode() []byte {
@@ -121,7 +121,7 @@ type MsgPacket struct {
 	Subject string
 	SubID   int
 	ReplyTo string
-	Payload string
+	Payload []byte
 }
 
 func (p *MsgPacket) Encode() []byte {
