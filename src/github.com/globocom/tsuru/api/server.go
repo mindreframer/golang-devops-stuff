@@ -17,7 +17,7 @@ import (
 )
 
 func fatal(err error) {
-	log.Fatal(err)
+	log.Fatal(err.Error())
 }
 
 // RunServer starts Tsuru API server. The dry parameter indicates whether the
@@ -79,6 +79,7 @@ func RunServer(dry bool) {
 	m.Del("/apps/:app/:team", authorizationRequiredHandler(revokeAppAccess))
 	m.Get("/apps/:app/log", authorizationRequiredHandler(appLog))
 	m.Post("/apps/:app/log", authorizationRequiredHandler(addLog))
+	m.Get("/apps/:app/deploys", adminRequiredHandler(deploysList))
 
 	m.Get("/platforms", authorizationRequiredHandler(platformList))
 

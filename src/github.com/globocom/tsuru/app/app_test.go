@@ -442,12 +442,19 @@ func (s *S) TestAddUnitPlaceHolder(c *gocheck.C) {
 	c.Assert(u.QuotaItem, gocheck.Equals, "appName-0")
 }
 
-func (s *S) TestAddUnitKeepsQuotaItem(c *gocheck.C) {
+func (s *S) TestAddUnitKeepsQuotaItemOnUpdate(c *gocheck.C) {
 	a := App{Name: "myapp", Units: []Unit{{Name: "myapp/0", QuotaItem: "myapp-1"}}}
 	u := Unit{Name: "myapp/0", Machine: 1}
 	a.AddUnit(&u)
 	c.Assert(len(a.Units), gocheck.Equals, 1)
 	c.Assert(u.QuotaItem, gocheck.Equals, "myapp-1")
+}
+
+func (s *S) TestAddUnitDoesntReplacePredefinedQuotaItem(c *gocheck.C) {
+	a := App{Name: "myapp"}
+	u := Unit{Name: "myapp/0", Machine: 1, QuotaItem: "waaaaat"}
+	a.AddUnit(&u)
+	c.Assert(u.QuotaItem, gocheck.Equals, "waaaaat")
 }
 
 func (s *S) TestAddUnits(c *gocheck.C) {
@@ -705,8 +712,7 @@ func (s *S) TestRemoveUnitsWithQuota(c *gocheck.C) {
 func (s *S) TestRemoveUnits(c *gocheck.C) {
 	var calls int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		v := atomic.LoadInt32(&calls)
-		atomic.StoreInt32(&calls, v+1)
+		atomic.AddInt32(&calls, 1)
 		w.WriteHeader(http.StatusNoContent)
 	}))
 	srvc := service.Service{Name: "mysql", Endpoint: map[string]string{"production": ts.URL}}
@@ -760,7 +766,7 @@ func (s *S) TestRemoveUnits(c *gocheck.C) {
 	}()
 	select {
 	case <-ok:
-	case <-time.After(2e9):
+	case <-time.After(10e9):
 		c.Fatal("Did not call service endpoint twice.")
 	}
 }
@@ -795,23 +801,6 @@ func (s *S) TestRemoveUnitsInvalidValues(c *gocheck.C) {
 		c.Check(err, gocheck.NotNil)
 		c.Check(err.Error(), gocheck.Equals, test.expected)
 	}
-}
-
-func (s *S) TestRemoveUnitsFailureInProvisioner(c *gocheck.C) {
-	s.provisioner.PrepareFailure("RemoveUnit", stderr.New("Cannot remove this unit."))
-	app := App{
-		Name:     "paradisum",
-		Platform: "python",
-		Units:    []Unit{{Name: "paradisum/0"}, {Name: "paradisum/1"}},
-	}
-	err := s.conn.Apps().Insert(app)
-	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Apps().Remove(bson.M{"name": app.Name})
-	s.provisioner.Provision(&app)
-	defer s.provisioner.Destroy(&app)
-	err = app.RemoveUnits(1)
-	c.Assert(err, gocheck.NotNil)
-	c.Assert(err.Error(), gocheck.Equals, "Cannot remove this unit.")
 }
 
 func (s *S) TestRemoveUnitsFromIndicesSlice(c *gocheck.C) {
@@ -1617,9 +1606,18 @@ func (s *S) TestSetTeamsSortTeamNames(c *gocheck.C) {
 }
 
 func (s *S) TestGetUnits(c *gocheck.C) {
-	app := App{Units: []Unit{{Ip: "1.1.1.1"}}}
-	expected := []bind.Unit{bind.Unit(&Unit{Ip: "1.1.1.1", app: &app})}
-	c.Assert(app.GetUnits(), gocheck.DeepEquals, expected)
+	ips := []string{"1.1.1.1", "2.2.2.2", "3.3.3.3"}
+	units := make([]Unit, len(ips))
+	got := make([]string, len(ips))
+	for i, ip := range ips {
+		unit := Unit{Ip: ip}
+		units[i] = unit
+	}
+	app := App{Units: units}
+	for i, unit := range app.GetUnits() {
+		got[i] = unit.GetIp()
+	}
+	c.Assert(got, gocheck.DeepEquals, ips)
 }
 
 func (s *S) TestAppMarshalJSON(c *gocheck.C) {
@@ -1864,6 +1862,29 @@ func (s *S) TestGetDeploys(c *gocheck.C) {
 	c.Assert(a.GetDeploys(), gocheck.Equals, a.Deploys)
 }
 
+func (s *S) TestListDeploys(c *gocheck.C) {
+	a := App{Name: "g1"}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	insert := []interface{}{
+		Deploy{App: "g1", Timestamp: time.Now().Add(-60 * time.Second)},
+		Deploy{App: "g1", Timestamp: time.Now()},
+	}
+	s.conn.Deploys().Insert(insert...)
+	defer s.conn.Deploys().RemoveAll(bson.M{"app": a.Name})
+	expected := []Deploy{insert[0].(Deploy), insert[1].(Deploy)}
+	deploys, err := a.ListDeploys()
+	c.Assert(err, gocheck.IsNil)
+	for i := 0; i < 2; i++ {
+		ts := expected[i].Timestamp
+		expected[i].Timestamp = time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, time.UTC)
+		ts = deploys[i].Timestamp
+		deploys[i].Timestamp = time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, time.UTC)
+	}
+	c.Assert(deploys, gocheck.DeepEquals, expected)
+}
+
 func (s *S) TestGetProvisionedUnits(c *gocheck.C) {
 	a := App{Name: "anycolor", Units: []Unit{{Name: "i-0800"}, {Name: "i-0900"}, {Name: "i-a00"}}}
 	gotUnits := a.ProvisionedUnits()
@@ -1903,4 +1924,48 @@ func (s *S) TestSwap(c *gocheck.C) {
 	app2 := &App{}
 	err := Swap(app1, app2)
 	c.Assert(err, gocheck.IsNil)
+}
+
+func (s *S) TestDeployApp(c *gocheck.C) {
+	a := App{
+		Name:     "someApp",
+		Platform: "django",
+		Teams:    []string{s.team.Name},
+		Units:    []Unit{{Name: "i-0800", State: "started"}},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	writer := &bytes.Buffer{}
+	err = DeployApp(&a, "version", writer)
+	c.Assert(err, gocheck.IsNil)
+	logs := writer.String()
+	c.Assert(logs, gocheck.Equals, "Deploy called")
+}
+
+func (s *S) TestDeployAppIncrementDeployNumber(c *gocheck.C) {
+	a := App{
+		Name:     "otherapp",
+		Platform: "zend",
+		Teams:    []string{s.team.Name},
+		Units:    []Unit{{Name: "i-0800", State: "started"}},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	writer := &bytes.Buffer{}
+	err = DeployApp(&a, "version", writer)
+	c.Assert(err, gocheck.IsNil)
+	s.conn.Apps().Find(bson.M{"name": a.Name}).One(&a)
+	c.Assert(a.Deploys, gocheck.Equals, uint(1))
+	var result map[string]interface{}
+	s.conn.Deploys().Find(bson.M{"app": a.Name}).One(&result)
+	c.Assert(result["app"], gocheck.Equals, a.Name)
+	now := time.Now()
+	diff := now.Sub(result["timestamp"].(time.Time))
+	c.Assert(diff < 60*time.Second, gocheck.Equals, true)
 }

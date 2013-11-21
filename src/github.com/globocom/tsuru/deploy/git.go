@@ -24,7 +24,7 @@ func clone(p provision.Provisioner, app provision.App) ([]byte, error) {
 	cmd := fmt.Sprintf("git clone %s %s --depth 1", repository.ReadOnlyURL(app.GetName()), path)
 	err = p.ExecuteCommand(&buf, &buf, app, cmd)
 	b := buf.Bytes()
-	log.Printf(`"git clone" output: %s`, b)
+	log.Debugf(`"git clone" output: %s`, b)
 	return b, err
 }
 
@@ -40,7 +40,7 @@ func fetch(p provision.Provisioner, app provision.App) ([]byte, error) {
 	cmd := fmt.Sprintf("cd %s && git fetch origin", path)
 	err = p.ExecuteCommand(&buf, &buf, app, cmd)
 	b := buf.Bytes()
-	log.Printf(`"git fetch" output: %s`, b)
+	log.Debugf(`"git fetch" output: %s`, b)
 	return b, err
 }
 
@@ -66,7 +66,7 @@ func Git(provisioner provision.Provisioner, app provision.App, objID string, w i
 		out, err = fetch(provisioner, app)
 	}
 	if err != nil {
-		msg := fmt.Sprintf("Got error while cloning/fetching repository: %s -- \n%s", err.Error(), string(out))
+		msg := fmt.Sprintf("Got error while cloning/fetching repository: %s -- \n%s", err, string(out))
 		log.Write(w, []byte(msg))
 		return errors.New(msg)
 	}

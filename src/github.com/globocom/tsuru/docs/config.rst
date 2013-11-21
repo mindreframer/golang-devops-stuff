@@ -86,6 +86,18 @@ database:name
 ``database:name`` is the name of the database that tsuru uses. It is a
 mandatory setting and has no default value. An example of value is "tsuru".
 
+Collector
+---------
+
+Collector is a tsuru agent responsible for collecting information about app units,
+interacting with the provisioner. This agent runs a loop in configurable interval.
+
+collector:ticker-time
++++++++++++++++++++++
+
+``collector:ticker-time`` is interval for running the loop, specified in seconds.
+Default value: 60 seconds.
+
 Email configuration
 -------------------
 
@@ -330,6 +342,15 @@ quota:apps-per-user
 ``quota:apps-per-user`` is the default value for apps per-user quota. All new
 users will have at most the number of apps specified by this setting. This
 setting is optional, and defaults to "unlimited".
+
+Log level
+---------
+
+debug
++++++
+
+``false`` is the default value, so you won't see any
+noises on logs, to turn it on set it to true, e.g.: ``debug: true``
 
 Defining the provisioner
 ------------------------

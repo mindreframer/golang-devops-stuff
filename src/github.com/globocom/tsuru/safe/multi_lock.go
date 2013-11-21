@@ -2,13 +2,17 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package quota
+package safe
 
 import "sync"
 
 type multiLocker struct {
 	m   map[string]*sync.Mutex
 	mut sync.Mutex
+}
+
+func MultiLocker() *multiLocker {
+	return &multiLocker{m: make(map[string]*sync.Mutex)}
 }
 
 func (l *multiLocker) Lock(name string) {
@@ -24,6 +28,7 @@ func (l *multiLocker) Lock(name string) {
 
 func (l *multiLocker) Unlock(name string) {
 	l.mut.Lock()
-	defer l.mut.Unlock()
-	l.m[name].Unlock()
+	mutex := l.m[name]
+	l.mut.Unlock()
+	mutex.Unlock()
 }

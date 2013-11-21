@@ -82,7 +82,7 @@ func (s *S) TestCloneRepositoryHandler(c *gocheck.C) {
 	s.provisioner.Provision(&a)
 	defer s.provisioner.Destroy(&a)
 	url := fmt.Sprintf("/apps/%s/repository/clone?:appname=%s", a.Name, a.Name)
-	request, err := http.NewRequest("POST", url, strings.NewReader("version=a345f3e"))
+	request, err := http.NewRequest("POST", url, strings.NewReader("version=a345f3e&user=fulano"))
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	recorder := httptest.NewRecorder()
@@ -117,6 +117,12 @@ func (s *S) TestCloneRepositoryShouldIncrementDeployNumberOnApp(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	s.conn.Apps().Find(bson.M{"name": a.Name}).One(&a)
 	c.Assert(a.Deploys, gocheck.Equals, uint(1))
+	var result map[string]interface{}
+	s.conn.Deploys().Find(bson.M{"app": a.Name}).One(&result)
+	c.Assert(result["app"], gocheck.Equals, a.Name)
+	now := time.Now()
+	diff := now.Sub(result["timestamp"].(time.Time))
+	c.Assert(diff < 60*time.Second, gocheck.Equals, true)
 }
 
 func (s *S) TestCloneRepositoryShouldReturnNotFoundWhenAppDoesNotExist(c *gocheck.C) {
