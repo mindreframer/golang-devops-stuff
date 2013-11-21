@@ -69,6 +69,10 @@ func init() {
 func main() {
 	flag.Parse()
 
+	if *memprofile != "" {
+		runtime.MemProfileRate = 1024
+	}
+
 	if *flagShowVersion {
 		fmt.Println("geodns", VERSION, buildTime)
 		os.Exit(0)
