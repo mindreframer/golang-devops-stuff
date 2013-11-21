@@ -198,6 +198,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Quick and easy performance analyzer library for golang
        7 commits, last change: 2013-10-03 06:43:07, 65 stars, 3 forks
 
+    uniqush/uniqush-push:
+      Uniqush is a free and open source software which provides a unified push service for server-side notification to apps on mobile devices.
+       406 commits, last change: 2013-11-07 12:23:32, 313 stars, 46 forks
+
     VividCortex/robustly:
       Run functions resiliently
        21 commits, last change: 2013-07-30 08:59:36, 44 stars, 1 forks
