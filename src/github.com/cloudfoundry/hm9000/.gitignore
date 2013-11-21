@@ -2,4 +2,5 @@
 local_config.json
 mcat/phd/*.csv
 mcat/phd/plot/*.pdf
+mcat/phdaws/*.csv
 *.coverprofile

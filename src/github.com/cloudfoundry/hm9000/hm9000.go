@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/cloudfoundry/gosteno"
 
 	"github.com/cloudfoundry/hm9000/config"
@@ -12,24 +13,12 @@ import (
 )
 
 func main() {
-	c := &gosteno.Config{
-		Sinks: []gosteno.Sink{
-			gosteno.NewSyslogSink("hm9000"),
-		},
-		Level:     gosteno.LOG_INFO,
-		Codec:     gosteno.NewJsonCodec(),
-		EnableLOC: true,
-	}
-	gosteno.Init(c)
-	steno := gosteno.NewLogger("hm9000")
-	l := logger.NewRealLogger(steno)
-
 	app := cli.NewApp()
 	app.Name = "HM9000"
 	app.Usage = "Start the various HM9000 components"
 	app.Version = "0.0.9000"
 	app.Commands = []cli.Command{
-		cli.Command{
+		{
 			Name:        "fetch_desired",
 			Description: "Fetches desired state",
 			Usage:       "hm fetch_desired --config=/path/to/config --poll",
@@ -38,10 +27,11 @@ func main() {
 				cli.BoolFlag{"poll", "If true, poll repeatedly with an interval defined in config"},
 			},
 			Action: func(c *cli.Context) {
-				hm.FetchDesiredState(l, loadConfig(l, c), c.Bool("poll"))
+				logger, _, conf := loadLoggerAndConfig(c, "fetcher")
+				hm.FetchDesiredState(logger, conf, c.Bool("poll"))
 			},
 		},
-		cli.Command{
+		{
 			Name:        "listen",
 			Description: "Listens over the NATS for the actual state",
 			Usage:       "hm listen --config=/path/to/config",
@@ -49,10 +39,11 @@ func main() {
 				cli.StringFlag{"config", "", "Path to config file"},
 			},
 			Action: func(c *cli.Context) {
-				hm.StartListeningForActual(l, loadConfig(l, c))
+				logger, _, conf := loadLoggerAndConfig(c, "listener")
+				hm.StartListeningForActual(logger, conf)
 			},
 		},
-		cli.Command{
+		{
 			Name:        "analyze",
 			Description: "Analyze the desired and actual state and enqueue start/stop messages",
 			Usage:       "hm analyze --config=/path/to/config --poll",
@@ -61,10 +52,11 @@ func main() {
 				cli.BoolFlag{"poll", "If true, poll repeatedly with an interval defined in config"},
 			},
 			Action: func(c *cli.Context) {
-				hm.Analyze(l, loadConfig(l, c), c.Bool("poll"))
+				logger, _, conf := loadLoggerAndConfig(c, "analyzer")
+				hm.Analyze(logger, conf, c.Bool("poll"))
 			},
 		},
-		cli.Command{
+		{
 			Name:        "send",
 			Description: "Send the enqueued start/stop messages",
 			Usage:       "hm send --config=/path/to/config --poll",
@@ -73,10 +65,23 @@ func main() {
 				cli.BoolFlag{"poll", "If true, poll repeatedly with an interval defined in config"},
 			},
 			Action: func(c *cli.Context) {
-				hm.Send(l, loadConfig(l, c), c.Bool("poll"))
+				logger, _, conf := loadLoggerAndConfig(c, "sender")
+				hm.Send(logger, conf, c.Bool("poll"))
 			},
 		},
-		cli.Command{
+		{
+			Name:        "evacuator",
+			Description: "Listens for Varz calls to serve metrics",
+			Usage:       "hm evacuator --config=/path/to/config",
+			Flags: []cli.Flag{
+				cli.StringFlag{"config", "", "Path to config file"},
+			},
+			Action: func(c *cli.Context) {
+				logger, _, conf := loadLoggerAndConfig(c, "evacuator")
+				hm.StartEvacuator(logger, conf)
+			},
+		},
+		{
 			Name:        "serve_metrics",
 			Description: "Listens for Varz calls to serve metrics",
 			Usage:       "hm serve_metrics --config=/path/to/config",
@@ -84,10 +89,11 @@ func main() {
 				cli.StringFlag{"config", "", "Path to config file"},
 			},
 			Action: func(c *cli.Context) {
-				hm.ServeMetrics(steno, l, loadConfig(l, c))
+				logger, steno, conf := loadLoggerAndConfig(c, "metrics_server")
+				hm.ServeMetrics(steno, logger, conf)
 			},
 		},
-		cli.Command{
+		{
 			Name:        "serve_api",
 			Description: "Serve app API over http",
 			Usage:       "hm serve_api --config=/path/to/config",
@@ -95,21 +101,37 @@ func main() {
 				cli.StringFlag{"config", "", "Path to config file"},
 			},
 			Action: func(c *cli.Context) {
-				hm.ServeAPI(l, loadConfig(l, c))
+				logger, _, conf := loadLoggerAndConfig(c, "api_server")
+				hm.ServeAPI(logger, conf)
 			},
 		},
-		cli.Command{
+		{
+			Name:        "shred",
+			Description: "Deletes empty directories from the store",
+			Usage:       "hm shred --config=/path/to/config --poll",
+			Flags: []cli.Flag{
+				cli.StringFlag{"config", "", "Path to config file"},
+				cli.BoolFlag{"poll", "If true, poll repeatedly with an interval defined in config"},
+			},
+			Action: func(c *cli.Context) {
+				logger, _, conf := loadLoggerAndConfig(c, "shredder")
+				hm.Shred(logger, conf, c.Bool("poll"))
+			},
+		},
+		{
 			Name:        "dump",
 			Description: "Dumps contents of the data store",
 			Usage:       "hm dump --config=/path/to/config",
 			Flags: []cli.Flag{
 				cli.StringFlag{"config", "", "Path to config file"},
+				cli.BoolFlag{"raw", "If set, dump the unstructured contents of the database"},
 			},
 			Action: func(c *cli.Context) {
-				hm.Dump(l, loadConfig(l, c))
+				logger, _, conf := loadLoggerAndConfig(c, "dumper")
+				hm.Dump(logger, conf, c.Bool("raw"))
 			},
 		},
-		cli.Command{
+		{
 			Name:        "clear_store",
 			Description: "Clears contents of the data store",
 			Usage:       "hm clear_store --config=/path/to/config",
@@ -117,7 +139,8 @@ func main() {
 				cli.StringFlag{"config", "", "Path to config file"},
 			},
 			Action: func(c *cli.Context) {
-				hm.Clear(l, loadConfig(l, c))
+				logger, _, conf := loadLoggerAndConfig(c, "store_clearer")
+				hm.Clear(logger, conf)
 			},
 		},
 	}
@@ -125,18 +148,30 @@ func main() {
 	app.Run(os.Args)
 }
 
-func loadConfig(l logger.Logger, c *cli.Context) config.Config {
+func loadLoggerAndConfig(c *cli.Context, component string) (logger.Logger, *gosteno.Logger, config.Config) {
 	configPath := c.String("config")
 	if configPath == "" {
-		l.Info("Config path required", nil)
+		fmt.Printf("Config path required")
 		os.Exit(1)
 	}
 
 	conf, err := config.FromFile(configPath)
 	if err != nil {
-		l.Info("Failed to load config", map[string]string{"Error": err.Error()})
+		fmt.Printf("Failed to load config: %s", err.Error())
 		os.Exit(1)
 	}
 
-	return conf
+	stenoConf := &gosteno.Config{
+		Sinks: []gosteno.Sink{
+			gosteno.NewIOSink(os.Stdout),
+			gosteno.NewSyslogSink("vcap.hm9000." + component),
+		},
+		Level: conf.LogLevel(),
+		Codec: gosteno.NewJsonCodec(),
+	}
+	gosteno.Init(stenoConf)
+	steno := gosteno.NewLogger("vcap.hm9000." + component)
+	hmLogger := logger.NewRealLogger(steno)
+
+	return hmLogger, steno, conf
 }

@@ -105,8 +105,8 @@ var _ = Describe("Apiserver", func() {
 					map[int]models.CrashCount{1: crashCount},
 				)
 
-				store.SaveDesiredState(app.DesiredState(3))
-				store.SaveActualState(instanceHeartbeats...)
+				store.SyncDesiredState(app.DesiredState(3))
+				store.SyncHeartbeats(app.Heartbeat(3))
 				store.SaveCrashCounts(crashCount)
 				validRequestPayload = fmt.Sprintf(`{"droplet":"%s","version":"%s"}`, app.AppGuid, app.AppVersion)
 			})

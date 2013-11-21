@@ -5,7 +5,7 @@ type StoreAdapter interface {
 	Set(nodes []StoreNode) error
 	Get(key string) (StoreNode, error)
 	ListRecursively(key string) (StoreNode, error)
-	Delete(key string) error
+	Delete(keys ...string) error
 	Disconnect() error
 }
 

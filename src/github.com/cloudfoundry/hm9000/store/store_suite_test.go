@@ -20,14 +20,15 @@ func TestStore(t *testing.T) {
 
 	etcdRunner = storerunner.NewETCDClusterRunner(5001+config.GinkgoConfig.ParallelNode, 1)
 
+	etcdRunner.Start()
+
 	RunSpecs(t, "Store Suite")
 
 	etcdRunner.Stop()
 }
 
 var _ = BeforeEach(func() {
-	etcdRunner.Stop()
-	etcdRunner.Start()
+	etcdRunner.Reset()
 })
 
 func registerSignalHandler() {

@@ -1,37 +1,40 @@
 package md_test
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"github.com/cloudfoundry/hm9000/config"
 	. "github.com/onsi/gomega"
+	"github.com/vito/cmdtest"
+	. "github.com/vito/cmdtest/matchers"
+	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 	"time"
 )
 
 type CLIRunner struct {
-	configPath           string
-	listenerCmd          *exec.Cmd
-	listenerStdoutBuffer *bytes.Buffer
-	metricsServerCmd     *exec.Cmd
-	apiServerCmd         *exec.Cmd
-	verbose              bool
+	configPath       string
+	listenerCmd      *exec.Cmd
+	listenerSession  *cmdtest.Session
+	metricsServerCmd *exec.Cmd
+	apiServerCmd     *exec.Cmd
+	evacuatorCmd     *exec.Cmd
+
+	verbose bool
 }
 
-func NewCLIRunner(storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int, verbose bool) *CLIRunner {
+func NewCLIRunner(storeType string, storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int, verbose bool) *CLIRunner {
 	runner := &CLIRunner{
 		verbose: verbose,
 	}
-	runner.generateConfig(storeURLs, ccBaseURL, natsPort, metricsServerPort)
+	runner.generateConfig(storeType, storeURLs, ccBaseURL, natsPort, metricsServerPort)
 	return runner
 }
 
-func (runner *CLIRunner) generateConfig(storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int) {
+func (runner *CLIRunner) generateConfig(storeType string, storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int) {
 	tmpFile, err := ioutil.TempFile("/tmp", "hm9000_clirunner")
 	defer tmpFile.Close()
 	Ω(err).ShouldNot(HaveOccured())
@@ -40,6 +43,7 @@ func (runner *CLIRunner) generateConfig(storeURLs []string, ccBaseURL string, na
 
 	conf, err := config.DefaultConfig()
 	Ω(err).ShouldNot(HaveOccured())
+	conf.StoreType = storeType
 	conf.StoreURLs = storeURLs
 	conf.CCBaseURL = ccBaseURL
 	conf.NATS.Port = natsPort
@@ -48,17 +52,20 @@ func (runner *CLIRunner) generateConfig(storeURLs []string, ccBaseURL string, na
 	conf.MetricsServerPort = metricsServerPort
 	conf.MetricsServerUser = "bob"
 	conf.MetricsServerPassword = "password"
+	conf.StoreMaxConcurrentRequests = 10
+	conf.ListenerHeartbeatSyncIntervalInMilliseconds = 1
 
 	err = json.NewEncoder(tmpFile).Encode(conf)
 	Ω(err).ShouldNot(HaveOccured())
 }
 
 func (runner *CLIRunner) StartListener(timestamp int) {
-	runner.listenerCmd, runner.listenerStdoutBuffer = runner.start("listen", timestamp)
+	runner.listenerCmd, runner.listenerSession = runner.start("listen", timestamp)
 }
 
 func (runner *CLIRunner) StopListener() {
-	runner.listenerCmd.Process.Kill()
+	runner.listenerCmd.Process.Signal(os.Interrupt)
+	runner.listenerCmd.Wait()
 }
 
 func (runner *CLIRunner) StartMetricsServer(timestamp int) {
@@ -66,7 +73,8 @@ func (runner *CLIRunner) StartMetricsServer(timestamp int) {
 }
 
 func (runner *CLIRunner) StopMetricsServer() {
-	runner.metricsServerCmd.Process.Kill()
+	runner.metricsServerCmd.Process.Signal(os.Interrupt)
+	runner.metricsServerCmd.Wait()
 }
 
 func (runner *CLIRunner) StartAPIServer(timestamp int) {
@@ -74,32 +82,40 @@ func (runner *CLIRunner) StartAPIServer(timestamp int) {
 }
 
 func (runner *CLIRunner) StopAPIServer() {
-	runner.apiServerCmd.Process.Kill()
+	runner.apiServerCmd.Process.Signal(os.Interrupt)
+	runner.apiServerCmd.Wait()
+}
+
+func (runner *CLIRunner) StartEvacuator(timestamp int) {
+	runner.evacuatorCmd, _ = runner.start("evacuator", timestamp)
+}
+
+func (runner *CLIRunner) StopEvacuator() {
+	runner.evacuatorCmd.Process.Signal(os.Interrupt)
+	runner.evacuatorCmd.Process.Wait()
 }
 
 func (runner *CLIRunner) Cleanup() {
 	os.Remove(runner.configPath)
 }
 
-func (runner *CLIRunner) start(command string, timestamp int) (*exec.Cmd, *bytes.Buffer) {
+func (runner *CLIRunner) start(command string, timestamp int) (*exec.Cmd, *cmdtest.Session) {
 	cmd := exec.Command("hm9000", command, fmt.Sprintf("--config=%s", runner.configPath))
 	cmd.Env = append(os.Environ(), fmt.Sprintf("HM9000_FAKE_TIME=%d", timestamp))
-	buffer := bytes.NewBuffer([]byte{})
-	cmd.Stdout = buffer
-	cmd.Start()
-	Eventually(func() int {
-		return buffer.Len()
-	}).ShouldNot(BeZero())
 
-	return cmd, buffer
-}
+	var session *cmdtest.Session
+	var err error
+	if runner.verbose {
+		session, err = cmdtest.StartWrapped(cmd, teeToStdout, teeToStdout)
+	} else {
+		session, err = cmdtest.Start(cmd)
+	}
 
-func (runner *CLIRunner) WaitForHeartbeats(num int) {
-	Eventually(func() int {
-		var validHeartbeat = regexp.MustCompile(`Received dea.heartbeat`)
-		heartbeats := validHeartbeat.FindAll(runner.listenerStdoutBuffer.Bytes(), -1)
-		return len(heartbeats)
-	}).Should(BeNumerically("==", num))
+	Ω(err).ShouldNot(HaveOccured())
+
+	Ω(session).Should(SayWithTimeout(".", 5*time.Second))
+
+	return cmd, session
 }
 
 func (runner *CLIRunner) Run(command string, timestamp int) {
@@ -107,12 +123,15 @@ func (runner *CLIRunner) Run(command string, timestamp int) {
 	cmd.Env = append(os.Environ(), fmt.Sprintf("HM9000_FAKE_TIME=%d", timestamp))
 	out, _ := cmd.CombinedOutput()
 	if runner.verbose {
-		fmt.Printf(command + "\n")
+		fmt.Printf(command+" (%s) \n", time.Unix(int64(timestamp), 0))
 		fmt.Printf(strings.Repeat("~", len(command)) + "\n")
 		fmt.Printf(string(out))
 
 		fmt.Printf("\n")
 	}
-	// Ω(err).ShouldNot(HaveOccured(), "%s command failed", command)
-	time.Sleep(50 * time.Millisecond) //give NATS a chance to send messages around, if necessary
+	time.Sleep(50 * time.Millisecond)
+}
+
+func teeToStdout(out io.Reader) io.Reader {
+	return io.TeeReader(out, os.Stdout)
 }

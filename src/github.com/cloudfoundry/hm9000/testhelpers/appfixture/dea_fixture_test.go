@@ -47,4 +47,12 @@ var _ = Describe("Dea Fixture", func() {
 			})
 		})
 	})
+
+	Describe("HeartbeatWith", func() {
+		It("should return a heartbeat wrapping the passed in instance heartbeats", func() {
+			hb := dea.HeartbeatWith(models.InstanceHeartbeat{AppGuid: "foo"})
+			Ω(hb.DeaGuid).Should(Equal(dea.DeaGuid))
+			Ω(hb.InstanceHeartbeats).Should(Equal([]models.InstanceHeartbeat{{AppGuid: "foo"}}))
+		})
+	})
 })

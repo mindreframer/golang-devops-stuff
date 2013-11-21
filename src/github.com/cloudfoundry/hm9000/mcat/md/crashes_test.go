@@ -9,26 +9,25 @@ import (
 
 var _ = Describe("Crashes", func() {
 	var (
+		dea               appfixture.DeaFixture
 		a                 appfixture.AppFixture
 		crashingHeartbeat models.Heartbeat
 	)
 
 	BeforeEach(func() {
-		a = appfixture.NewAppFixture()
+		dea = appfixture.NewDeaFixture()
+		a = dea.GetApp(0)
 	})
 
 	Describe("when all instances are crashed", func() {
 		BeforeEach(func() {
 			simulator.SetDesiredState(a.DesiredState(3))
 
-			crashingHeartbeat = models.Heartbeat{
-				DeaGuid: models.Guid(),
-				InstanceHeartbeats: []models.InstanceHeartbeat{
-					a.CrashedInstanceHeartbeatAtIndex(0),
-					a.CrashedInstanceHeartbeatAtIndex(1),
-					a.CrashedInstanceHeartbeatAtIndex(2),
-				},
-			}
+			crashingHeartbeat = dea.HeartbeatWith(
+				a.CrashedInstanceHeartbeatAtIndex(0),
+				a.CrashedInstanceHeartbeatAtIndex(1),
+				a.CrashedInstanceHeartbeatAtIndex(2),
+			)
 
 			simulator.SetCurrentHeartbeats(crashingHeartbeat)
 			simulator.Tick(simulator.TicksToAttainFreshness)
@@ -51,14 +50,11 @@ var _ = Describe("Crashes", func() {
 		BeforeEach(func() {
 			simulator.SetDesiredState(a.DesiredState(3))
 
-			crashingHeartbeat = models.Heartbeat{
-				DeaGuid: models.Guid(),
-				InstanceHeartbeats: []models.InstanceHeartbeat{
-					a.CrashedInstanceHeartbeatAtIndex(0),
-					a.InstanceAtIndex(1).Heartbeat(),
-					a.CrashedInstanceHeartbeatAtIndex(2),
-				},
-			}
+			crashingHeartbeat = dea.HeartbeatWith(
+				a.CrashedInstanceHeartbeatAtIndex(0),
+				a.InstanceAtIndex(1).Heartbeat(),
+				a.CrashedInstanceHeartbeatAtIndex(2),
+			)
 
 			simulator.SetCurrentHeartbeats(crashingHeartbeat)
 			simulator.Tick(simulator.TicksToAttainFreshness)
@@ -82,13 +78,10 @@ var _ = Describe("Crashes", func() {
 		BeforeEach(func() {
 			simulator.SetDesiredState(a.DesiredState(2))
 
-			crashingHeartbeat = models.Heartbeat{
-				DeaGuid: models.Guid(),
-				InstanceHeartbeats: []models.InstanceHeartbeat{
-					a.InstanceAtIndex(0).Heartbeat(),
-					a.CrashedInstanceHeartbeatAtIndex(1),
-				},
-			}
+			crashingHeartbeat = dea.HeartbeatWith(
+				a.InstanceAtIndex(0).Heartbeat(),
+				a.CrashedInstanceHeartbeatAtIndex(1),
+			)
 
 			simulator.SetCurrentHeartbeats(crashingHeartbeat)
 			simulator.Tick(simulator.TicksToAttainFreshness)
@@ -131,14 +124,11 @@ var _ = Describe("Crashes", func() {
 				simulator.Tick(1)                     //sends start for #3
 
 				simulator.Tick(simulator.GracePeriod) //wait for keep-alive #3 to expire
-				runningHeartbeat := models.Heartbeat{
-					DeaGuid: models.Guid(),
-					InstanceHeartbeats: []models.InstanceHeartbeat{
-						a.InstanceAtIndex(0).Heartbeat(),
-						a.InstanceAtIndex(1).Heartbeat(),
-						a.CrashedInstanceHeartbeatAtIndex(1),
-					},
-				}
+				runningHeartbeat := dea.HeartbeatWith(
+					a.InstanceAtIndex(0).Heartbeat(),
+					a.InstanceAtIndex(1).Heartbeat(),
+					a.CrashedInstanceHeartbeatAtIndex(1),
+				)
 
 				startStopListener.Reset()
 				simulator.SetCurrentHeartbeats(runningHeartbeat)
@@ -149,7 +139,7 @@ var _ = Describe("Crashes", func() {
 			Context("when it starts crashing again *before* the crash count expires", func() {
 				It("should continue the backoff policy where it left off", func() {
 					simulator.SetCurrentHeartbeats(crashingHeartbeat)
-					simulator.Tick(simulator.TicksToExpireHeartbeat) //kill off the running heartbeat and then schedule a start
+					simulator.Tick(1) //running heartbeat is gone; schedule a start from where the policy left off
 					Ω(startStopListener.Starts).Should(HaveLen(0))
 					simulator.Tick(simulator.GracePeriod)
 					Ω(startStopListener.Starts).Should(HaveLen(1))
@@ -160,8 +150,7 @@ var _ = Describe("Crashes", func() {
 				It("should reset the backoff policy", func() {
 					simulator.Tick(6 * 2) //6 is the maximum backoff (cli_runner_test sets this in the config) and the crash count TTL is max backoff * 2
 					simulator.SetCurrentHeartbeats(crashingHeartbeat)
-					simulator.Tick(simulator.TicksToExpireHeartbeat) //kill off the running heartbeat and then schedule a start
-					simulator.Tick(1)
+					simulator.Tick(1) //schedule and send a start immediately
 					Ω(startStopListener.Starts).Should(HaveLen(1))
 				})
 			})

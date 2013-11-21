@@ -8,7 +8,7 @@ import (
 )
 
 func ServeAPI(l logger.Logger, conf config.Config) {
-	store := connectToStore(l, conf)
+	store, _ := connectToStore(l, conf)
 	messageBus := connectToMessageBus(l, conf)
 
 	apiServer := apiserver.New(

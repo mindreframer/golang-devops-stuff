@@ -3,14 +3,17 @@ package md_test
 import (
 	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/models"
+	"github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/testhelpers/desiredstateserver"
 	"github.com/cloudfoundry/hm9000/testhelpers/storerunner"
 	"github.com/cloudfoundry/yagnats"
+	. "github.com/onsi/gomega"
 )
 
 type Simulator struct {
 	conf                   config.Config
 	storeRunner            storerunner.StoreRunner
+	store                  store.Store
 	desiredStateServer     *desiredstateserver.DesiredStateServer
 	currentHeartbeats      []models.Heartbeat
 	currentTimestamp       int
@@ -21,13 +24,14 @@ type Simulator struct {
 	messageBus             yagnats.NATSClient
 }
 
-func NewSimulator(conf config.Config, storeRunner storerunner.StoreRunner, desiredStateServer *desiredstateserver.DesiredStateServer, cliRunner *CLIRunner, messageBus yagnats.NATSClient) *Simulator {
+func NewSimulator(conf config.Config, storeRunner storerunner.StoreRunner, store store.Store, desiredStateServer *desiredstateserver.DesiredStateServer, cliRunner *CLIRunner, messageBus yagnats.NATSClient) *Simulator {
 	desiredStateServer.Reset()
 
 	return &Simulator{
 		currentTimestamp:       100,
 		conf:                   conf,
 		storeRunner:            storeRunner,
+		store:                  store,
 		desiredStateServer:     desiredStateServer,
 		cliRunner:              cliRunner,
 		TicksToAttainFreshness: int(conf.ActualFreshnessTTLInHeartbeats) + 1,
@@ -51,11 +55,17 @@ func (s *Simulator) Tick(numTicks int) {
 }
 
 func (s *Simulator) sendHeartbeats() {
+	originalNHeartbeats, _ := s.store.GetMetric("SavedHeartbeats")
 	s.cliRunner.StartListener(s.currentTimestamp)
 	for _, heartbeat := range s.currentHeartbeats {
 		s.messageBus.Publish("dea.heartbeat", string(heartbeat.ToJSON()))
 	}
-	s.cliRunner.WaitForHeartbeats(len(s.currentHeartbeats))
+
+	Eventually(func() float64 {
+		nHeartbeats, _ := s.store.GetMetric("SavedHeartbeats")
+		return nHeartbeats
+	}, 5.0, 0.05).Should(BeNumerically(">=", originalNHeartbeats+float64(len(s.currentHeartbeats))))
+
 	s.cliRunner.StopListener()
 }
 

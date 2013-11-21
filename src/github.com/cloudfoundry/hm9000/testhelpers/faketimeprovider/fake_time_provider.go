@@ -9,3 +9,7 @@ type FakeTimeProvider struct {
 func (provider *FakeTimeProvider) Time() time.Time {
 	return provider.TimeToProvide
 }
+
+func (provider *FakeTimeProvider) IncrementBySeconds(seconds uint64) {
+	provider.TimeToProvide = time.Unix(provider.TimeToProvide.Unix()+int64(seconds), 0)
+}

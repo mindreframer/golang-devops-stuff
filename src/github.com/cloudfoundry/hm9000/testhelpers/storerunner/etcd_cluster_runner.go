@@ -16,6 +16,7 @@ type ETCDClusterRunner struct {
 	numNodes     int
 	etcdCommands []*exec.Cmd
 	running      bool
+	client       *etcdclient.Client
 }
 
 func NewETCDClusterRunner(startingPort int, numNodes int) *ETCDClusterRunner {
@@ -47,6 +48,7 @@ func (etcd *ETCDClusterRunner) Start() {
 		}, 3, 0.05).Should(BeTrue(), "Expected ETCD to be up and running")
 	}
 
+	etcd.client = etcdclient.NewClient(etcd.NodeURLS())
 	etcd.running = true
 }
 
@@ -59,6 +61,7 @@ func (etcd *ETCDClusterRunner) Stop() {
 		}
 		etcd.etcdCommands = nil
 		etcd.running = false
+		etcd.client = nil
 	}
 }
 
@@ -80,54 +83,39 @@ func (etcd *ETCDClusterRunner) DiskUsage() (bytes int64, err error) {
 
 func (etcd *ETCDClusterRunner) Reset() {
 	if etcd.running {
-		client := etcdclient.NewClient(etcd.NodeURLS())
-
-		etcd.deleteDir(client, "/")
+		response, err := etcd.client.Get("/?garbage=foo", false) //TODO: remove this terribleness when we upgrade go-etcd
+		Ω(err).ShouldNot(HaveOccured())
+		for _, doomed := range response.Kvs {
+			etcd.client.DeleteAll(doomed.Key)
+		}
 	}
 }
 
 func (etcd *ETCDClusterRunner) FastForwardTime(seconds int) {
 	if etcd.running {
-		client := etcdclient.NewClient(etcd.NodeURLS())
+		//TODO: can't do a recursive get (YET!) because etcd does not return TTLs when getting recursively.  This should be fixed in 0.2 soon.  For now we do a (slower) manual fetch.
 
-		etcd.fastForwardTime(client, "/", seconds)
+		etcd.fastForwardTime("/?recursive=true&", seconds)
 	}
 }
 
-func (etcd *ETCDClusterRunner) deleteDir(client *etcdclient.Client, dir string) {
-	responses, err := client.Get(dir)
+func (etcd *ETCDClusterRunner) fastForwardTime(key string, seconds int) {
+	response, err := etcd.client.Get(key, false)
 	Ω(err).ShouldNot(HaveOccured())
-	for _, response := range responses {
-		if response.Key != "/_etcd" {
-			if response.Dir == true {
-				etcd.deleteDir(client, response.Key)
-			} else {
-				_, err := client.Delete(response.Key)
-				Ω(err).ShouldNot(HaveOccured())
-			}
+	if response.Dir == true {
+		for _, child := range response.Kvs {
+			etcd.fastForwardTime(child.Key, seconds)
 		}
-	}
-}
-
-func (etcd *ETCDClusterRunner) fastForwardTime(client *etcdclient.Client, dir string, seconds int) {
-	responses, err := client.Get(dir)
-	Ω(err).ShouldNot(HaveOccured())
-	for _, response := range responses {
-		if response.Key != "/_etcd" {
-			if response.Dir == true {
-				etcd.fastForwardTime(client, response.Key, seconds)
-			} else {
-				if response.TTL == 0 {
-					continue
-				}
-				if response.TTL < int64(seconds) {
-					_, err := client.Delete(response.Key)
-					Ω(err).ShouldNot(HaveOccured())
-				} else {
-					_, err := client.Set(response.Key, response.Value, uint64(response.TTL-int64(seconds)+1))
-					Ω(err).ShouldNot(HaveOccured())
-				}
-			}
+	} else {
+		if response.TTL == 0 {
+			return
+		}
+		if response.TTL <= int64(seconds) {
+			_, err := etcd.client.Delete(response.Key)
+			Ω(err).ShouldNot(HaveOccured())
+		} else {
+			_, err := etcd.client.Set(response.Key, response.Value, uint64(response.TTL-int64(seconds)))
+			Ω(err).ShouldNot(HaveOccured())
 		}
 	}
 }

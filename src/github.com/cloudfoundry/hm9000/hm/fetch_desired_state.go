@@ -5,26 +5,27 @@ import (
 	"github.com/cloudfoundry/hm9000/desiredstatefetcher"
 	"github.com/cloudfoundry/hm9000/helpers/httpclient"
 	"github.com/cloudfoundry/hm9000/helpers/logger"
+	"github.com/cloudfoundry/hm9000/helpers/metricsaccountant"
 	"github.com/cloudfoundry/hm9000/store"
-	"github.com/cloudfoundry/hm9000/storeadapter"
 	"os"
 	"strconv"
 )
 
 func FetchDesiredState(l logger.Logger, conf config.Config, poll bool) {
-	etcdStoreAdapter := connectToETCDStoreAdapter(l, conf)
+	store, _ := connectToStore(l, conf)
 
 	if poll {
 		l.Info("Starting Desired State Daemon...")
 		err := Daemonize("Fetcher", func() error {
-			return fetchDesiredState(l, conf, etcdStoreAdapter)
+			return fetchDesiredState(l, conf, store)
 		}, conf.FetcherPollingInterval(), conf.FetcherTimeout(), l)
 		if err != nil {
 			l.Error("Desired State Daemon Errored", err)
 		}
 		l.Info("Desired State Daemon is Down")
+		os.Exit(1)
 	} else {
-		err := fetchDesiredState(l, conf, etcdStoreAdapter)
+		err := fetchDesiredState(l, conf, store)
 		if err != nil {
 			os.Exit(1)
 		} else {
@@ -33,14 +34,14 @@ func FetchDesiredState(l logger.Logger, conf config.Config, poll bool) {
 	}
 }
 
-func fetchDesiredState(l logger.Logger, conf config.Config, etcdStoreAdapter storeadapter.StoreAdapter) error {
+func fetchDesiredState(l logger.Logger, conf config.Config, store store.Store) error {
 	l.Info("Fetching Desired State")
-	store := store.NewStore(conf, etcdStoreAdapter, l)
-
 	fetcher := desiredstatefetcher.New(conf,
 		store,
+		metricsaccountant.New(store),
 		httpclient.NewHttpClient(conf.FetcherNetworkTimeout()),
 		buildTimeProvider(l),
+		l,
 	)
 
 	resultChan := make(chan desiredstatefetcher.DesiredStateFetcherResult, 1)

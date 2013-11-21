@@ -1,6 +1,6 @@
 # Health Manager 9000
 
-[![Build Status](https://travis-ci.org/cloudfoundry/hm9000.png)](https://travis-ci.org/cloudfoundry/hm9000)
+[![Build Status](https://travis-ci.org/cloudfoundry/hm-workspace.png)](https://travis-ci.org/cloudfoundry/hm-workspace)
 
 HM 9000 is a rewrite of CloudFoundry's Health Manager.  HM 9000 is written in Golang and has a more modular architecture compared to the original ruby implementation.  HM 9000's dependencies are locked down in a separate repo, the [hm-workspace](https://github.com/cloudfoundry/hm-workspace).
 
@@ -17,6 +17,23 @@ hm9000 is not yet a complete replacement for health_manager -- we'll update this
 HM9000 solves the high-availability problem by relying on a robust high-availability store (Zookeeper or ETCD) distributed, potentially, across multiple nodes.  Individual HM9000 components are built to rely completely on the store for their knowledge of the world.  This removes the need for maintaining in-memory information and allows clarifies the relationship between the various components (all data must flow through the store).
 
 To avoid the singleton problem, we will allow multiple copies of each HM9000 component across multiple nodes.  These copies will vie for a lock in the high-availability store.  The copy that grabs the lock gets to run and is responsible for maintaining the lock.  Should that copy enter a bad state or die, the lock becomes available allowing another copy to pick up the slack.  Since all state is stored in the store, the backup component should be able to function independently of the failed component.
+
+## Deployment
+
+### Recovering from Failure
+
+If HM9000 enters a bad state, the simplest solution - typically - is to delete the contents of the data store.  Here's how:
+
+    local  $ bosh_ssh hm9000_z1/0 #for example
+    hm9000 $ sudo su -
+    hm9000 $ monit stop etcd
+    hm9000 $ mkdir /var/vcap/store/etcdstorage-bad #for example
+    hm9000 $ mv /var/vcap/store/etcdstorage/* /var/vcap/store/etcdstorage-bad
+    hm9000 $ monit start etcd
+
+all the other components should recover gracefully.
+
+The data files in etcdstorage-bad can then be downloaded and analyzed to try to understand what went wrong to put HM9000/etcd in a bad state.  If you don't think this is necessary: just blow away the contents of `/var/vcap/store/etcdstorage`.
 
 ## Installing HM9000
 

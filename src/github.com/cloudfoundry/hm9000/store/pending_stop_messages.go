@@ -6,14 +6,14 @@ import (
 )
 
 func (store *RealStore) SavePendingStopMessages(messages ...models.PendingStopMessage) error {
-	return store.save(messages, "/stop", 0)
+	return store.save(messages, store.SchemaRoot()+"/stop", 0)
 }
 
 func (store *RealStore) GetPendingStopMessages() (map[string]models.PendingStopMessage, error) {
-	slice, err := store.get("/stop", reflect.TypeOf(map[string]models.PendingStopMessage{}), reflect.ValueOf(models.NewPendingStopMessageFromJSON))
+	slice, err := store.get(store.SchemaRoot()+"/stop", reflect.TypeOf(map[string]models.PendingStopMessage{}), reflect.ValueOf(models.NewPendingStopMessageFromJSON))
 	return slice.Interface().(map[string]models.PendingStopMessage), err
 }
 
 func (store *RealStore) DeletePendingStopMessages(messages ...models.PendingStopMessage) error {
-	return store.delete(messages, "/stop")
+	return store.delete(messages, store.SchemaRoot()+"/stop")
 }

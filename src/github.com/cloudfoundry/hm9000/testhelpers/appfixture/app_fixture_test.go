@@ -26,7 +26,6 @@ var _ = Describe("App Fixture", func() {
 			Ω(desired.AppGuid).Should(Equal(app.AppGuid))
 			Ω(desired.AppVersion).Should(Equal(app.AppVersion))
 			Ω(desired.NumberOfInstances).Should(BeNumerically("==", 1))
-			Ω(desired.Memory).Should(BeNumerically("==", 1024))
 			Ω(desired.State).Should(Equal(AppStateStarted))
 			Ω(desired.PackageState).Should(Equal(AppPackageStateStaged))
 		})
@@ -55,11 +54,11 @@ var _ = Describe("App Fixture", func() {
 			index := 1
 			heartbeat := app.CrashedInstanceHeartbeatAtIndex(index)
 			Ω(heartbeat.State).Should(Equal(InstanceStateCrashed))
-			Ω(heartbeat.CCPartition).Should(Equal("default"))
 			Ω(heartbeat.AppGuid).Should(Equal(app.AppGuid))
 			Ω(heartbeat.AppVersion).Should(Equal(app.AppVersion))
 			Ω(heartbeat.InstanceGuid).ShouldNot(BeZero())
 			Ω(heartbeat.InstanceIndex).Should(Equal(index))
+			Ω(heartbeat.DeaGuid).Should(Equal(app.DeaGuid))
 		})
 	})
 
@@ -73,12 +72,12 @@ var _ = Describe("App Fixture", func() {
 			It("creates an instance heartbeat", func() {
 				heartbeat := instance.Heartbeat()
 
-				Ω(heartbeat.CCPartition).Should(Equal("default"))
 				Ω(heartbeat.AppGuid).Should(Equal(app.AppGuid))
 				Ω(heartbeat.AppVersion).Should(Equal(app.AppVersion))
 				Ω(heartbeat.InstanceGuid).Should(Equal(instance.InstanceGuid))
 				Ω(heartbeat.InstanceIndex).Should(Equal(instance.InstanceIndex))
 				Ω(heartbeat.State).Should(Equal(InstanceStateRunning))
+				Ω(heartbeat.DeaGuid).Should(Equal(app.DeaGuid))
 			})
 		})
 
@@ -105,6 +104,7 @@ var _ = Describe("App Fixture", func() {
 			heartbeat := app.Heartbeat(2)
 
 			Ω(heartbeat.DeaGuid).ShouldNot(BeEmpty())
+			Ω(heartbeat.DeaGuid).Should(Equal(app.DeaGuid))
 
 			Ω(heartbeat.InstanceHeartbeats).Should(HaveLen(2))
 			Ω(heartbeat.InstanceHeartbeats[0]).Should(Equal(instance.Heartbeat()))

@@ -36,3 +36,10 @@ func (dea DeaFixture) Heartbeat(numApps int) models.Heartbeat {
 		InstanceHeartbeats: instanceHeartbeats,
 	}
 }
+
+func (dea DeaFixture) HeartbeatWith(instanceHeartbeats ...models.InstanceHeartbeat) models.Heartbeat {
+	return models.Heartbeat{
+		DeaGuid:            dea.DeaGuid,
+		InstanceHeartbeats: instanceHeartbeats,
+	}
+}

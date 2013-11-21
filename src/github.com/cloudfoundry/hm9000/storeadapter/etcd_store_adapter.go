@@ -11,10 +11,10 @@ type ETCDStoreAdapter struct {
 	workerPool *workerpool.WorkerPool
 }
 
-func NewETCDStoreAdapter(urls []string, maxConcurrentRequests int) *ETCDStoreAdapter {
+func NewETCDStoreAdapter(urls []string, workerPool *workerpool.WorkerPool) *ETCDStoreAdapter {
 	return &ETCDStoreAdapter{
 		urls:       urls,
-		workerPool: workerpool.NewWorkerPool(maxConcurrentRequests),
+		workerPool: workerPool,
 	}
 }
 
@@ -87,32 +87,64 @@ func (adapter *ETCDStoreAdapter) Set(nodes []StoreNode) error {
 }
 
 func (adapter *ETCDStoreAdapter) Get(key string) (StoreNode, error) {
-	responses, err := adapter.client.Get(key)
+	//TODO: remove this terribleness when we upgrade go-etcd
+	if key == "/" {
+		key = "/?garbage=foo&"
+	}
+
+	done := make(chan bool, 1)
+	var response *etcd.Response
+	var err error
+
+	//we route through the worker pool to enable usage tracking
+	adapter.workerPool.ScheduleWork(func() {
+		response, err = adapter.client.Get(key, false)
+		done <- true
+	})
+
+	<-done
+
 	if adapter.isTimeoutError(err) {
 		return StoreNode{}, ErrorTimeout
 	}
 
-	if len(responses) == 0 {
+	if adapter.isMissingKeyError(err) {
 		return StoreNode{}, ErrorKeyNotFound
 	}
 	if err != nil {
 		return StoreNode{}, err
 	}
 
-	if len(responses) > 1 || responses[0].Key != key {
+	if response.Dir {
 		return StoreNode{}, ErrorNodeIsDirectory
 	}
 
 	return StoreNode{
-		Key:   responses[0].Key,
-		Value: []byte(responses[0].Value),
-		Dir:   responses[0].Dir,
-		TTL:   uint64(responses[0].TTL),
+		Key:   response.Key,
+		Value: []byte(response.Value),
+		Dir:   response.Dir,
+		TTL:   uint64(response.TTL),
 	}, nil
 }
 
 func (adapter *ETCDStoreAdapter) ListRecursively(key string) (StoreNode, error) {
-	responses, err := adapter.client.Get(key)
+	//TODO: remove this terribleness when we upgrade go-etcd
+	if key == "/" {
+		key = "/?recursive=true&garbage=foo&"
+	}
+
+	done := make(chan bool, 1)
+	var response *etcd.Response
+	var err error
+
+	//we route through the worker pool to enable usage tracking
+	adapter.workerPool.ScheduleWork(func() {
+		response, err = adapter.client.GetAll(key, false)
+		done <- true
+	})
+
+	<-done
+
 	if adapter.isTimeoutError(err) {
 		return StoreNode{}, ErrorTimeout
 	}
@@ -125,42 +157,67 @@ func (adapter *ETCDStoreAdapter) ListRecursively(key string) (StoreNode, error) 
 		return StoreNode{}, err
 	}
 
-	if len(responses) == 0 {
-		return StoreNode{Key: key, Dir: true}, nil
-	}
-
-	if responses[0].Key == key {
+	if !response.Dir {
 		return StoreNode{}, ErrorNodeIsNotDirectory
 	}
 
-	childNodes := make([]StoreNode, 0)
+	if len(response.Kvs) == 0 {
+		return StoreNode{Key: key, Dir: true}, nil
+	}
 
-	for _, response := range responses {
-		if response.Key == "/_etcd" {
-			continue
+	kvPair := etcd.KeyValuePair{
+		Key:     response.Key,
+		Value:   response.Value,
+		Dir:     response.Dir,
+		KVPairs: response.Kvs,
+	}
+
+	return adapter.makeStoreNode(kvPair), nil
+}
+
+func (adapter *ETCDStoreAdapter) makeStoreNode(kvPair etcd.KeyValuePair) StoreNode {
+	if kvPair.Dir {
+		node := StoreNode{
+			Key:        kvPair.Key,
+			Dir:        true,
+			ChildNodes: []StoreNode{},
 		}
 
-		if response.Dir {
-			node, err := adapter.ListRecursively(response.Key)
-			if err != nil {
-				return StoreNode{}, err
-			}
-			childNodes = append(childNodes, node)
-		} else {
-			childNodes = append(childNodes, StoreNode{
-				Key:   response.Key,
-				Value: []byte(response.Value),
-				Dir:   response.Dir,
-				TTL:   uint64(response.TTL),
-			})
+		for _, child := range kvPair.KVPairs {
+			node.ChildNodes = append(node.ChildNodes, adapter.makeStoreNode(child))
+		}
+
+		return node
+	} else {
+		return StoreNode{
+			Key:   kvPair.Key,
+			Value: []byte(kvPair.Value),
+			// TTL:   uint64(kvPair.TTL),
+		}
+	}
+}
+
+func (adapter *ETCDStoreAdapter) Delete(keys ...string) error {
+	results := make(chan error, len(keys))
+
+	for _, key := range keys {
+		key := key
+		adapter.workerPool.ScheduleWork(func() {
+			_, err := adapter.client.DeleteAll(key)
+			results <- err
+		})
+	}
+
+	var err error
+	numReceived := 0
+	for numReceived < len(keys) {
+		result := <-results
+		numReceived++
+		if err == nil {
+			err = result
 		}
 	}
 
-	return StoreNode{Key: key, Dir: true, ChildNodes: childNodes}, nil
-}
-
-func (adapter *ETCDStoreAdapter) Delete(key string) error {
-	_, err := adapter.client.Delete(key)
 	if adapter.isTimeoutError(err) {
 		return ErrorTimeout
 	}

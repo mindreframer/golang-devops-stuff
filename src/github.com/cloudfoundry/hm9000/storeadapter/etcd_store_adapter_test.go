@@ -1,6 +1,7 @@
 package storeadapter_test
 
 import (
+	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	. "github.com/cloudfoundry/hm9000/storeadapter"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -24,7 +25,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 			Value: []byte("burgers"),
 		}
 
-		adapter = NewETCDStoreAdapter(etcdRunner.NodeURLS(), 100)
+		adapter = NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(100))
 		err := adapter.Connect()
 		Ω(err).ShouldNot(HaveOccured())
 	})
@@ -231,7 +232,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 		Context("when listing an empty directory", func() {
 			It("should return an empty list of breakfastNodes, and not error", func() {
 				err := adapter.Set([]StoreNode{
-					StoreNode{
+					{
 						Key:   "/empty_dir/temp",
 						Value: []byte("foo"),
 					},
@@ -285,16 +286,20 @@ var _ = Describe("ETCD Store Adapter", func() {
 
 	Describe("Delete", func() {
 		BeforeEach(func() {
-			err := adapter.Set([]StoreNode{breakfastNode})
+			err := adapter.Set([]StoreNode{breakfastNode, lunchNode})
 			Ω(err).ShouldNot(HaveOccured())
 		})
 
-		Context("when deleting an existing key", func() {
-			It("should delete the key", func() {
-				err := adapter.Delete("/menu/breakfast")
+		Context("when deleting existing keys", func() {
+			It("should delete the keys", func() {
+				err := adapter.Delete("/menu/breakfast", "/menu/lunch")
 				Ω(err).ShouldNot(HaveOccured())
 
-				value, err := adapter.Get("/menu/breakfat")
+				value, err := adapter.Get("/menu/breakfast")
+				Ω(err).Should(Equal(ErrorKeyNotFound))
+				Ω(value).Should(BeZero())
+
+				value, err = adapter.Get("/menu/lunch")
 				Ω(err).Should(Equal(ErrorKeyNotFound))
 				Ω(value).Should(BeZero())
 			})
@@ -303,6 +308,19 @@ var _ = Describe("ETCD Store Adapter", func() {
 		Context("when deleting a non-existing key", func() {
 			It("should error", func() {
 				err := adapter.Delete("/not-a-key")
+				Ω(err).Should(Equal(ErrorKeyNotFound))
+			})
+		})
+
+		Context("when deleting a directory", func() {
+			It("deletes the key and its contents", func() {
+				err := adapter.Delete("/menu")
+				Ω(err).ShouldNot(HaveOccured())
+
+				_, err = adapter.Get("/menu/breakfast")
+				Ω(err).Should(Equal(ErrorKeyNotFound))
+
+				_, err = adapter.Get("/menu")
 				Ω(err).Should(Equal(ErrorKeyNotFound))
 			})
 		})
@@ -324,7 +342,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 	})
 
 	Context("When setting a key with a non-zero TTL", func() {
-		It("should stay in the adapter for its TTL and then disappear", func() {
+		It("should stay in the store for the duration of its TTL and then disappear", func() {
 			breakfastNode.TTL = 1
 			err := adapter.Set([]StoreNode{breakfastNode})
 			Ω(err).ShouldNot(HaveOccured())
@@ -335,7 +353,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 			Eventually(func() interface{} {
 				_, err = adapter.Get("/menu/breakfast")
 				return err
-			}, 1.05, 0.01).Should(Equal(ErrorKeyNotFound))
+			}, 2, 0.01).Should(Equal(ErrorKeyNotFound)) // as of etcd v0.2rc1, etcd seems to take an extra 0.5 seconds to expire its TTLs
 		})
 	})
 })

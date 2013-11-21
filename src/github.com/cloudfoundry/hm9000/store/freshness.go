@@ -8,11 +8,11 @@ import (
 )
 
 func (store *RealStore) BumpDesiredFreshness(timestamp time.Time) error {
-	return store.bumpFreshness(store.config.DesiredFreshnessKey, store.config.DesiredFreshnessTTL(), timestamp)
+	return store.bumpFreshness(store.SchemaRoot()+store.config.DesiredFreshnessKey, store.config.DesiredFreshnessTTL(), timestamp)
 }
 
 func (store *RealStore) BumpActualFreshness(timestamp time.Time) error {
-	return store.bumpFreshness(store.config.ActualFreshnessKey, store.config.ActualFreshnessTTL(), timestamp)
+	return store.bumpFreshness(store.SchemaRoot()+store.config.ActualFreshnessKey, store.config.ActualFreshnessTTL(), timestamp)
 }
 
 func (store *RealStore) bumpFreshness(key string, ttl uint64, timestamp time.Time) error {
@@ -26,7 +26,7 @@ func (store *RealStore) bumpFreshness(key string, ttl uint64, timestamp time.Tim
 	}
 
 	return store.adapter.Set([]storeadapter.StoreNode{
-		storeadapter.StoreNode{
+		{
 			Key:   key,
 			Value: jsonTimestamp,
 			TTL:   ttl,
@@ -35,7 +35,7 @@ func (store *RealStore) bumpFreshness(key string, ttl uint64, timestamp time.Tim
 }
 
 func (store *RealStore) IsDesiredStateFresh() (bool, error) {
-	_, err := store.adapter.Get(store.config.DesiredFreshnessKey)
+	_, err := store.adapter.Get(store.SchemaRoot() + store.config.DesiredFreshnessKey)
 	if err == storeadapter.ErrorKeyNotFound {
 		return false, nil
 	}
@@ -46,7 +46,7 @@ func (store *RealStore) IsDesiredStateFresh() (bool, error) {
 }
 
 func (store *RealStore) IsActualStateFresh(currentTime time.Time) (bool, error) {
-	node, err := store.adapter.Get(store.config.ActualFreshnessKey)
+	node, err := store.adapter.Get(store.SchemaRoot() + store.config.ActualFreshnessKey)
 	if err == storeadapter.ErrorKeyNotFound {
 		return false, nil
 	}
