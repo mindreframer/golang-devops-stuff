@@ -70,6 +70,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       a go implementation of the STUN client (RFC 3489 and RFC 5389)
        4 commits, last change: 2013-08-17 16:10:34, 10 stars, 0 forks
 
+    cloudflare/redoctober:
+      Go server for two-man rule style file encryption and decryption.
+       24 commits, last change: 2013-11-22 06:51:07, 202 stars, 7 forks
+
     cloudfoundry/gorouter:
 
        360 commits, last change: 2013-11-15 22:01:29, 92 stars, 28 forks
