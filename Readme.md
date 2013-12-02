@@ -138,6 +138,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Service orchestration and management tool.
        537 commits, last change: 2013-11-20 08:54:21, 1,029 stars, 42 forks
 
+    inconshreveable/ngrok:
+      Tunneling, reverse proxy for developing and understanding networked, HTTP services
+       164 commits, last change: 2013-08-29 08:39:16, 479 stars, 27 forks
+
     influxdb/influxdb:
       Scalable datastore for metrics, events, and real-time analytics
        446 commits, last change: 2013-11-20 12:37:01, 838 stars, 33 forks
