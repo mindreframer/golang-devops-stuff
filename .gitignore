@@ -1,0 +1,9 @@
+*.swp
+bin/
+pkg/
+src/code.google.com
+src/github.com
+src/bitbucket.org
+src/launchpad.net
+src/ngrok/client/assets/assets_release.go
+src/ngrok/server/assets/assets_release.go
