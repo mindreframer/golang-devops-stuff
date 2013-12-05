@@ -138,6 +138,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Service orchestration and management tool.
        537 commits, last change: 2013-11-20 08:54:21, 1,029 stars, 42 forks
 
+    inconshreveable/muxado:
+      Stream multiplexing for Go
+       10 commits, last change: 2013-12-02 08:56:11, 47 stars, 3 forks
+
     inconshreveable/ngrok:
       Tunneling, reverse proxy for developing and understanding networked, HTTP services
        164 commits, last change: 2013-08-29 08:39:16, 479 stars, 27 forks
