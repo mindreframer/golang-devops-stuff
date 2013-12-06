@@ -1,3 +1,4 @@
+[![Stories in Ready](https://badge.waffle.io/buger/gor.png?label=ready)](https://waffle.io/buger/gor)  
 [![Build Status](https://travis-ci.org/buger/gor.png?branch=master)](https://travis-ci.org/buger/gor)
 
 ## About
