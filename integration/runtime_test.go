@@ -74,6 +74,9 @@ func layerArchive(tarfile string) (io.Reader, error) {
 }
 
 func init() {
+	// Always use the same driver (vfs) for all integration tests.
+	// To test other drivers, we need a dedicated driver validation suite.
+	os.Setenv("DOCKER_DRIVER", "vfs")
 	os.Setenv("TEST", "1")
 
 	// Hack to run sys init during unit testing
@@ -124,7 +127,7 @@ func setupBaseImage() {
 	job.SetenvBool("Autorestart", false)
 	job.Setenv("BridgeIface", unitTestNetworkBridge)
 	if err := job.Run(); err != nil {
-		log.Fatalf("Unable to create a runtime for tests:", err)
+		log.Fatalf("Unable to create a runtime for tests: %s", err)
 	}
 	srv := mkServerFromEngine(eng, log.New(os.Stderr, "", 0))
 
@@ -170,7 +173,7 @@ func spawnGlobalDaemon() {
 func GetTestImage(runtime *docker.Runtime) *docker.Image {
 	imgs, err := runtime.Graph().Map()
 	if err != nil {
-		log.Fatalf("Unable to get the test image:", err)
+		log.Fatalf("Unable to get the test image: %s", err)
 	}
 	for _, image := range imgs {
 		if image.ID == unitTestImageID {
@@ -387,7 +390,7 @@ func startEchoServerContainer(t *testing.T, proto string) (*docker.Runtime, *doc
 		jobCreate.SetenvList("Cmd", []string{"sh", "-c", cmd})
 		jobCreate.SetenvList("PortSpecs", []string{fmt.Sprintf("%s/%s", strPort, proto)})
 		jobCreate.SetenvJson("ExposedPorts", ep)
-		jobCreate.StdoutParseString(&id)
+		jobCreate.Stdout.AddString(&id)
 		if err := jobCreate.Run(); err != nil {
 			t.Fatal(err)
 		}
@@ -419,7 +422,7 @@ func startEchoServerContainer(t *testing.T, proto string) (*docker.Runtime, *doc
 	}
 
 	setTimeout(t, "Waiting for the container to be started timed out", 2*time.Second, func() {
-		for !container.State.Running {
+		for !container.State.IsRunning() {
 			time.Sleep(10 * time.Millisecond)
 		}
 	})
@@ -533,7 +536,7 @@ func TestRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !container2.State.Running {
+	if !container2.State.IsRunning() {
 		t.Fatalf("Container %v should appear as running but isn't", container2.ID)
 	}
 
@@ -543,7 +546,7 @@ func TestRestore(t *testing.T) {
 	if err := container2.WaitTimeout(2 * time.Second); err != nil {
 		t.Fatal(err)
 	}
-	container2.State.Running = true
+	container2.State.SetRunning(42)
 	container2.ToDisk()
 
 	if len(runtime1.List()) != 2 {
@@ -553,7 +556,7 @@ func TestRestore(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !container2.State.Running {
+	if !container2.State.IsRunning() {
 		t.Fatalf("Container %v should appear as running but isn't", container2.ID)
 	}
 
@@ -577,7 +580,7 @@ func TestRestore(t *testing.T) {
 	}
 	runningCount := 0
 	for _, c := range runtime2.List() {
-		if c.State.Running {
+		if c.State.IsRunning() {
 			t.Errorf("Running container found: %v (%v)", c.ID, c.Path)
 			runningCount++
 		}
@@ -592,7 +595,7 @@ func TestRestore(t *testing.T) {
 	if err := container3.Run(); err != nil {
 		t.Fatal(err)
 	}
-	container2.State.Running = false
+	container2.State.SetStopped(0)
 }
 
 func TestReloadContainerLinks(t *testing.T) {
@@ -638,11 +641,11 @@ func TestReloadContainerLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !container2.State.Running {
+	if !container2.State.IsRunning() {
 		t.Fatalf("Container %v should appear as running but isn't", container2.ID)
 	}
 
-	if !container1.State.Running {
+	if !container1.State.IsRunning() {
 		t.Fatalf("Container %s should appear as running but isn't", container1.ID)
 	}
 
@@ -669,7 +672,7 @@ func TestReloadContainerLinks(t *testing.T) {
 	}
 	runningCount := 0
 	for _, c := range runtime2.List() {
-		if c.State.Running {
+		if c.State.IsRunning() {
 			runningCount++
 		}
 	}
@@ -838,5 +841,45 @@ func TestGetAllChildren(t *testing.T) {
 		if value.ID != childContainer.ID {
 			t.Fatalf("Expected id %s got %s", childContainer.ID, value.ID)
 		}
+	}
+}
+
+func TestDestroyWithInitLayer(t *testing.T) {
+	runtime := mkRuntime(t)
+	defer nuke(runtime)
+
+	container, _, err := runtime.Create(&docker.Config{
+		Image: GetTestImage(runtime).ID,
+		Cmd:   []string{"ls", "-al"},
+	}, "")
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Destroy
+	if err := runtime.Destroy(container); err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure runtime.Exists() behaves correctly
+	if runtime.Exists("test_destroy") {
+		t.Fatalf("Exists() returned true")
+	}
+
+	// Make sure runtime.List() doesn't list the destroyed container
+	if len(runtime.List()) != 0 {
+		t.Fatalf("Expected 0 container, %v found", len(runtime.List()))
+	}
+
+	driver := runtime.Graph().Driver()
+
+	// Make sure that the container does not exist in the driver
+	if _, err := driver.Get(container.ID); err == nil {
+		t.Fatal("Conttainer should not exist in the driver")
+	}
+
+	// Make sure that the init layer is removed from the driver
+	if _, err := driver.Get(fmt.Sprintf("%s-init", container.ID)); err == nil {
+		t.Fatal("Container's init layer should not exist in the driver")
 	}
 }

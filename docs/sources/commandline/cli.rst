@@ -18,6 +18,38 @@ To list available commands, either run ``docker`` with no parameters or execute
 
     ...
 
+.. _cli_daemon:
+
+``daemon``
+----------
+
+::
+
+    Usage of docker:
+      -D=false: Enable debug mode
+      -H=[unix:///var/run/docker.sock]: Multiple tcp://host:port or unix://path/to/socket to bind in daemon mode, single connection otherwise
+      -api-enable-cors=false: Enable CORS headers in the remote API
+      -b="": Attach containers to a pre-existing network bridge; use 'none' to disable container networking
+      -d=false: Enable daemon mode
+      -dns="": Force docker to use specific DNS servers
+      -g="/var/lib/docker": Path to use as the root of the docker runtime
+      -icc=true: Enable inter-container communication
+      -ip="0.0.0.0": Default IP address to use when binding container ports
+      -iptables=true: Disable docker's addition of iptables rules
+      -p="/var/run/docker.pid": Path to use for daemon PID file
+      -r=true: Restart previously running containers
+      -s="": Force the docker runtime to use a specific storage driver
+      -v=false: Print version information and quit
+
+The docker daemon is the persistent process that manages containers.  Docker uses the same binary for both the 
+daemon and client.  To run the daemon you provide the ``-d`` flag.
+
+To force docker to use devicemapper as the storage driver, use ``docker -d -s devicemapper``
+
+To set the dns server for all docker containers, use ``docker -d -dns 8.8.8.8``
+
+To run the daemon with debug output, use ``docker -d -D``
+
 .. _cli_attach:
 
 ``attach``
@@ -34,7 +66,8 @@ To list available commands, either run ``docker`` with no parameters or execute
 
 You can detach from the container again (and leave it running) with
 ``CTRL-c`` (for a quiet exit) or ``CTRL-\`` to get a stacktrace of
-the Docker client when it quits.
+the Docker client when it quits.  When you detach from the container's 
+process the exit code will be retuned to the client.
 
 To stop a container, use ``docker stop``
 
@@ -88,35 +121,69 @@ Examples:
 
     Usage: docker build [OPTIONS] PATH | URL | -
     Build a new container image from the source code at PATH
-      -t="": Repository name (and optionally a tag) to be applied to the resulting image in case of success.
+      -t="": Repository name (and optionally a tag) to be applied 
+             to the resulting image in case of success.
       -q=false: Suppress verbose build output.
       -no-cache: Do not use the cache when building the image.
       -rm: Remove intermediate containers after a successful build
-    When a single Dockerfile is given as URL, then no context is set. When a git repository is set as URL, the repository is used as context
+
+The files at PATH or URL are called the "context" of the build. The
+build process may refer to any of the files in the context, for
+example when using an :ref:`ADD <dockerfile_add>` instruction.  When a
+single ``Dockerfile`` is given as URL, then no context is set.  When a
+git repository is set as URL, then the repository is used as the
+context
 
 .. _cli_build_examples:
+
+.. seealso:: :ref:`dockerbuilder`.
 
 Examples:
 ~~~~~~~~~
 
 .. code-block:: bash
 
-    sudo docker build .
+    $ sudo docker build .
+    Uploading context 10240 bytes
+    Step 1 : FROM busybox
+    Pulling repository busybox
+     ---> e9aa60c60128MB/2.284 MB (100%) endpoint: https://cdn-registry-1.docker.io/v1/
+    Step 2 : RUN ls -lh /
+     ---> Running in 9c9e81692ae9
+    total 24
+    drwxr-xr-x    2 root     root        4.0K Mar 12  2013 bin
+    drwxr-xr-x    5 root     root        4.0K Oct 19 00:19 dev
+    drwxr-xr-x    2 root     root        4.0K Oct 19 00:19 etc
+    drwxr-xr-x    2 root     root        4.0K Nov 15 23:34 lib
+    lrwxrwxrwx    1 root     root           3 Mar 12  2013 lib64 -> lib
+    dr-xr-xr-x  116 root     root           0 Nov 15 23:34 proc
+    lrwxrwxrwx    1 root     root           3 Mar 12  2013 sbin -> bin
+    dr-xr-xr-x   13 root     root           0 Nov 15 23:34 sys
+    drwxr-xr-x    2 root     root        4.0K Mar 12  2013 tmp
+    drwxr-xr-x    2 root     root        4.0K Nov 15 23:34 usr
+     ---> b35f4035db3f
+    Step 3 : CMD echo Hello World
+     ---> Running in 02071fceb21b
+     ---> f52f38b7823e
+    Successfully built f52f38b7823e
 
-This will read the ``Dockerfile`` from the current directory. It will
-also send any other files and directories found in the current
-directory to the ``docker`` daemon.
+This example specifies that the PATH is ``.``, and so all the files in
+the local directory get tar'd and sent to the Docker daemon.  The PATH
+specifies where to find the files for the "context" of the build on
+the Docker daemon. Remember that the daemon could be running on a
+remote machine and that no parsing of the Dockerfile happens at the
+client side (where you're running ``docker build``). That means that
+*all* the files at PATH get sent, not just the ones listed to
+:ref:`ADD <dockerfile_add>` in the ``Dockerfile``.
 
-The contents of this directory would be used by ``ADD`` commands found
-within the ``Dockerfile``.  This will send a lot of data to the
-``docker`` daemon if the current directory contains a lot of data.  If
-the absolute path is provided instead of ``.`` then only the files and
-directories required by the ADD commands from the ``Dockerfile`` will be
-added to the context and transferred to the ``docker`` daemon.
+The transfer of context from the local machine to the Docker daemon is
+what the ``docker`` client means when you see the "Uploading context"
+message.
+
 
 .. code-block:: bash
 
-   sudo docker build -t vieux/apache:2.0 .
+   $ sudo docker build -t vieux/apache:2.0 .
 
 This will build like the previous example, but it will then tag the
 resulting image. The repository name will be ``vieux/apache`` and the
@@ -125,20 +192,19 @@ tag will be ``2.0``
 
 .. code-block:: bash
 
-    sudo docker build - < Dockerfile
+    $ sudo docker build - < Dockerfile
 
 This will read a ``Dockerfile`` from *stdin* without context. Due to
 the lack of a context, no contents of any local directory will be sent
-to the ``docker`` daemon.  ``ADD`` doesn't work when running in this
-mode because the absence of the context provides no source files to
-copy to the container.
+to the ``docker`` daemon.  Since there is no context, a Dockerfile
+``ADD`` only works if it refers to a remote URL.
 
 .. code-block:: bash
 
-    sudo docker build github.com/creack/docker-firefox
+    $ sudo docker build github.com/creack/docker-firefox
 
-This will clone the Github repository and use it as context. The
-``Dockerfile`` at the root of the repository is used as
+This will clone the Github repository and use the cloned repository as
+context. The ``Dockerfile`` at the root of the repository is used as
 ``Dockerfile``.  Note that you can specify an arbitrary git repository
 by using the ``git://`` schema.
 
@@ -157,23 +223,23 @@ by using the ``git://`` schema.
       -m="": Commit message
       -author="": Author (eg. "John Hannibal Smith <hannibal@a-team.com>"
       -run="": Configuration to be applied when the image is launched with `docker run`.
-               (ex: '{"Cmd": ["cat", "/world"], "PortSpecs": ["22"]}')
+               (ex: -run='{"Cmd": ["cat", "/world"], "PortSpecs": ["22"]}')
 
 Simple commit of an existing container
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-	$ docker ps
+	$ sudo docker ps
 	ID                  IMAGE               COMMAND             CREATED             STATUS              PORTS
 	c3f279d17e0a        ubuntu:12.04        /bin/bash           7 days ago          Up 25 hours                             
 	197387f1b436        ubuntu:12.04        /bin/bash           7 days ago          Up 25 hours                             
 	$ docker commit c3f279d17e0a  SvenDowideit/testimage:version3
 	f5283438590d
 	$ docker images | head
-	REPOSITORY                        TAG                 ID                  CREATED             SIZE
-	SvenDowideit/testimage            version3            f5283438590d        16 seconds ago      204.2 MB (virtual 335.7 MB)
-	S
+	REPOSITORY                        TAG                 ID                  CREATED             VIRTUAL SIZE
+	SvenDowideit/testimage            version3            f5283438590d        16 seconds ago      335.7 MB
+	
 
 Full -run example
 .................
@@ -336,7 +402,13 @@ Show events in the past from a specified time
 
     Usage: docker export CONTAINER
 
-    Export the contents of a filesystem as a tar archive
+    Export the contents of a filesystem as a tar archive to STDOUT
+    
+for example:
+
+.. code-block:: bash
+
+    $ sudo docker export red_panda > latest.tar
 
 .. _cli_history:
 
@@ -409,16 +481,16 @@ Listing the most recently created images
 .. code-block:: bash
 
 	$ sudo docker images | head
-	REPOSITORY                    TAG                 IMAGE ID            CREATED             SIZE
-	<none>                        <none>              77af4d6b9913        19 hours ago        30.53 MB (virtual 1.089 GB)
-	committest                    latest              b6fa739cedf5        19 hours ago        30.53 MB (virtual 1.089 GB)
-	<none>                        <none>              78a85c484f71        19 hours ago        30.53 MB (virtual 1.089 GB)
-	docker                        latest              30557a29d5ab        20 hours ago        30.53 MB (virtual 1.089 GB)
-	<none>                        <none>              0124422dd9f9        20 hours ago        30.53 MB (virtual 1.089 GB)
-	<none>                        <none>              18ad6fad3402        22 hours ago        23.68 MB (virtual 1.082 GB)
-	<none>                        <none>              f9f1e26352f0        23 hours ago        30.46 MB (virtual 1.089 GB)
-	tryout                        latest              2629d1fa0b81        23 hours ago        16.4 kB (virtual 131.5 MB)
-	<none>                        <none>              5ed6274db6ce        24 hours ago        30.44 MB (virtual 1.089 GB)
+	REPOSITORY                    TAG                 IMAGE ID            CREATED             VIRTUAL SIZE
+	<none>                        <none>              77af4d6b9913        19 hours ago        1.089 GB
+	committest                    latest              b6fa739cedf5        19 hours ago        1.089 GB
+	<none>                        <none>              78a85c484f71        19 hours ago        1.089 GB
+	docker                        latest              30557a29d5ab        20 hours ago        1.089 GB
+	<none>                        <none>              0124422dd9f9        20 hours ago        1.089 GB
+	<none>                        <none>              18ad6fad3402        22 hours ago        1.082 GB
+	<none>                        <none>              f9f1e26352f0        23 hours ago        1.089 GB
+	tryout                        latest              2629d1fa0b81        23 hours ago        131.5 MB
+	<none>                        <none>              5ed6274db6ce        24 hours ago        1.089 GB
 
 Listing the full length image IDs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -426,16 +498,16 @@ Listing the full length image IDs
 .. code-block:: bash
 
 	$ sudo docker images -notrunc | head
-	REPOSITORY                    TAG                 IMAGE ID                                                           CREATED             SIZE
-	<none>                        <none>              77af4d6b9913e693e8d0b4b294fa62ade6054e6b2f1ffb617ac955dd63fb0182   19 hours ago        30.53 MB (virtual 1.089 GB)
-	committest                    latest              b6fa739cedf5ea12a620a439402b6004d057da800f91c7524b5086a5e4749c9f   19 hours ago        30.53 MB (virtual 1.089 GB)
-	<none>                        <none>              78a85c484f71509adeaace20e72e941f6bdd2b25b4c75da8693efd9f61a37921   19 hours ago        30.53 MB (virtual 1.089 GB)
-	docker                        latest              30557a29d5abc51e5f1d5b472e79b7e296f595abcf19fe6b9199dbbc809c6ff4   20 hours ago        30.53 MB (virtual 1.089 GB)
-	<none>                        <none>              0124422dd9f9cf7ef15c0617cda3931ee68346455441d66ab8bdc5b05e9fdce5   20 hours ago        30.53 MB (virtual 1.089 GB)
-	<none>                        <none>              18ad6fad340262ac2a636efd98a6d1f0ea775ae3d45240d3418466495a19a81b   22 hours ago        23.68 MB (virtual 1.082 GB)
-	<none>                        <none>              f9f1e26352f0a3ba6a0ff68167559f64f3e21ff7ada60366e2d44a04befd1d3a   23 hours ago        30.46 MB (virtual 1.089 GB)
-	tryout                        latest              2629d1fa0b81b222fca63371ca16cbf6a0772d07759ff80e8d1369b926940074   23 hours ago        16.4 kB (virtual 131.5 MB)
-	<none>                        <none>              5ed6274db6ceb2397844896966ea239290555e74ef307030ebb01ff91b1914df   24 hours ago        30.44 MB (virtual 1.089 GB)
+	REPOSITORY                    TAG                 IMAGE ID                                                           CREATED             VIRTUAL SIZE
+	<none>                        <none>              77af4d6b9913e693e8d0b4b294fa62ade6054e6b2f1ffb617ac955dd63fb0182   19 hours ago        1.089 GB
+	committest                    latest              b6fa739cedf5ea12a620a439402b6004d057da800f91c7524b5086a5e4749c9f   19 hours ago        1.089 GB
+	<none>                        <none>              78a85c484f71509adeaace20e72e941f6bdd2b25b4c75da8693efd9f61a37921   19 hours ago        1.089 GB
+	docker                        latest              30557a29d5abc51e5f1d5b472e79b7e296f595abcf19fe6b9199dbbc809c6ff4   20 hours ago        1.089 GB
+	<none>                        <none>              0124422dd9f9cf7ef15c0617cda3931ee68346455441d66ab8bdc5b05e9fdce5   20 hours ago        1.089 GB
+	<none>                        <none>              18ad6fad340262ac2a636efd98a6d1f0ea775ae3d45240d3418466495a19a81b   22 hours ago        1.082 GB
+	<none>                        <none>              f9f1e26352f0a3ba6a0ff68167559f64f3e21ff7ada60366e2d44a04befd1d3a   23 hours ago        1.089 GB
+	tryout                        latest              2629d1fa0b81b222fca63371ca16cbf6a0772d07759ff80e8d1369b926940074   23 hours ago        131.5 MB
+	<none>                        <none>              5ed6274db6ceb2397844896966ea239290555e74ef307030ebb01ff91b1914df   24 hours ago        1.089 GB
 
 Displaying images visually
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -486,7 +558,8 @@ Displaying image hierarchy
 
     Usage: docker import URL|- [REPOSITORY[:TAG]]
 
-    Create a new filesystem image from the contents of a tarball
+    Create an empty filesystem image and import the contents of the tarball 
+    (.tar, .tar.gz, .tgz, .bzip, .tar.xz, .txz) into it, then optionally tag it.
 
 At this time, the URL must start with ``http`` and point to a single
 file archive (.tar, .tar.gz, .tgz, .bzip, .tar.xz, .txz) containing a
@@ -558,6 +631,12 @@ might not get preserved.
 
     Insert a file from URL in the IMAGE at PATH
 
+Use the specified IMAGE as the parent for a new image which adds a
+:ref:`layer <layer_def>` containing the new file. ``insert`` does not modify 
+the original image, and the new image has the contents of the parent image, 
+plus the new file.
+
+
 Examples
 ~~~~~~~~
 
@@ -567,6 +646,7 @@ Insert file from github
 .. code-block:: bash
 
     $ sudo docker insert 8283e18b24bc https://raw.github.com/metalivedev/django/master/postinstall /tmp/postinstall.sh
+    06fd35556d7b
 
 .. _cli_inspect:
 
@@ -578,6 +658,52 @@ Insert file from github
     Usage: docker inspect [OPTIONS] CONTAINER
 
     Return low-level information on a container
+
+      -format="": template to output results
+
+By default, this will render all results in a JSON array.  If a format
+is specified, the given template will be executed for each result.
+
+Go's `text/template <http://golang.org/pkg/text/template/>` package
+describes all the details of the format.
+
+Examples
+~~~~~~~~
+
+Get an instance's IP Address
+............................
+
+For the most part, you can pick out any field from the JSON in a
+fairly straightforward manner.
+
+.. code-block:: bash
+
+    $ sudo docker inspect -format='{{.NetworkSettings.IPAddress}}' $INSTANCE_ID
+
+List All Port Bindings
+......................
+
+One can loop over arrays and maps in the results to produce simple
+text output:
+
+.. code-block:: bash
+
+    $ sudo docker inspect -format='{{range $p, $conf := .NetworkSettings.Ports}} {{$p}} -> {{(index $conf 0).HostPort}} {{end}}' $INSTANCE_ID
+
+Find a Specific Port Mapping
+............................
+
+The ``.Field`` syntax doesn't work when the field name begins with a
+number, but the template language's ``index`` function does.  The
+``.NetworkSettings.Ports`` section contains a map of the internal port
+mappings to a list of external address/port objects, so to grab just
+the numeric public port, you use ``index`` to find the specific port
+map, and then ``index`` 0 contains first object inside of that.  Then
+we ask for the ``HostPort`` field to get the public address.
+
+.. code-block:: bash
+
+    $ sudo docker inspect -format='{{(index (index .NetworkSettings.Ports "8787/tcp") 0).HostPort}}' $INSTANCE_ID
 
 .. _cli_kill:
 
@@ -671,6 +797,15 @@ Known Issues (kill)
       -notrunc=false: Don't truncate output
       -q=false: Only display numeric IDs
 
+Running ``docker ps`` showing 2 linked containers.
+
+.. code-block:: bash
+
+    $ docker ps
+    CONTAINER ID        IMAGE                        COMMAND                CREATED              STATUS              PORTS               NAMES
+    4c01db0b339c        ubuntu:12.04                 bash                   17 seconds ago       Up 16 seconds                           webapp              
+    d7886598dbe2        crosbymichael/redis:latest   /redis-server --dir    33 minutes ago       Up 33 minutes       6379/tcp            redis,webapp/db     
+
 .. _cli_pull:
 
 ``pull``
@@ -719,7 +854,7 @@ Known Issues (kill)
         -link="": Remove the link instead of the actual container
 
 Known Issues (rm)
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 * :issue:`197` indicates that ``docker kill`` may leave directories
   behind and make it difficult to remove the container.
@@ -730,7 +865,7 @@ Examples:
 
 .. code-block:: bash
 
-    $ docker rm /redis
+    $ sudo docker rm /redis
     /redis
 
 
@@ -739,7 +874,7 @@ This will remove the container referenced under the link ``/redis``.
 
 .. code-block:: bash
 
-    $ docker rm -link /webapp/redis
+    $ sudo docker rm -link /webapp/redis
     /webapp/redis
 
 
@@ -748,7 +883,7 @@ network communication.
 
 .. code-block:: bash
 
-    $ docker rm `docker ps -a -q`
+    $ sudo docker rm `docker ps -a -q`
 
 
 This command will delete all stopped containers. The command ``docker ps -a -q`` will return all
@@ -802,13 +937,25 @@ containers will not be deleted.
       -link="": Add link to another container (name:alias)
       -name="": Assign the specified name to the container. If no name is specific docker will generate a random name
       -P=false: Publish all exposed ports to the host interfaces
+      
+``'docker run'`` first ``'creates'`` a writeable container layer over
+the specified image, and then ``'starts'`` it using the specified
+command. That is, ``'docker run'`` is equivalent to the API
+``/containers/create`` then ``/containers/(id)/start``.
 
-Examples
---------
+Known Issues (run -volumes-from)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* :issue:`2702`: "lxc-start: Permission denied - failed to mount"
+  could indicate a permissions problem with AppArmor. Please see the
+  issue for a workaround.
+
+Examples:
+~~~~~~~~~
 
 .. code-block:: bash
 
-    sudo docker run -cidfile /tmp/docker_test.cid ubuntu echo "test"
+    $ sudo docker run -cidfile /tmp/docker_test.cid ubuntu echo "test"
 
 This will create a container and print "test" to the console. The
 ``cidfile`` flag makes docker attempt to create a new file and write the
@@ -817,7 +964,10 @@ error. Docker will close this file when docker run exits.
 
 .. code-block:: bash
 
-   docker run mount -t tmpfs none /var/spool/squid
+   $ sudo docker run -t -i -rm ubuntu bash
+   root@bc338942ef20:/# mount -t tmpfs none /mnt
+   mount: permission denied
+
 
 This will *not* work, because by default, most potentially dangerous
 kernel capabilities are dropped; including ``cap_sys_admin`` (which is
@@ -826,7 +976,12 @@ allow it to run:
 
 .. code-block:: bash
 
-   docker run -privileged mount -t tmpfs none /var/spool/squid
+   $ sudo docker run -privileged ubuntu bash
+   root@50e3f57e16e6:/# mount -t tmpfs none /mnt
+   root@50e3f57e16e6:/# df -h
+   Filesystem      Size  Used Avail Use% Mounted on
+   none            1.9G     0  1.9G   0% /mnt
+
 
 The ``-privileged`` flag gives *all* capabilities to the container,
 and it also lifts all the limitations enforced by the ``device``
@@ -836,7 +991,7 @@ use-cases, like running Docker within Docker.
 
 .. code-block:: bash
 
-   docker  run -w /path/to/dir/ -i -t  ubuntu pwd
+   $ sudo docker  run -w /path/to/dir/ -i -t  ubuntu pwd
 
 The ``-w`` lets the command being executed inside directory given,
 here /path/to/dir/. If the path does not exists it is created inside the
@@ -844,7 +999,7 @@ container.
 
 .. code-block:: bash
 
-   docker  run  -v `pwd`:`pwd` -w `pwd` -i -t  ubuntu pwd
+   $ sudo docker  run  -v `pwd`:`pwd` -w `pwd` -i -t  ubuntu pwd
 
 The ``-v`` flag mounts the current working directory into the container.
 The ``-w`` lets the command being executed inside the current
@@ -854,7 +1009,7 @@ using the container, but inside the current working directory.
 
 .. code-block:: bash
 
-    docker run -p 127.0.0.1:80:8080 ubuntu bash
+   $ sudo docker run -p 127.0.0.1:80:8080 ubuntu bash
 
 This binds port ``8080`` of the container to port ``80`` on 127.0.0.1 of the
 host machine. :ref:`port_redirection` explains in detail how to manipulate ports
@@ -862,7 +1017,7 @@ in Docker.
 
 .. code-block:: bash
 
-    docker run -expose 80 ubuntu bash
+    $ sudo docker run -expose 80 ubuntu bash
 
 This exposes port ``80`` of the container for use within a link without
 publishing the port to the host system's interfaces. :ref:`port_redirection`
@@ -870,14 +1025,14 @@ explains in detail how to manipulate ports in Docker.
 
 .. code-block:: bash
 
-    docker run -name console -t -i ubuntu bash
+    $ sudo docker run -name console -t -i ubuntu bash
 
 This will create and run a new container with the container name
 being ``console``.
 
 .. code-block:: bash
 
-    docker run -link /redis:redis -name console ubuntu bash
+    $ sudo docker run -link /redis:redis -name console ubuntu bash
 
 The ``-link`` flag will link the container named ``/redis`` into the
 newly created container with the alias ``redis``.  The new container
@@ -887,7 +1042,7 @@ to the newly created container.
 
 .. code-block:: bash
 
-   docker run -volumes-from 777f7dc92da7,ba8c0c54f0f2:ro -i -t ubuntu pwd
+   $ sudo docker run -volumes-from 777f7dc92da7,ba8c0c54f0f2:ro -i -t ubuntu pwd
 
 The ``-volumes-from`` flag mounts all the defined volumes from the
 refrence containers. Containers can be specified by a comma seperated
@@ -896,16 +1051,10 @@ id may be optionally suffixed with ``:ro`` or ``:rw`` to mount the volumes in
 read-only or read-write mode, respectively. By default, the volumes are mounted
 in the same mode (rw or ro) as the reference container.
 
-Known Issues (run -volumes-from)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-* :issue:`2702`: "lxc-start: Permission denied - failed to mount"
-  could indicate a permissions problem with AppArmor. Please see the
-  issue for a workaround.
-
 .. _cli_save:
 
 ``save``
+---------
 
 ::
 
