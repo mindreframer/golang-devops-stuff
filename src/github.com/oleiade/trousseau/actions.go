@@ -3,6 +3,7 @@ package trousseau
 import (
 	"fmt"
 	"github.com/codegangsta/cli"
+	"github.com/oleiade/trousseau/dsn"
 	"io"
 	"log"
 	"os"
@@ -10,7 +11,8 @@ import (
 	"time"
 )
 
-func hasEnoughArgs(args []string, expected int) bool {
+// hasExpectedArgs checks whether the number of args are as expected.
+func hasExpectedArgs(args []string, expected int) bool {
 	switch expected {
 	case -1:
 		if len(args) > 0 {
@@ -28,8 +30,8 @@ func hasEnoughArgs(args []string, expected int) bool {
 }
 
 func CreateAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 1) {
-		log.Fatal("Not enough argument supplied to configure command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'configure' command")
 	}
 
 	recipients := strings.Split(c.Args()[0], ",")
@@ -48,31 +50,35 @@ func CreateAction(c *cli.Context) {
 }
 
 func PushAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 0) {
-		log.Fatal("Not enough arguments supplied to push command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'push' command")
 	}
 
-	environment := NewEnvironment()
-	err := environment.OverrideWith(map[string]string{
-		"S3Bucket":       c.String("s3-bucket"),
-		"SshPrivateKey":  c.String("ssh-private-key"),
-		"RemoteFilename": c.String("remote-filename"),
-		"RemoteHost":     c.String("host"),
-		"RemotePort":     c.String("port"),
-		"RemoteUser":     c.String("user"),
-	})
+	endpointDsn, err := dsn.Parse(c.Args()[0])
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	switch c.String("remote-storage") {
+	switch endpointDsn.Scheme {
 	case "s3":
-		err = uploadUsingS3(environment)
+		err := endpointDsn.SetDefaults(gS3Defaults)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = uploadUsingS3(endpointDsn)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case "scp":
-		err = uploadUsingScp(environment)
+		privateKey := c.String("ssh-private-key")
+
+		err := endpointDsn.SetDefaults(gScpDefaults)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = uploadUsingScp(endpointDsn, privateKey)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -80,31 +86,35 @@ func PushAction(c *cli.Context) {
 }
 
 func PullAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 0) {
-		log.Fatal("Not enough arguments supplied to push command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'pull' command")
 	}
 
-	environment := NewEnvironment()
-	err := environment.OverrideWith(map[string]string{
-		"S3Bucket":       c.String("s3-bucket"),
-		"SshPrivateKey":  c.String("ssh-private-key"),
-		"RemoteFilename": c.String("remote-filename"),
-		"RemoteHost":     c.String("host"),
-		"RemotePort":     c.String("port"),
-		"RemoteUser":     c.String("user"),
-	})
+	endpointDsn, err := dsn.Parse(c.Args()[0])
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	switch c.String("remote-storage") {
+	switch endpointDsn.Scheme {
 	case "s3":
-		err = DownloadUsingS3(environment)
+		err := endpointDsn.SetDefaults(gS3Defaults)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = DownloadUsingS3(endpointDsn)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case "scp":
-		err = DownloadUsingScp(environment)
+		privateKey := c.String("ssh-private-key")
+
+		err := endpointDsn.SetDefaults(gScpDefaults)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = DownloadUsingScp(endpointDsn, privateKey)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -112,8 +122,8 @@ func PullAction(c *cli.Context) {
 }
 
 func ExportAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 1) {
-		log.Fatal("Not enough argument supplied to export command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'export' command")
 	}
 
 	var err error
@@ -141,8 +151,8 @@ func ExportAction(c *cli.Context) {
 }
 
 func ImportAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 1) {
-		log.Fatal("Not enough argument supplied to import command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'import' command")
 	}
 
 	var err error
@@ -183,13 +193,13 @@ func ImportAction(c *cli.Context) {
 }
 
 func AddRecipientAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 1) {
-		log.Fatal("Not enough argument supplied to add-recipient command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'add-recipient' command")
 	}
 
 	recipient := c.Args()[0]
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -215,13 +225,13 @@ func AddRecipientAction(c *cli.Context) {
 }
 
 func RemoveRecipientAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 1) {
-		log.Fatal("Not enough argument supplied to remove-recipient command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'remove-recipient' command")
 	}
 
 	recipient := c.Args()[0]
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -247,11 +257,11 @@ func RemoveRecipientAction(c *cli.Context) {
 }
 
 func GetAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 1) {
-		log.Fatal("Not enough argument supplied to get command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'get' command")
 	}
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -265,11 +275,11 @@ func GetAction(c *cli.Context) {
 }
 
 func SetAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 2) {
-		log.Fatal("Not enough argument supplied to set command")
+	if !hasExpectedArgs(c.Args(), 2) {
+		log.Fatal("Incorrect number of arguments to 'set' command")
 	}
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -288,11 +298,11 @@ func SetAction(c *cli.Context) {
 }
 
 func DelAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 1) {
-		log.Fatal("Not enough argument supplied to del command")
+	if !hasExpectedArgs(c.Args(), 1) {
+		log.Fatal("Incorrect number of arguments to 'del' command")
 	}
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -311,11 +321,11 @@ func DelAction(c *cli.Context) {
 }
 
 func KeysAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 0) {
-		log.Fatal("Not enough argument supplied to keys command")
+	if !hasExpectedArgs(c.Args(), 0) {
+		log.Fatal("Incorrect number of arguments to 'keys' command")
 	}
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -331,11 +341,11 @@ func KeysAction(c *cli.Context) {
 }
 
 func ShowAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 0) {
-		log.Fatal("Not enough argument supplied to show command")
+	if !hasExpectedArgs(c.Args(), 0) {
+		log.Fatal("Incorrect number of arguments to 'show' command")
 	}
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -351,11 +361,11 @@ func ShowAction(c *cli.Context) {
 }
 
 func MetaAction(c *cli.Context) {
-	if !hasEnoughArgs(c.Args(), 0) {
-		log.Fatal("Not enough argument supplied to show command")
+	if !hasExpectedArgs(c.Args(), 0) {
+		log.Fatal("Incorrect number of arguments to 'meta' command")
 	}
 
-	store, err := NewEncryptedStoreFromFile(gStorePath)
+	store, err := NewEncryptedStoreFromFile(gStorePath, c.GlobalString("passphrase"))
 	if err != nil {
 		log.Fatal(err)
 	}
