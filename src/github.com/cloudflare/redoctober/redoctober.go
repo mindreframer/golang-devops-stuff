@@ -142,7 +142,7 @@ const usage = `Usage:
 	redoctober -static <path> -vaultpath <path> -addr <addr> -cert <path> -key <path> [-ca <path>]
 
 example:
-redoctober -vaultpath /tmp/diskrecord.json -addr localhost:8080 -cert cert.pem -key cert.key
+redoctober -vaultpath diskrecord.json -addr localhost:8080 -cert cert.pem -key cert.key
 `
 
 func main() {
@@ -152,9 +152,9 @@ func main() {
 		os.Exit(2)
 	}
 
-	var staticPath = flag.String("staticpath", "/tmp/index.html", "Path to the the static entry")
-	var vaultPath = flag.String("vaultpath", "/tmp/tmpvault", "Path to the the disk vault")
-	var addr = flag.String("addr", "localhost:8000", "Server and port separated by :")
+	var staticPath = flag.String("static", "/tmp/index.html", "Path to the the static entry")
+	var vaultPath = flag.String("vaultpath", "diskrecord.json", "Path to the the disk vault")
+	var addr = flag.String("addr", "localhost:8080", "Server and port separated by :")
 	var certPath = flag.String("cert", "", "Path of TLS certificate in PEM format")
 	var keyPath = flag.String("key", "", "Path of TLS private key in PEM format")
 	var caPath = flag.String("ca", "", "Path of TLS CA for client authentication (optional)")
@@ -201,9 +201,8 @@ func main() {
 	}()
 
 	s, l, err := NewServer(process, *staticPath, *addr, *certPath, *keyPath, *caPath)
-	if err == nil {
-		s.Serve(*l)
-	} else {
+	if err != nil {
 		log.Fatalf("Error starting redoctober server: %s\n", err)
 	}
+	s.Serve(*l)
 }
