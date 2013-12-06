@@ -3,6 +3,7 @@ package http
 import (
 	"bytes"
 	"common"
+	"coordinator"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -109,18 +110,26 @@ func (self *MockCoordinator) WriteSeriesData(_ common.User, db string, series *p
 	return nil
 }
 
-func (self *MockCoordinator) CreateDatabase(_ common.User, db string) error {
+func (self *MockCoordinator) CreateDatabase(_ common.User, db string, _ uint8) error {
 	self.db = db
 	return nil
 }
 
-func (self *MockCoordinator) ListDatabases(_ common.User) ([]string, error) {
-	return []string{"db1", "db2"}, nil
+func (self *MockCoordinator) ListDatabases(_ common.User) ([]*coordinator.Database, error) {
+	return []*coordinator.Database{&coordinator.Database{"db1", 1}, &coordinator.Database{"db2", 1}}, nil
 }
 
 func (self *MockCoordinator) DropDatabase(_ common.User, db string) error {
 	self.droppedDb = db
 	return nil
+}
+
+func (self *MockCoordinator) ReplicateWrite(request *protocol.Request) error {
+	return nil
+}
+
+func (self *MockCoordinator) ReplayReplication(request *protocol.Request, replicationFactor *uint8, owningServerId *uint32, lastSeenSequenceNumber *uint64) {
+	return
 }
 
 func (self *ApiSuite) formatUrl(path string, args ...interface{}) string {
@@ -136,7 +145,8 @@ func (self *ApiSuite) SetUpSuite(c *C) {
 		dbUsers:       map[string][]string{"db1": []string{"db_user1"}},
 	}
 	self.engine = &MockEngine{}
-	self.server = NewHttpServer("", self.engine, self.coordinator, self.manager)
+	dir := c.MkDir()
+	self.server = NewHttpServer("", dir, self.engine, self.coordinator, self.manager)
 	var err error
 	self.listener, err = net.Listen("tcp4", ":8081")
 	c.Assert(err, IsNil)
@@ -252,6 +262,29 @@ func (self *ApiSuite) TestQueryWithSecondsPrecision(c *C) {
 	c.Assert(int(series[0].Points[0][0].(float64)), Equals, 1381346631)
 }
 
+func (self *ApiSuite) TestWriritingToSeriesWithUnderscore(c *C) {
+	for _, name := range []string{"1foo", "_foo"} {
+
+		data := fmt.Sprintf(`
+[
+  {
+    "points": [
+				[1382131686, "1"]
+    ],
+    "name": "%s",
+    "columns": ["time", "column_one"]
+  }
+]
+`, name)
+
+		addr := self.formatUrl("/db/db1/series?time_precision=s&u=dbuser&p=password")
+		resp, err := libhttp.Post(addr, "application/json", bytes.NewBufferString(data))
+		c.Assert(err, IsNil)
+		c.Assert(resp.StatusCode, Equals, libhttp.StatusBadRequest)
+		c.Assert(self.coordinator.series, HasLen, 0)
+	}
+}
+
 func (self *ApiSuite) TestQueryWithInvalidPrecision(c *C) {
 	query := "select * from foo where column_one == 'some_value';"
 	query = url.QueryEscape(query)
@@ -283,7 +316,7 @@ func (self *ApiSuite) TestNotChunkedQuery(c *C) {
 	c.Assert(series[0].Columns, HasLen, 4)
 	c.Assert(series[0].Points, HasLen, 4)
 	// timestamp precision is milliseconds by default
-	c.Assert(int(series[0].Points[0][0].(float64)), Equals, 1381346631000)
+	c.Assert(int64(series[0].Points[0][0].(float64)), Equals, int64(1381346631000))
 }
 
 func (self *ApiSuite) TestChunkedQuery(c *C) {
@@ -489,13 +522,13 @@ func (self *ApiSuite) TestDropDatabase(c *C) {
 
 func (self *ApiSuite) TestClusterAdminOperations(c *C) {
 	url := self.formatUrl("/cluster_admins?u=root&p=root")
-	resp, err := libhttp.Post(url, "", bytes.NewBufferString(`{"username":"", "password": "new_pass"}`))
+	resp, err := libhttp.Post(url, "", bytes.NewBufferString(`{"name":"", "password": "new_pass"}`))
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, libhttp.StatusBadRequest)
 
 	url = self.formatUrl("/cluster_admins?u=root&p=root")
-	resp, err = libhttp.Post(url, "", bytes.NewBufferString(`{"username":"new_user", "password": "new_pass"}`))
+	resp, err = libhttp.Post(url, "", bytes.NewBufferString(`{"name":"new_user", "password": "new_pass"}`))
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
@@ -545,7 +578,7 @@ func (self *ApiSuite) TestDbUserOperations(c *C) {
 
 	// create user using the `username` field
 	url = self.formatUrl("/db/db1/users?u=root&p=root")
-	resp, err = libhttp.Post(url, "", bytes.NewBufferString(`{"username":"dbuser", "password": "password"}`))
+	resp, err = libhttp.Post(url, "", bytes.NewBufferString(`{"name":"dbuser", "password": "password"}`))
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
@@ -570,7 +603,7 @@ func (self *ApiSuite) TestDbUserOperations(c *C) {
 
 	// empty usernames aren't valid
 	url = self.formatUrl("/db/db1/users?u=root&p=root")
-	resp, err = libhttp.Post(url, "", bytes.NewBufferString(`{"username":"", "password": "password"}`))
+	resp, err = libhttp.Post(url, "", bytes.NewBufferString(`{"name":"", "password": "password"}`))
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()
 	c.Assert(resp.StatusCode, Equals, libhttp.StatusBadRequest)
@@ -661,7 +694,7 @@ func (self *ApiSuite) TestDbUsersIndex(c *C) {
 }
 
 func (self *ApiSuite) TestDatabasesIndex(c *C) {
-	for _, path := range []string{"/dbs?u=root&p=root", "/db?u=root&p=root"} {
+	for _, path := range []string{"/db?u=root&p=root", "/db?u=root&p=root"} {
 		url := self.formatUrl(path)
 		resp, err := libhttp.Get(url)
 		c.Assert(err, IsNil)
@@ -669,15 +702,15 @@ func (self *ApiSuite) TestDatabasesIndex(c *C) {
 		defer resp.Body.Close()
 		body, err := ioutil.ReadAll(resp.Body)
 		c.Assert(err, IsNil)
-		users := []*Database{}
+		users := []*coordinator.Database{}
 		err = json.Unmarshal(body, &users)
 		c.Assert(err, IsNil)
-		c.Assert(users, DeepEquals, []*Database{&Database{"db1"}, &Database{"db2"}})
+		c.Assert(users, DeepEquals, []*coordinator.Database{&coordinator.Database{"db1", uint8(1)}, &coordinator.Database{"db2", uint8(1)}})
 	}
 }
 
 func (self *ApiSuite) TestBasicAuthentication(c *C) {
-	url := self.formatUrl("/dbs")
+	url := self.formatUrl("/db")
 	req, err := libhttp.NewRequest("GET", url, nil)
 	c.Assert(err, IsNil)
 	auth := base64.StdEncoding.EncodeToString([]byte("root:root"))
@@ -687,8 +720,8 @@ func (self *ApiSuite) TestBasicAuthentication(c *C) {
 	body, err := ioutil.ReadAll(resp.Body)
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
-	users := []*Database{}
+	users := []*coordinator.Database{}
 	err = json.Unmarshal(body, &users)
 	c.Assert(err, IsNil)
-	c.Assert(users, DeepEquals, []*Database{&Database{"db1"}, &Database{"db2"}})
+	c.Assert(users, DeepEquals, []*coordinator.Database{&coordinator.Database{"db1", 1}, &coordinator.Database{"db2", 1}})
 }

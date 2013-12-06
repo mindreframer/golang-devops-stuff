@@ -3,6 +3,8 @@
 #define FALSE 0
 #define TRUE !FALSE
 
+// #define DEBUG
+
 typedef struct {
   size_t size;
   char **elems;
@@ -26,23 +28,12 @@ typedef struct value_t {
     VALUE_SIMPLE_NAME,
     VALUE_DURATION,
     VALUE_WILDCARD,
-    VALUE_FUNCTION_CALL
+    VALUE_FUNCTION_CALL,
+    VALUE_EXPRESSION
   } value_type;
   char is_case_insensitive;
   value_array *args;
 } value;
-
-typedef struct expression_t {
-  void *left;                           /* this can be a *value or *expression */
-  char op;                              /* +, -, *, / or \0 if there's no right operand */
-  struct expression_t *right;
-} expression;
-
-typedef struct {
-  expression *left;
-  char *op;                             /* ==, !=, <, >, <=, >= or NULL if there is no right operand */
-  expression *right;
-} bool_expression;
 
 typedef struct condition_t {
   char is_bool_expression;
@@ -92,8 +83,6 @@ typedef struct {
 void free_array(array *array);
 void free_value_array(value_array *array);
 void free_value(value *value);
-void free_expression(expression *expr);
-void free_bool_expression(bool_expression *expr);
 void free_condition(condition *condition);
 void free_error (error *error);
 

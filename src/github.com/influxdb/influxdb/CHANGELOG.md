@@ -127,9 +127,43 @@
 - [Issue #57](https://github.com/influxdb/influxdb/issues/57). Don't panic when type of time != float
 - [Issue #63](https://github.com/influxdb/influxdb/issues/63). Aggregate queries should not have a sequence_number column
 
-## v0.3.1 (unreleased)
+## v0.3.2
 
 ## Features
 
+- [Issue #82](https://github.com/influxdb/influxdb/issues/82). Add endpoint for listing available admin interfaces.
+- [Issue #80](https://github.com/influxdb/influxdb/issues/80). Support durations when specifying start and end time
+- [Issue #81](https://github.com/influxdb/influxdb/issues/81). Add support for IN
+
 ## Bugfixes
 
+- [Issue #75](https://github.com/influxdb/influxdb/issues/75). Don't allow time series names that start with underscore
+- [Issue #85](https://github.com/influxdb/influxdb/issues/85). Non-existing columns exist after they have been queried before
+
+## v0.4.0 (unreleased)
+
+## Features
+
+- [Issue #86](https://github.com/influxdb/influxdb/issues/86). Support arithmetic expressions in select clause
+- [Issue #92](https://github.com/influxdb/influxdb/issues/92). Change '==' to '=' and '!=' to '<>'
+- [Issue #88](https://github.com/influxdb/influxdb/issues/88). Support datetime strings
+- [Issue #64](https://github.com/influxdb/influxdb/issues/64). Shard writes and queries across cluster with replay for briefly downed nodes (< 24 hrs)
+- [Issue #78](https://github.com/influxdb/influxdb/issues/78). Sequence numbers persist across restarts so they're not reused
+- [Issue #102](https://github.com/influxdb/influxdb/issues/102). Support expressions in where condition
+- [Issue #101](https://github.com/influxdb/influxdb/issues/101). Support expressions in aggregates
+
+## Bugfixes
+
+- [Issue #90](https://github.com/influxdb/influxdb/issues/90). Group by multiple columns panic
+- [Issue #89](https://github.com/influxdb/influxdb/issues/89). 'Group by' combined with 'where' not working
+- [Issue #106](https://github.com/influxdb/influxdb/issues/106). Don't panic if we only see one point and can't calculate derivative
+- [Issue #105](https://github.com/influxdb/influxdb/issues/105). Panic when using a where clause that reference columns with null values
+
+### Deprecated
+
+- deprecate '==' and '!=' in favor of '=' and '<>', respectively
+- deprecate `/dbs` (for listing databases) in favor of a more consistent `/db` endpoint
+- deprecate `username` field for a more consistent `name` field in the `/db/:db/users`
+- deprecate endpoints `/db/:db/admins/:user` in favor of using `/db/:db/users/:user` which should
+  be used to update user flags, password, etc.
+- Querying for column names that don't exist no longer throws an error.

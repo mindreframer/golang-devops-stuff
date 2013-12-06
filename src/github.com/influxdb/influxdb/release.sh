@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -e
+
 cd `dirname $0`
 
 modified=$(git ls-files --modified | wc -l)
@@ -19,14 +21,12 @@ else
     version=$1
 fi
 
-if [ "x$assume_yes" != "xtrue" ]; then
-    echo -n "Release version $version ? [Y/n] "
-    read response
-    response=`echo $response | tr 'A-Z' 'a-z'`
-    if [ "x$response" == "xn" ]; then
-        echo "Aborting"
-        exit 1
-    fi
+echo -n "Release version $version ? [Y/n] "
+read response
+response=`echo $response | tr 'A-Z' 'a-z'`
+if [ "x$response" == "xn" ]; then
+    echo "Aborting"
+    exit 1
 fi
 
 echo "Releasing version $version"
@@ -36,10 +36,9 @@ if ! which aws > /dev/null 2>&1; then
     exit 1
 fi
 
-if ! ./package.sh $version; then
-    echo "Build failed. Aborting the release"
-    exit 1
-fi
+make clean
+make package version=$version
+make package version=$version arch=386
 
 for filepath in `ls packages/*.{tar.gz,deb,rpm}`; do
     [ -e "$filepath" ] || continue
@@ -50,6 +49,8 @@ for filepath in `ls packages/*.{tar.gz,deb,rpm}`; do
 
     AWS_CONFIG_FILE=~/aws.conf aws s3 cp $filepath s3://influxdb/$filename --acl public-read --region us-east-1
     AWS_CONFIG_FILE=~/aws.conf aws s3 cp $filepath s3://influxdb/${latest_filename} --acl public-read --region us-east-1
+    AWS_CONFIG_FILE=~/aws.conf aws s3 cp $filepath s3://get.influxdb.org/$filename --acl public-read --region us-east-1
+    AWS_CONFIG_FILE=~/aws.conf aws s3 cp $filepath s3://get.influxdb.org/${latest_filename} --acl public-read --region us-east-1
 done
 
 branch=`git rev-parse --abbrev-ref HEAD`
