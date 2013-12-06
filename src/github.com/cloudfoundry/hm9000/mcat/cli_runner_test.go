@@ -1,4 +1,4 @@
-package md_test
+package mcat_test
 
 import (
 	"encoding/json"
@@ -46,14 +46,14 @@ func (runner *CLIRunner) generateConfig(storeType string, storeURLs []string, cc
 	conf.StoreType = storeType
 	conf.StoreURLs = storeURLs
 	conf.CCBaseURL = ccBaseURL
-	conf.NATS.Port = natsPort
+	conf.NATS[0].Port = natsPort
 	conf.SenderMessageLimit = 8
 	conf.MaximumBackoffDelayInHeartbeats = 6
 	conf.MetricsServerPort = metricsServerPort
 	conf.MetricsServerUser = "bob"
 	conf.MetricsServerPassword = "password"
 	conf.StoreMaxConcurrentRequests = 10
-	conf.ListenerHeartbeatSyncIntervalInMilliseconds = 1
+	conf.ListenerHeartbeatSyncIntervalInMilliseconds = 100
 
 	err = json.NewEncoder(tmpFile).Encode(conf)
 	Ω(err).ShouldNot(HaveOccured())

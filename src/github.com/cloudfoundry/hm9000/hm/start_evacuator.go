@@ -6,7 +6,7 @@ import (
 	"github.com/cloudfoundry/hm9000/helpers/logger"
 )
 
-func StartEvacuator(l logger.Logger, conf config.Config) {
+func StartEvacuator(l logger.Logger, conf *config.Config) {
 	messageBus := connectToMessageBus(l, conf)
 	store, _ := connectToStore(l, conf)
 

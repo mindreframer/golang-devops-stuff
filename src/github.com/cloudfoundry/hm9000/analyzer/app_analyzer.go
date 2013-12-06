@@ -11,7 +11,7 @@ import (
 
 type appAnalyzer struct {
 	app                          *models.App
-	conf                         config.Config
+	conf                         *config.Config
 	existingPendingStartMessages map[string]models.PendingStartMessage
 	existingPendingStopMessages  map[string]models.PendingStopMessage
 	currentTime                  time.Time
@@ -22,7 +22,7 @@ type appAnalyzer struct {
 	crashCounts   []models.CrashCount
 }
 
-func newAppAnalyzer(app *models.App, currentTime time.Time, existingPendingStartMessages map[string]models.PendingStartMessage, existingPendingStopMessages map[string]models.PendingStopMessage, logger logger.Logger, conf config.Config) *appAnalyzer {
+func newAppAnalyzer(app *models.App, currentTime time.Time, existingPendingStartMessages map[string]models.PendingStartMessage, existingPendingStopMessages map[string]models.PendingStopMessage, logger logger.Logger, conf *config.Config) *appAnalyzer {
 	return &appAnalyzer{
 		app:  app,
 		conf: conf,

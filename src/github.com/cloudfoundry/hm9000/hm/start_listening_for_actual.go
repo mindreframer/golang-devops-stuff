@@ -7,7 +7,7 @@ import (
 	"github.com/cloudfoundry/hm9000/helpers/metricsaccountant"
 )
 
-func StartListeningForActual(l logger.Logger, conf config.Config) {
+func StartListeningForActual(l logger.Logger, conf *config.Config) {
 	messageBus := connectToMessageBus(l, conf)
 	store, usageTracker := connectToStore(l, conf)
 

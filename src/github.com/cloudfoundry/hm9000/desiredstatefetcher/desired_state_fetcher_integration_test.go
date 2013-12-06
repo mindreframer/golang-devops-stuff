@@ -23,7 +23,7 @@ var _ = Describe("Fetching from CC and storing the result in the Store", func() 
 		a3           appfixture.AppFixture
 		store        storepackage.Store
 		resultChan   chan desiredstatefetcher.DesiredStateFetcherResult
-		conf         config.Config
+		conf         *config.Config
 		storeAdapter *fakestoreadapter.FakeStoreAdapter
 	)
 

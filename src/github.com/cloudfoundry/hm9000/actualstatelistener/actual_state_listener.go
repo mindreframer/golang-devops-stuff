@@ -14,19 +14,26 @@ import (
 	"github.com/cloudfoundry/yagnats"
 )
 
+const HeartbeatSyncTimer = "HeartbeatSyncTimer"
+
 type ActualStateListener struct {
-	logger            logger.Logger
-	config            config.Config
-	messageBus        yagnats.NATSClient
-	store             store.Store
-	timeProvider      timeprovider.TimeProvider
-	storeUsageTracker metricsaccountant.UsageTracker
-	metricsAccountant metricsaccountant.MetricsAccountant
-	heartbeatsToSave  []models.Heartbeat
-	heartbeatMutex    *sync.Mutex
+	logger                  logger.Logger
+	config                  *config.Config
+	messageBus              yagnats.NATSClient
+	store                   store.Store
+	timeProvider            timeprovider.TimeProvider
+	storeUsageTracker       metricsaccountant.UsageTracker
+	metricsAccountant       metricsaccountant.MetricsAccountant
+	heartbeatsToSave        []models.Heartbeat
+	totalReceivedHeartbeats int
+	totalSavedHeartbeats    int
+
+	lastReceivedHeartbeat time.Time
+
+	heartbeatMutex *sync.Mutex
 }
 
-func New(config config.Config,
+func New(config *config.Config,
 	messageBus yagnats.NATSClient,
 	store store.Store,
 	storeUsageTracker metricsaccountant.UsageTracker,
@@ -48,32 +55,50 @@ func New(config config.Config,
 }
 
 func (listener *ActualStateListener) Start() {
+	heartbeatThreshold := time.Duration(listener.config.ActualFreshnessTTL()) * time.Second
+
 	listener.messageBus.Subscribe("dea.advertise", func(message *yagnats.Message) {
-		listener.bumpFreshness()
+		listener.heartbeatMutex.Lock()
+		lastReceived := listener.lastReceivedHeartbeat
+		listener.heartbeatMutex.Unlock()
+
+		if listener.timeProvider.Time().Sub(lastReceived) >= heartbeatThreshold {
+			listener.bumpFreshness()
+		}
+
 		listener.logger.Debug("Received dea.advertise")
 	})
 
 	listener.messageBus.Subscribe("dea.heartbeat", func(message *yagnats.Message) {
 		listener.logger.Debug("Got a heartbeat")
-		heartbeat, err := models.NewHeartbeatFromJSON([]byte(message.Payload))
+		heartbeat, err := models.NewHeartbeatFromJSON(message.Payload)
 		if err != nil {
 			listener.logger.Error("Could not unmarshal heartbeat", err,
 				map[string]string{
-					"MessageBody": message.Payload,
+					"MessageBody": string(message.Payload),
 				})
 			return
 		}
 
 		listener.logger.Debug("Decoded the heartbeat")
 
-		listener.metricsAccountant.IncrementReceivedHeartbeats()
-
 		listener.heartbeatMutex.Lock()
+
+		listener.lastReceivedHeartbeat = listener.timeProvider.Time()
+
+		listener.totalReceivedHeartbeats++
 		listener.heartbeatsToSave = append(listener.heartbeatsToSave, heartbeat)
-		listener.logger.Info("Received a heartbeat", map[string]string{
-			"Heartbeats Pending Save": strconv.Itoa(len(listener.heartbeatsToSave)),
-		})
+
+		totalReceivedHeartbeats := listener.totalReceivedHeartbeats
+		numToSave := len(listener.heartbeatsToSave)
+
 		listener.heartbeatMutex.Unlock()
+
+		listener.logger.Info("Received a heartbeat", map[string]string{
+			"Heartbeats Pending Save": strconv.Itoa(numToSave),
+		})
+
+		listener.metricsAccountant.TrackReceivedHeartbeats(totalReceivedHeartbeats)
 	})
 
 	go listener.syncHeartbeats()
@@ -85,7 +110,7 @@ func (listener *ActualStateListener) Start() {
 }
 
 func (listener *ActualStateListener) syncHeartbeats() {
-	syncInterval := time.NewTicker(listener.config.ListenerHeartbeatSyncInterval())
+	syncInterval := listener.timeProvider.NewTickerChannel(HeartbeatSyncTimer, listener.config.ListenerHeartbeatSyncInterval())
 
 	for {
 		listener.heartbeatMutex.Lock()
@@ -100,21 +125,32 @@ func (listener *ActualStateListener) syncHeartbeats() {
 
 			t := time.Now()
 			err := listener.store.SyncHeartbeats(heartbeatsToSave...)
+
 			if err != nil {
 				listener.logger.Error("Could not put instance heartbeats in store:", err)
-				return
-			}
+				listener.store.RevokeActualFreshness()
+			} else {
+				dt := time.Since(t)
+				if dt < listener.config.ListenerHeartbeatSyncInterval() {
+					listener.bumpFreshness()
+				} else {
+					listener.logger.Info("Save took too long.  Not bumping freshness.")
+				}
+				listener.logger.Info("Saved Heartbeats", map[string]string{
+					"Heartbeats to Save": strconv.Itoa(len(heartbeatsToSave)),
+					"Duration":           time.Since(t).String(),
+				})
 
-			listener.bumpFreshness()
-			listener.metricsAccountant.IncrementSavedHeartbeats(len(heartbeatsToSave))
-			dt := time.Since(t)
-			listener.logger.Info("Saved Heartbeats", map[string]string{
-				"Heartbeats to Save": strconv.Itoa(len(heartbeatsToSave)),
-				"Duration":           dt.String(),
-			})
+				listener.heartbeatMutex.Lock()
+				listener.totalSavedHeartbeats += len(heartbeatsToSave)
+				totalSavedHeartbeats := listener.totalSavedHeartbeats
+				listener.heartbeatMutex.Unlock()
+
+				listener.metricsAccountant.TrackSavedHeartbeats(totalSavedHeartbeats)
+			}
 		}
 
-		<-syncInterval.C
+		<-syncInterval
 	}
 }
 

@@ -8,7 +8,7 @@ import (
 	"os"
 )
 
-func Shred(l logger.Logger, conf config.Config, poll bool) {
+func Shred(l logger.Logger, conf *config.Config, poll bool) {
 	store, _ := connectToStore(l, conf)
 
 	if poll {

@@ -16,7 +16,7 @@ var _ = Describe("Storing PendingStopMessages", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 		message1     models.PendingStopMessage
 		message2     models.PendingStopMessage
 		message3     models.PendingStopMessage

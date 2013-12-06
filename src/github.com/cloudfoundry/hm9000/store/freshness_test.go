@@ -18,7 +18,7 @@ var _ = Describe("Freshness", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 	)
 
 	conf, _ = config.DefaultConfig()
@@ -88,6 +88,24 @@ var _ = Describe("Freshness", func() {
 
 		Context("the actual state", func() {
 			bumpingFreshness("/v1"+conf.ActualFreshnessKey, conf.ActualFreshnessTTL(), Store.BumpActualFreshness)
+
+			Context("revoking actual state freshness", func() {
+				BeforeEach(func() {
+					store.BumpActualFreshness(time.Unix(100, 0))
+				})
+
+				It("should no longer be fresh", func() {
+					fresh, err := store.IsActualStateFresh(time.Unix(130, 0))
+					Ω(err).ShouldNot(HaveOccured())
+					Ω(fresh).Should(BeTrue())
+
+					store.RevokeActualFreshness()
+
+					fresh, err = store.IsActualStateFresh(time.Unix(130, 0))
+					Ω(err).ShouldNot(HaveOccured())
+					Ω(fresh).Should(BeFalse())
+				})
+			})
 		})
 
 		Context("the desired state", func() {

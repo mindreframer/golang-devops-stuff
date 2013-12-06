@@ -40,20 +40,20 @@ func (server *ApiServer) Listen() {
 		t := time.Now()
 
 		var err error
-		var response string
+		var response []byte
 
 		defer func() {
 			if err != nil {
-				server.messageBus.Publish(message.ReplyTo, "{}")
+				server.messageBus.Publish(message.ReplyTo, []byte("{}"))
 				server.logger.Error("Failed to handle app.state request", err, map[string]string{
-					"payload":      message.Payload,
+					"payload":      string(message.Payload),
 					"elapsed time": fmt.Sprintf("%s", time.Since(t)),
 				})
 				return
 			} else {
 				server.messageBus.Publish(message.ReplyTo, response)
 				server.logger.Info("Responded succesfully to app.state request", map[string]string{
-					"payload":      message.Payload,
+					"payload":      string(message.Payload),
 					"elapsed time": fmt.Sprintf("%s", time.Since(t)),
 				})
 			}
@@ -75,7 +75,7 @@ func (server *ApiServer) Listen() {
 			return
 		}
 
-		response = string(app.ToJSON())
+		response = app.ToJSON()
 		return
 	})
 }

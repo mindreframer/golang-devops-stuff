@@ -17,7 +17,7 @@ var _ = Describe("Apps", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 
 		dea        appfixture.DeaFixture
 		app1       appfixture.AppFixture

@@ -1,4 +1,4 @@
-package md_test
+package mcat_test
 
 import (
 	"github.com/cloudfoundry/hm9000/testhelpers/startstoplistener"
@@ -12,13 +12,13 @@ import (
 )
 
 var (
-	coordinator       *MDCoordinator
+	coordinator       *MCATCoordinator
 	simulator         *Simulator
 	cliRunner         *CLIRunner
 	startStopListener *startstoplistener.StartStopListener
 )
 
-func TestMd(t *testing.T) {
+func TestMCAT(t *testing.T) {
 	registerSignalHandler()
 	RegisterFailHandler(Fail)
 
@@ -30,15 +30,10 @@ func TestMd(t *testing.T) {
 		os.Exit(1)
 	}
 
-	coordinator = NewMDCoordinator(ginkgoConfig.GinkgoConfig.ParallelNode, ginkgoConfig.DefaultReporterConfig.Verbose)
+	coordinator = NewMCATCoordinator(ginkgoConfig.GinkgoConfig.ParallelNode, ginkgoConfig.DefaultReporterConfig.Verbose)
 	coordinator.StartNats()
 	coordinator.StartDesiredStateServer()
 	coordinator.StartStartStopListener()
-
-	//run the suite for Cassandra...
-	coordinator.StartCassandra()
-	RunSpecs(t, "MCAT Cassandra MD Suite")
-	coordinator.StopStore()
 
 	//run the suite for ETCD...
 	coordinator.StartETCD()

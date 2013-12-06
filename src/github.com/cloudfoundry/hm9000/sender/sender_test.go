@@ -26,7 +26,7 @@ var _ = Describe("Sender", func() {
 		timeProvider      *faketimeprovider.FakeTimeProvider
 		dea               appfixture.DeaFixture
 		app               appfixture.AppFixture
-		conf              config.Config
+		conf              *config.Config
 		metricsAccountant *fakemetricsaccountant.FakeMetricsAccountant
 	)
 

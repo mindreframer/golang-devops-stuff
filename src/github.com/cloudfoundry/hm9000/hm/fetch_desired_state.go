@@ -11,7 +11,7 @@ import (
 	"strconv"
 )
 
-func FetchDesiredState(l logger.Logger, conf config.Config, poll bool) {
+func FetchDesiredState(l logger.Logger, conf *config.Config, poll bool) {
 	store, _ := connectToStore(l, conf)
 
 	if poll {
@@ -34,7 +34,7 @@ func FetchDesiredState(l logger.Logger, conf config.Config, poll bool) {
 	}
 }
 
-func fetchDesiredState(l logger.Logger, conf config.Config, store store.Store) error {
+func fetchDesiredState(l logger.Logger, conf *config.Config, store store.Store) error {
 	l.Info("Fetching Desired State")
 	fetcher := desiredstatefetcher.New(conf,
 		store,

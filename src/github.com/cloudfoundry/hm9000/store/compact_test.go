@@ -15,7 +15,7 @@ var _ = Describe("Compact", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 	)
 
 	BeforeEach(func() {

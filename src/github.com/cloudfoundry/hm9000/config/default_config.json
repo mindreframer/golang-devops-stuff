@@ -33,7 +33,6 @@
     "store_schema_version": 1,
     "store_type": "etcd",
     "store_urls": ["http://127.0.0.1:4001"],
-    "cassandra_consistency": "QUORUM",
     "actual_freshness_key": "/actual-fresh",
     "desired_freshness_key": "/desired-fresh",
 
@@ -45,10 +44,10 @@
 
     "sender_nats_start_subject": "hm9000.start",
     "sender_nats_stop_subject": "hm9000.stop",
-    "nats": {
+    "nats": [{
         "host": "127.0.0.1",
         "port": 4222,
         "user": "",
         "password": ""
-    }
+    }]
 }

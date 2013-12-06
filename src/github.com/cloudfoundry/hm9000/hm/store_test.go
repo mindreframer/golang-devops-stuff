@@ -14,7 +14,7 @@ var _ = Describe("Store", func() {
 	var (
 		etcdStoreAdapter storeadapter.StoreAdapter
 		nodes            []storeadapter.StoreNode
-		conf             config.Config
+		conf             *config.Config
 	)
 
 	BeforeEach(func() {

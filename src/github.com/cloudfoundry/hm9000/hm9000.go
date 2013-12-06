@@ -148,7 +148,7 @@ func main() {
 	app.Run(os.Args)
 }
 
-func loadLoggerAndConfig(c *cli.Context, component string) (logger.Logger, *gosteno.Logger, config.Config) {
+func loadLoggerAndConfig(c *cli.Context, component string) (logger.Logger, *gosteno.Logger, *config.Config) {
 	configPath := c.String("config")
 	if configPath == "" {
 		fmt.Printf("Config path required")

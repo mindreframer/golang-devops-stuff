@@ -16,7 +16,7 @@ var _ = Describe("Crash Count", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 		crashCount1  models.CrashCount
 		crashCount2  models.CrashCount
 		crashCount3  models.CrashCount

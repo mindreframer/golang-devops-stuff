@@ -1,4 +1,4 @@
-package md_test
+package mcat_test
 
 import (
 	"github.com/cloudfoundry/hm9000/models"

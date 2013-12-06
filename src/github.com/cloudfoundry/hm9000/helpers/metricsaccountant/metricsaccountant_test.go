@@ -59,50 +59,23 @@ var _ = Describe("Metrics Accountant", func() {
 		})
 	})
 
-	Describe("IncrementReceivedHeartbeats", func() {
-		It("should increment the number of received metrics by 1", func() {
-			err := accountant.IncrementReceivedHeartbeats()
+	Describe("TrackReceivedHeartbeats", func() {
+		It("should record the number of received heartbeats appropriately", func() {
+			err := accountant.TrackReceivedHeartbeats(127)
 			Ω(err).ShouldNot(HaveOccured())
 			metrics, err := accountant.GetMetrics()
 			Ω(err).ShouldNot(HaveOccured())
-			Ω(metrics["ReceivedHeartbeats"]).Should(BeNumerically("==", 1))
-		})
-
-		Context("when the metric is already set", func() {
-			It("should increment the number of received metrics by 1", func() {
-				store.SaveMetric("ReceivedHeartbeats", 6.0)
-				err := accountant.IncrementReceivedHeartbeats()
-				Ω(err).ShouldNot(HaveOccured())
-				metrics, err := accountant.GetMetrics()
-				Ω(err).ShouldNot(HaveOccured())
-				Ω(metrics["ReceivedHeartbeats"]).Should(BeNumerically("==", 7))
-			})
+			Ω(metrics["ReceivedHeartbeats"]).Should(BeNumerically("==", 127))
 		})
 	})
 
-	Describe("IncrementSavedHeartbeats", func() {
-		Context("when the metric is not already set", func() {
-			It("should record the passed in time duration appropriately", func() {
-				err := accountant.IncrementSavedHeartbeats(3)
-				Ω(err).ShouldNot(HaveOccured())
-				metrics, err := accountant.GetMetrics()
-				Ω(err).ShouldNot(HaveOccured())
-				Ω(metrics["SavedHeartbeats"]).Should(BeNumerically("==", 3))
-			})
-		})
-
-		Context("when the metric is already set", func() {
-			BeforeEach(func() {
-				store.SaveMetric("SavedHeartbeats", 6.0)
-			})
-
-			It("should record the passed in time duration appropriately", func() {
-				err := accountant.IncrementSavedHeartbeats(3)
-				Ω(err).ShouldNot(HaveOccured())
-				metrics, err := accountant.GetMetrics()
-				Ω(err).ShouldNot(HaveOccured())
-				Ω(metrics["SavedHeartbeats"]).Should(BeNumerically("==", 9))
-			})
+	Describe("TrackSavedHeartbeats", func() {
+		It("should record the number of received heartbeats appropriately", func() {
+			err := accountant.TrackSavedHeartbeats(91)
+			Ω(err).ShouldNot(HaveOccured())
+			metrics, err := accountant.GetMetrics()
+			Ω(err).ShouldNot(HaveOccured())
+			Ω(metrics["SavedHeartbeats"]).Should(BeNumerically("==", 91))
 		})
 	})
 

@@ -26,8 +26,8 @@ var stopMetrics = map[models.PendingStopMessageReason]string{
 }
 
 type MetricsAccountant interface {
-	IncrementReceivedHeartbeats() error
-	IncrementSavedHeartbeats(by int) error
+	TrackReceivedHeartbeats(metric int) error
+	TrackSavedHeartbeats(metric int) error
 	IncrementSentMessageMetrics(starts []models.PendingStartMessage, stops []models.PendingStopMessage) error
 	TrackDesiredStateSyncTime(dt time.Duration) error
 	TrackActualStateListenerStoreUsageFraction(usage float64) error
@@ -46,32 +46,18 @@ func New(store store.Store) *RealMetricsAccountant {
 	}
 }
 
-func (m *RealMetricsAccountant) IncrementReceivedHeartbeats() error {
+func (m *RealMetricsAccountant) TrackReceivedHeartbeats(metric int) error {
 	m.storeMutex.Lock()
 	defer m.storeMutex.Unlock()
 
-	currentCount, err := m.store.GetMetric("ReceivedHeartbeats")
-	if err == storeadapter.ErrorKeyNotFound {
-		currentCount = 0.0
-	} else if err != nil {
-		return err
-	}
-
-	return m.store.SaveMetric("ReceivedHeartbeats", currentCount+1.0)
+	return m.store.SaveMetric("ReceivedHeartbeats", float64(metric))
 }
 
-func (m *RealMetricsAccountant) IncrementSavedHeartbeats(by int) error {
+func (m *RealMetricsAccountant) TrackSavedHeartbeats(metric int) error {
 	m.storeMutex.Lock()
 	defer m.storeMutex.Unlock()
 
-	currentCount, err := m.store.GetMetric("SavedHeartbeats")
-	if err == storeadapter.ErrorKeyNotFound {
-		currentCount = 0.0
-	} else if err != nil {
-		return err
-	}
-
-	return m.store.SaveMetric("SavedHeartbeats", currentCount+float64(by))
+	return m.store.SaveMetric("SavedHeartbeats", float64(metric))
 }
 
 func (m *RealMetricsAccountant) TrackDesiredStateSyncTime(dt time.Duration) error {

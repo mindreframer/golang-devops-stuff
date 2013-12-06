@@ -1,4 +1,4 @@
-package md_test
+package mcat_test
 
 import (
 	"github.com/cloudfoundry/hm9000/config"
@@ -11,7 +11,7 @@ import (
 )
 
 type Simulator struct {
-	conf                   config.Config
+	conf                   *config.Config
 	storeRunner            storerunner.StoreRunner
 	store                  store.Store
 	desiredStateServer     *desiredstateserver.DesiredStateServer
@@ -24,7 +24,7 @@ type Simulator struct {
 	messageBus             yagnats.NATSClient
 }
 
-func NewSimulator(conf config.Config, storeRunner storerunner.StoreRunner, store store.Store, desiredStateServer *desiredstateserver.DesiredStateServer, cliRunner *CLIRunner, messageBus yagnats.NATSClient) *Simulator {
+func NewSimulator(conf *config.Config, storeRunner storerunner.StoreRunner, store store.Store, desiredStateServer *desiredstateserver.DesiredStateServer, cliRunner *CLIRunner, messageBus yagnats.NATSClient) *Simulator {
 	desiredStateServer.Reset()
 
 	return &Simulator{
@@ -55,16 +55,16 @@ func (s *Simulator) Tick(numTicks int) {
 }
 
 func (s *Simulator) sendHeartbeats() {
-	originalNHeartbeats, _ := s.store.GetMetric("SavedHeartbeats")
+	s.store.SaveMetric("SavedHeartbeats", 0)
 	s.cliRunner.StartListener(s.currentTimestamp)
 	for _, heartbeat := range s.currentHeartbeats {
-		s.messageBus.Publish("dea.heartbeat", string(heartbeat.ToJSON()))
+		s.messageBus.Publish("dea.heartbeat", heartbeat.ToJSON())
 	}
 
 	Eventually(func() float64 {
 		nHeartbeats, _ := s.store.GetMetric("SavedHeartbeats")
 		return nHeartbeats
-	}, 5.0, 0.05).Should(BeNumerically(">=", originalNHeartbeats+float64(len(s.currentHeartbeats))))
+	}, 5.0, 0.05).Should(BeNumerically("==", len(s.currentHeartbeats)))
 
 	s.cliRunner.StopListener()
 }

@@ -17,7 +17,7 @@ var _ = Describe("Actual State", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 		dea          appfixture.DeaFixture
 		otherDea     appfixture.DeaFixture
 	)

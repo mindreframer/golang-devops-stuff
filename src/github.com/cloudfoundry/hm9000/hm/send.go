@@ -11,7 +11,7 @@ import (
 	"os"
 )
 
-func Send(l logger.Logger, conf config.Config, poll bool) {
+func Send(l logger.Logger, conf *config.Config, poll bool) {
 	messageBus := connectToMessageBus(l, conf)
 	store, _ := connectToStore(l, conf)
 
@@ -35,7 +35,7 @@ func Send(l logger.Logger, conf config.Config, poll bool) {
 	}
 }
 
-func send(l logger.Logger, conf config.Config, messageBus yagnats.NATSClient, store store.Store) error {
+func send(l logger.Logger, conf *config.Config, messageBus yagnats.NATSClient, store store.Store) error {
 	l.Info("Sending...")
 
 	sender := sender.New(store, metricsaccountant.New(store), conf, messageBus, buildTimeProvider(l), l)

@@ -12,7 +12,7 @@ type StartStopListener struct {
 	messageBus yagnats.NATSClient
 }
 
-func NewStartStopListener(messageBus yagnats.NATSClient, conf config.Config) *StartStopListener {
+func NewStartStopListener(messageBus yagnats.NATSClient, conf *config.Config) *StartStopListener {
 	listener := &StartStopListener{
 		messageBus: messageBus,
 	}
