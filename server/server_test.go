@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"bytes"
@@ -369,7 +369,7 @@ func TestAuthenticationSuccess(t *testing.T) {
 }
 
 var services = []msg.Service{
-	msg.Service{
+	{
 		UUID:        "100",
 		Name:        "TestService",
 		Version:     "1.0.0",
@@ -380,7 +380,7 @@ var services = []msg.Service{
 		TTL:         30,
 		Expires:     getExpirationTime(30),
 	},
-	msg.Service{
+	{
 		UUID:        "101",
 		Name:        "TestService",
 		Version:     "1.0.1",
@@ -391,7 +391,7 @@ var services = []msg.Service{
 		TTL:         31,
 		Expires:     getExpirationTime(31),
 	},
-	msg.Service{
+	{
 		UUID:        "102",
 		Name:        "OtherService",
 		Version:     "1.0.0",
@@ -402,7 +402,7 @@ var services = []msg.Service{
 		TTL:         32,
 		Expires:     getExpirationTime(32),
 	},
-	msg.Service{
+	{
 		UUID:        "103",
 		Name:        "TestService",
 		Version:     "1.0.1",
@@ -413,7 +413,7 @@ var services = []msg.Service{
 		TTL:         33,
 		Expires:     getExpirationTime(33),
 	},
-	msg.Service{
+	{
 		UUID:        "104",
 		Name:        "TestService",
 		Version:     "1.0.0",
@@ -424,7 +424,7 @@ var services = []msg.Service{
 		TTL:         34,
 		Expires:     getExpirationTime(34),
 	},
-	msg.Service{
+	{
 		UUID:        "105",
 		Name:        "TestService",
 		Version:     "1.0.0",
@@ -435,7 +435,7 @@ var services = []msg.Service{
 		TTL:         35,
 		Expires:     getExpirationTime(35),
 	},
-	msg.Service{
+	{
 		UUID:        "106",
 		Name:        "OtherService",
 		Version:     "1.0.0",
@@ -455,10 +455,10 @@ type dnsTestCase struct {
 
 var dnsTestCases = []dnsTestCase{
 	// Generic Test
-	dnsTestCase{
+	{
 		Question: "testservice.production.skydns.local.",
 		Answer: []dns.SRV{
-			dns.SRV{
+			{
 				Hdr: dns.RR_Header{
 					Name:   "testservice.production.skydns.local.",
 					Ttl:    30,
@@ -469,7 +469,7 @@ var dnsTestCases = []dnsTestCase{
 				Target:   "server2.",
 				Port:     9001,
 			},
-			dns.SRV{
+			{
 				Hdr: dns.RR_Header{
 					Name:   "testservice.production.skydns.local.",
 					Ttl:    33,
@@ -480,7 +480,7 @@ var dnsTestCases = []dnsTestCase{
 				Target:   "server5.",
 				Port:     9004,
 			},
-			dns.SRV{
+			{
 				Hdr: dns.RR_Header{
 					Name:   "testservice.production.skydns.local.",
 					Ttl:    34,
@@ -495,10 +495,10 @@ var dnsTestCases = []dnsTestCase{
 	},
 
 	// Region Priority Test
-	dnsTestCase{
+	{
 		Question: "region1.any.testservice.production.skydns.local.",
 		Answer: []dns.SRV{
-			dns.SRV{
+			{
 				Hdr: dns.RR_Header{
 					Name:   "region1.any.testservice.production.skydns.local.",
 					Ttl:    30,
@@ -509,7 +509,7 @@ var dnsTestCases = []dnsTestCase{
 				Target:   "server2.",
 				Port:     9001,
 			},
-			dns.SRV{
+			{
 				Hdr: dns.RR_Header{
 					Name:   "region1.any.testservice.production.skydns.local.",
 					Ttl:    33,
@@ -520,7 +520,7 @@ var dnsTestCases = []dnsTestCase{
 				Target:   "server5.",
 				Port:     9004,
 			},
-			dns.SRV{
+			{
 				Hdr: dns.RR_Header{
 					Name:   "region1.any.testservice.production.skydns.local.",
 					Ttl:    34,
