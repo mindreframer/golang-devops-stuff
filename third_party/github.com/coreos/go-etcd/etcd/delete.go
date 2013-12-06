@@ -1,40 +1,26 @@
 package etcd
 
-import (
-	"encoding/json"
-	"io/ioutil"
-	"net/http"
-	"path"
-)
-
-func (c *Client) Delete(key string) (*Response, error) {
-
-	resp, err := c.sendRequest("DELETE", path.Join("keys", key), "")
-
-	if err != nil {
-		return nil, err
-	}
-
-	b, err := ioutil.ReadAll(resp.Body)
-
-	resp.Body.Close()
+// Delete deletes the given key.
+// When recursive set to false If the key points to a
+// directory, the method will fail.
+// When recursive set to true, if the key points to a file,
+// the file will be deleted.  If the key points
+// to a directory, then everything under the directory, including
+// all child directories, will be deleted.
+func (c *Client) Delete(key string, recursive bool) (*Response, error) {
+	raw, err := c.DeleteRaw(key, recursive)
 
 	if err != nil {
 		return nil, err
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, handleError(b)
+	return raw.toResponse()
+}
+
+func (c *Client) DeleteRaw(key string, recursive bool) (*RawResponse, error) {
+	ops := options{
+		"recursive": recursive,
 	}
 
-	var result Response
-
-	err = json.Unmarshal(b, &result)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &result, nil
-
+	return c.delete(key, ops)
 }
