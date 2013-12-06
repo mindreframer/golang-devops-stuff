@@ -77,18 +77,14 @@ func TestConfigEventScripts(t *testing.T) {
 		},
 	}
 
-	result, err := c.EventScripts()
-	if err != nil {
-		t.Fatalf("err: %s", err)
-	}
-
+	result := c.EventScripts()
 	if len(result) != 2 {
 		t.Fatalf("bad: %#v", result)
 	}
 
 	expected := []EventScript{
-		{"*", "", "foo.sh"},
-		{"bar", "", "blah.sh"},
+		{EventFilter{"*", ""}, "foo.sh"},
+		{EventFilter{"bar", ""}, "blah.sh"},
 	}
 
 	if !reflect.DeepEqual(result, expected) {
@@ -109,6 +105,14 @@ func TestDecodeConfig(t *testing.T) {
 	}
 
 	if config.Protocol != DefaultConfig.Protocol {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	if config.SkipLeaveOnInt != DefaultConfig.SkipLeaveOnInt {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	if config.LeaveOnTerm != DefaultConfig.LeaveOnTerm {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -137,6 +141,39 @@ func TestDecodeConfig(t *testing.T) {
 	if config.BindAddr != "127.0.0.2" {
 		t.Fatalf("bad: %#v", config)
 	}
+
+	// replayOnJoin
+	input = `{"replay_on_join": true}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.ReplayOnJoin != true {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// leave_on_terminate
+	input = `{"leave_on_terminate": true}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.LeaveOnTerm != true {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// skip_leave_on_interrupt
+	input = `{"skip_leave_on_interrupt": true}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.SkipLeaveOnInt != true {
+		t.Fatalf("bad: %#v", config)
+	}
 }
 
 func TestMergeConfig(t *testing.T) {
@@ -146,14 +183,17 @@ func TestMergeConfig(t *testing.T) {
 		Protocol:      7,
 		EventHandlers: []string{"foo"},
 		StartJoin:     []string{"foo"},
+		ReplayOnJoin:  true,
 	}
 
 	b := &Config{
-		NodeName:      "bname",
-		Protocol:      -1,
-		EncryptKey:    "foo",
-		EventHandlers: []string{"bar"},
-		StartJoin:     []string{"bar"},
+		NodeName:       "bname",
+		Protocol:       -1,
+		EncryptKey:     "foo",
+		EventHandlers:  []string{"bar"},
+		StartJoin:      []string{"bar"},
+		LeaveOnTerm:    true,
+		SkipLeaveOnInt: true,
 	}
 
 	c := MergeConfig(a, b)
@@ -172,6 +212,18 @@ func TestMergeConfig(t *testing.T) {
 
 	if c.EncryptKey != "foo" {
 		t.Fatalf("bad: %#v", c.EncryptKey)
+	}
+
+	if c.ReplayOnJoin != true {
+		t.Fatalf("bad: %#v", c.ReplayOnJoin)
+	}
+
+	if !c.LeaveOnTerm {
+		t.Fatalf("bad: %#v", c.LeaveOnTerm)
+	}
+
+	if !c.SkipLeaveOnInt {
+		t.Fatalf("bad: %#v", c.SkipLeaveOnInt)
 	}
 
 	expected := []string{"foo", "bar"}

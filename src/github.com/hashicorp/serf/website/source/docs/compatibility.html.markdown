@@ -12,8 +12,8 @@ compatibility, this page makes it clear on our promise to keeping different
 Serf versions compatible with each other.
 
 We promise that every subsequent release of Serf will remain backwards
-compatible with _at least_ one prior version. Concretely: version 0.3 can
-speak to 0.2 (and vice versa), but may not be able to speak to 0.1.
+compatible with _at least_ one prior version. Concretely: version 0.5 can
+speak to 0.4 (and vice versa), but may not be able to speak to 0.1.
 
 The backwards compatibility must be explicitly enabled: Serf agents by
 default will speak the latest protocol, but can be configured to speak earlier
@@ -27,7 +27,7 @@ upgrading, see the [upgrading page](/docs/upgrading.html).
 
 ## Protocol Compatibility Table
 
-<table>
+<table class="table table-bordered table-striped">
 <tr>
 <th>Version</th>
 <th>Protocol Compatibility</th>
@@ -40,4 +40,19 @@ upgrading, see the [upgrading page](/docs/upgrading.html).
 <td>0.2.X</td>
 <td>0, 1</td>
 </tr>
+<tr>
+<td>0.3.X</td>
+<td>0, 1, 2&nbsp;&nbsp;&nbsp;<span class="label label-info">see warning below</span></td>
+</tr>
 </table>
+
+<div class="alert alert-info">
+<p>
+<strong>Warning: </strong> Version 0.3 introduces support for dynamic ports, allowing each
+agent to bind to a different port. However, this feature is only supported
+if all agents are running protocol version 2. Due to the nature of this
+feature, it is hard to detect using the versioning scheme. If ports are kept
+consistent across the cluster, then protocol version 2 is fully backwards
+compatible.
+</p>
+</div>

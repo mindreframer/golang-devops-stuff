@@ -24,6 +24,9 @@ $ serf agent
     Node name: 'mitchellh.local'
     Bind addr: '0.0.0.0:7946'
      RPC addr: '127.0.0.1:7373'
+    Encrypted: false
+     Snapshot: false
+      Profile: lan
 
 ==> Log data will now stream in as it occurs:
 
@@ -34,23 +37,42 @@ $ serf agent
 ...
 ```
 
-There are three important components that `serf agent` outputs:
+There are six important components that `serf agent` outputs:
 
-* **Node name**: This is a unique name for the node. By default this
+* **Node name**: This is a unique name for the agent. By default this
   is the hostname of the machine, but you may customize it to whatever
   you'd like using the `-node` flag.
 
 * **Bind addr**: This is the address and port used for communication between
-  Serf agents in a cluster. Every Serf agent in a cluster must have the
-  _same port_! If you're running multiple clusters, you'll want to choose
-  a unique port per cluster.
+  Serf agents in a cluster. Every Serf agent in a cluster does not have to
+  use the same port.
 
 * **RPC addr**: This is the address and port used for RPC communications
   for other `serf` commands. Other Serf commands such as `serf members`
   connect to a running agent and use RPC to query and control the agent.
   By default, this binds only to localhost on the default port. If you
   change this address, you'll have to specify an `-rpc-addr` to commands
-  such as `serf members` so they know how to talk to the agent.
+  such as `serf members` so they know how to talk to the agent. This is also
+  the address other applications can use over [RPC to control Serf](/docs/agent/rpc.html).
+
+* **Encrypted**: This shows if Serf is encrypting all traffic that it
+  sends and expects to receive. It is a good sanity check to avoid sending
+  non-encrypted traffic over any public networks. You can read more about
+  [encryption here](/docs/agent/encryption.html).
+
+* **Snapshot**: This shows if Serf snapshotting is enabled. The snapshot
+  file enables Serf to automatically re-join a cluster after failure and
+  prevents replay of events that have already been seen. It requires storing
+  state on disk, and [must be configured](/docs/agent/options.html)
+  using a CLI flag or in the configuration directory. If it is not provided,
+  other nodes will still attempt to reconnect on recovery, however the node
+  will take longer to join the cluster and will replay old events.
+
+* **Profile**: The profile controls various timing values which should
+  be appropriate to the environment Serf is running in. It defaults to
+  optimizing for a LAN environment, but can also be set for WAN or
+  local-only communication. The profile can be set in
+  the [configuration](/docs/agent/options.html).
 
 ## Stopping an Agent
 

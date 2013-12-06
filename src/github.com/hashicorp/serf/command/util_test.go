@@ -5,8 +5,10 @@ import (
 	"github.com/hashicorp/serf/command/agent"
 	"github.com/hashicorp/serf/serf"
 	"github.com/hashicorp/serf/testutil"
+	"io"
 	"math/rand"
 	"net"
+	"os"
 	"testing"
 	"time"
 )
@@ -23,10 +25,11 @@ func testAgent(t *testing.T) *agent.Agent {
 	config.MemberlistConfig.ProbeTimeout = 25 * time.Millisecond
 	config.MemberlistConfig.SuspicionMult = 1
 	config.NodeName = config.MemberlistConfig.BindAddr
+	config.Role = "test"
 
-	agent := &agent.Agent{
-		RPCAddr:    getRPCAddr(),
-		SerfConfig: config,
+	agent, err := agent.Create(config, nil)
+	if err != nil {
+		t.Fatalf("err: %s", err)
 	}
 
 	if err := agent.Start(); err != nil {
@@ -46,4 +49,18 @@ func getRPCAddr() string {
 	}
 
 	panic("no listener")
+}
+
+func testIPC(t *testing.T, a *agent.Agent) (string, *agent.AgentIPC) {
+	rpcAddr := getRPCAddr()
+
+	l, err := net.Listen("tcp", rpcAddr)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	lw := agent.NewLogWriter(512)
+	mult := io.MultiWriter(os.Stderr, lw)
+	ipc := agent.NewAgentIPC(a, l, mult, lw)
+	return rpcAddr, ipc
 }
