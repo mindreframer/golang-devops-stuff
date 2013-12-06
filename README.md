@@ -34,11 +34,26 @@ go-raft is under the MIT license.
 
 These projects are built on go-raft:
 
-- [coreos/etcd](https://github.com/coreos/etcd) - A highly-available key value store for shared configuration and service discovery
-- [benbjohnson/raftd](https://github.com/benbjohnson/raftd) - A reference implementation for using the go-raft library for distributed consensus.
-- [skynetservices/skydns](https://github.com/skynetservices/skydns) - DNS for skynet or any other service discovery
+- [coreos/etcd](https://github.com/coreos/etcd) - A highly-available key value store for shared configuration and service discovery.
+- [goraft/raftd](https://github.com/goraft/raftd) - A reference implementation for using the go-raft library for distributed consensus.
+- [skynetservices/skydns](https://github.com/skynetservices/skydns) - DNS for skynet or any other service discovery.
+- [influxdb/influxdb](https://github.com/influxdb/influxdb) - An open-source, distributed, time series, events, and metrics database.
 
 If you have a project that you're using go-raft in, please add it to this README so others can see implementation examples.
+
+## Contact and Resources
+
+- [raft-dev][raft-dev] is a mailing list for discussion about best practices
+  and implementation of Raft. Not goraft specific but helpful if you have
+  questions.
+- [Slides from Ben's talk][bens-talk] which includes easy to understand
+  diagrams of leader election and replication
+- The [Raft Consensus homepage][raft-home] has links to additional raft
+  implementations, slides to talks on Raft and general information
+
+[raft-home]:  http://raftconsensus.github.io/
+[raft-dev]: https://groups.google.com/forum/#!forum/raft-dev
+[bens-talk]: https://speakerdeck.com/benbjohnson/raft-the-understandable-distributed-consensus-protocol
 
 ## The Raft Protocol
 
