@@ -18,6 +18,7 @@ import (
 	"github.com/globocom/tsuru/queue"
 	"github.com/globocom/tsuru/quota"
 	"github.com/globocom/tsuru/repository"
+	"io"
 	"labix.org/v2/mgo/bson"
 	"launchpad.net/goamz/aws"
 	"launchpad.net/goamz/iam"
@@ -25,7 +26,10 @@ import (
 	"strings"
 )
 
-var ErrAppAlreadyExists = errors.New("there is already an app with this name.")
+var (
+	ErrAppAlreadyExists = errors.New("there is already an app with this name.")
+	ErrAppNotFound      = errors.New("App not found")
+)
 
 // reserveUserApp reserves the app for the user, only if the user has a quota
 // of apps. If the user does not have a quota, meaning that it's unlimited,
@@ -51,14 +55,20 @@ var reserveUserApp = action.Action{
 		default:
 			return nil, errors.New("Third parameter must be auth.User or *auth.User.")
 		}
-		if err := quota.Reserve(user.Email, app.Name); err != nil && err != quota.ErrQuotaNotFound {
+		usr, err := auth.GetUserByEmail(user.Email)
+		if err != nil {
+			return nil, err
+		}
+		if err := auth.ReserveApp(usr); err != nil {
 			return nil, err
 		}
 		return map[string]string{"app": app.Name, "user": user.Email}, nil
 	},
 	Backward: func(ctx action.BWContext) {
 		m := ctx.FWResult.(map[string]string)
-		quota.Release(m["user"], m["app"])
+		if user, err := auth.GetUserByEmail(m["user"]); err == nil {
+			auth.ReleaseApp(user)
+		}
 	},
 	MinParams: 2,
 }
@@ -111,6 +121,10 @@ var insertApp = action.Action{
 			return nil, err
 		}
 		defer conn.Close()
+		app.Quota = quota.Unlimited
+		if limit, err := config.GetInt("quota:units-per-app"); err == nil {
+			app.Quota.Limit = limit
+		}
 		app.Units = append(app.Units, Unit{QuotaItem: app.Name + "-0"})
 		err = conn.Apps().Insert(app)
 		if err != nil && strings.HasPrefix(err.Error(), "E11000") {
@@ -366,7 +380,7 @@ var reserveUnitsToAdd = action.Action{
 		defer conn.Close()
 		err = app.Get()
 		if err != nil {
-			return nil, errors.New("App not found")
+			return nil, ErrAppNotFound
 		}
 		ids := generateUnitQuotaItems(&app, int(n))
 		err = quota.Reserve(app.Name, ids...)
@@ -451,7 +465,7 @@ var saveNewUnitsInDatabase = action.Action{
 		defer conn.Close()
 		err = app.Get()
 		if err != nil {
-			return nil, errors.New("App not found")
+			return nil, ErrAppNotFound
 		}
 		messages := make([]queue.Message, len(prev.units)*2)
 		mCount := 0
@@ -479,6 +493,46 @@ var saveNewUnitsInDatabase = action.Action{
 		}
 		go Enqueue(messages...)
 		return nil, nil
+	},
+	MinParams: 1,
+}
+
+// ProvisionerDeploy is an actions that call the Provisioner.Deploy.
+var ProvisionerDeploy = action.Action{
+	Name: "provisioner-deploy",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		app, ok := ctx.Params[0].(*App)
+		if !ok {
+			return nil, errors.New("First parameter must be a *App.")
+		}
+		version, ok := ctx.Params[1].(string)
+		if !ok {
+			return nil, errors.New("Second parameter must be a string.")
+		}
+		logWriter, ok := ctx.Params[2].(io.Writer)
+		if !ok {
+			return nil, errors.New("Third parameter must be a io.Writer.")
+		}
+		err := Provisioner.Deploy(app, version, logWriter)
+		return nil, err
+	},
+	Backward: func(ctx action.BWContext) {
+	},
+	MinParams: 3,
+}
+
+// Increment is an actions that increments the deploy number.
+var IncrementDeploy = action.Action{
+	Name: "increment-deploy",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		app, ok := ctx.Params[0].(*App)
+		if !ok {
+			return nil, errors.New("First parameter must be a *App.")
+		}
+		err := incrementDeploy(app)
+		return nil, err
+	},
+	Backward: func(ctx action.BWContext) {
 	},
 	MinParams: 1,
 }

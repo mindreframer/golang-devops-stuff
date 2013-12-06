@@ -1,6 +1,6 @@
 {
 	"ImportPath": "github.com/globocom/tsuru",
-	"GoVersion": "devel +c8d3de543c1b Fri Nov 15 11:01:54 2013 -0800",
+	"GoVersion": "devel +c67a1d0df694 Wed Oct 16 09:22:57 2013 -0700",
 	"Packages": [
 		"./..."
 	],
@@ -11,9 +11,19 @@
 			"Rev": "cd1eea1eb82851fe9cde1d062406ca60c935ce24"
 		},
 		{
+			"ImportPath": "code.google.com/p/go.crypto/blowfish",
+			"Comment": "null-184",
+			"Rev": "cd1eea1eb82851fe9cde1d062406ca60c935ce24"
+		},
+		{
 			"ImportPath": "code.google.com/p/go.net/websocket",
 			"Comment": "null-88",
 			"Rev": "55437409069bb181ad562b1ad1e5f361c44aff17"
+		},
+		{
+			"ImportPath": "code.google.com/p/gosqlite/sqlite3",
+			"Comment": "null-16",
+			"Rev": "74691fb6f83716190870cde1b658538dd4b18eb0"
 		},
 		{
 			"ImportPath": "github.com/bmizerany/pat",
@@ -25,8 +35,8 @@
 		},
 		{
 			"ImportPath": "github.com/dotcloud/docker",
-			"Comment": "v0.6.3",
-			"Rev": "b0a49a30c78e8cafecac455aa0a306ac1792a644"
+			"Comment": "v0.7.0-rc6-362-g258d707",
+			"Rev": "258d707548619eae7517b39ff0bc9541ebec566c"
 		},
 		{
 			"ImportPath": "github.com/dotcloud/tar",
@@ -37,8 +47,12 @@
 			"Rev": "cf2b00bae0a0e4444486ff232d441ba838935462"
 		},
 		{
+			"ImportPath": "github.com/flaviamissi/go-elb/elb",
+			"Rev": "cf2b00bae0a0e4444486ff232d441ba838935462"
+		},
+		{
 			"ImportPath": "github.com/fsouza/go-dockerclient",
-			"Rev": "cf791086fadc90b3f9e2077f01a9e7a07cf36244"
+			"Rev": "270abd956f2f0e3216a02014ed502a1694e08478"
 		},
 		{
 			"ImportPath": "github.com/garyburd/redigo/redis",
@@ -54,11 +68,15 @@
 		},
 		{
 			"ImportPath": "github.com/globocom/docker-cluster/cluster",
-			"Rev": "d9550a3f1ac79f551da906d2d85136ede69d1f24"
+			"Rev": "00b8740722f32c314a757660fead910ef7de031b"
+		},
+		{
+			"ImportPath": "github.com/globocom/docker-cluster/storage",
+			"Rev": "00b8740722f32c314a757660fead910ef7de031b"
 		},
 		{
 			"ImportPath": "github.com/globocom/go-gandalfclient",
-			"Rev": "7860251e851672e43e2252297f12bf858d7e7c99"
+			"Rev": "874ca26886fc17186993bb02d66655145e0e1c0b"
 		},
 		{
 			"ImportPath": "github.com/gorilla/context",
@@ -70,7 +88,7 @@
 		},
 		{
 			"ImportPath": "github.com/howeyc/fsnotify",
-			"Rev": "6258bb8183757d12ef2260ac4a18a7665c0ca4c4"
+			"Rev": "5102fde921d31f59c6e45d835aa01f0213aade0f"
 		},
 		{
 			"ImportPath": "github.com/kr/beanstalk",
@@ -93,6 +111,21 @@
 		},
 		{
 			"ImportPath": "launchpad.net/goamz/aws",
+			"Comment": "43",
+			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
+		},
+		{
+			"ImportPath": "launchpad.net/goamz/ec2",
+			"Comment": "43",
+			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
+		},
+		{
+			"ImportPath": "launchpad.net/goamz/iam",
+			"Comment": "43",
+			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
+		},
+		{
+			"ImportPath": "launchpad.net/goamz/s3",
 			"Comment": "43",
 			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
 		},

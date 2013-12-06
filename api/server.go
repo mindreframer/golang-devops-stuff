@@ -41,9 +41,6 @@ func RunServer(dry bool) {
 	m.Get("/schema/service", authorizationRequiredHandler(serviceSchema))
 	m.Get("/schema/services", authorizationRequiredHandler(servicesSchema))
 
-	m.Get("/quota/:owner", authorizationRequiredHandler(quotaByOwner))
-	m.Put("/quota/:owner", adminRequiredHandler(changeQuota))
-
 	m.Get("/services/instances", authorizationRequiredHandler(serviceInstances))
 	m.Get("/services/instances/:name", authorizationRequiredHandler(serviceInstance))
 	m.Del("/services/instances/:name", authorizationRequiredHandler(removeServiceInstance))
@@ -79,7 +76,8 @@ func RunServer(dry bool) {
 	m.Del("/apps/:app/:team", authorizationRequiredHandler(revokeAppAccess))
 	m.Get("/apps/:app/log", authorizationRequiredHandler(appLog))
 	m.Post("/apps/:app/log", authorizationRequiredHandler(addLog))
-	m.Get("/apps/:app/deploys", adminRequiredHandler(deploysList))
+
+	m.Get("/deploys", adminRequiredHandler(deploysList))
 
 	m.Get("/platforms", authorizationRequiredHandler(platformList))
 

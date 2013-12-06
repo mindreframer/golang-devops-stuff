@@ -11,12 +11,14 @@ import (
 	"github.com/globocom/config"
 	"github.com/globocom/tsuru/app"
 	"github.com/globocom/tsuru/cmd"
+	"github.com/globocom/tsuru/db"
 	"github.com/globocom/tsuru/exec"
 	etesting "github.com/globocom/tsuru/exec/testing"
 	"github.com/globocom/tsuru/provision"
 	"github.com/globocom/tsuru/queue"
 	rtesting "github.com/globocom/tsuru/router/testing"
 	"github.com/globocom/tsuru/testing"
+	tsrTesting "github.com/globocom/tsuru/testing"
 	"labix.org/v2/mgo/bson"
 	"launchpad.net/gocheck"
 	"net"
@@ -101,6 +103,10 @@ func (s *S) stopContainers(n uint) {
 }
 
 func (s *S) TestDeploy(c *gocheck.C) {
+	h := &tsrTesting.TestHandler{}
+	t := &tsrTesting.T{}
+	gandalfServer := t.StartGandalfTestServer(h)
+	defer gandalfServer.Close()
 	go s.stopContainers(1)
 	err := newImage("tsuru/python", s.server.URL())
 	c.Assert(err, gocheck.IsNil)
@@ -108,21 +114,35 @@ func (s *S) TestDeploy(c *gocheck.C) {
 	setExecut(fexec)
 	defer setExecut(nil)
 	p := dockerProvisioner{}
-	app := testing.NewFakeApp("cribcaged", "python", 1)
-	p.Provision(app)
-	defer p.Destroy(app)
+	app.Provisioner = &p
+	a := app.App{
+		Name:     "otherapp",
+		Platform: "python",
+		Units:    []app.Unit{{Name: "i-0800", State: "started"}},
+	}
+	conn, err := db.Conn()
+	defer conn.Close()
+	err = conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Apps().Remove(bson.M{"name": a.Name})
+	p.Provision(&a)
+	defer p.Destroy(&a)
 	w := writer{b: make([]byte, 2048)}
-	err = p.Deploy(app, "master", &w)
+	err = app.DeployApp(&a, "master", &w)
 	c.Assert(err, gocheck.IsNil)
 	w.b = nil
-	defer p.Destroy(app)
+	defer p.Destroy(&a)
 	time.Sleep(6e9)
 	q, err := getQueue()
-	message, err := q.Get(1e6)
-	c.Assert(err, gocheck.IsNil)
-	defer message.Delete()
-	c.Assert(app.GetCommands(), gocheck.DeepEquals, []string{"serialize", "restart"})
-	c.Assert(app.HasLog("tsuru", "Restarting app..."), gocheck.Equals, true)
+	for _, u := range a.ProvisionedUnits() {
+		message, err := q.Get(1e6)
+		c.Assert(err, gocheck.IsNil)
+		defer message.Delete()
+		c.Assert(err, gocheck.IsNil)
+		c.Assert(message.Action, gocheck.Equals, app.BindService)
+		c.Assert(message.Args[0], gocheck.Equals, a.GetName())
+		c.Assert(message.Args[1], gocheck.Equals, u.GetName())
+	}
 }
 
 func getQueue() (queue.Q, error) {
@@ -135,27 +155,44 @@ func getQueue() (queue.Q, error) {
 }
 
 func (s *S) TestDeployEnqueuesBindService(c *gocheck.C) {
+	h := &tsrTesting.TestHandler{}
+	t := &tsrTesting.T{}
+	gandalfServer := t.StartGandalfTestServer(h)
+	defer gandalfServer.Close()
 	go s.stopContainers(1)
 	err := newImage("tsuru/python", s.server.URL())
 	c.Assert(err, gocheck.IsNil)
 	setExecut(&etesting.FakeExecutor{})
 	defer setExecut(nil)
 	p := dockerProvisioner{}
-	a := testing.NewFakeApp("cribcaged", "python", 1)
-	p.Provision(a)
-	defer p.Destroy(a)
+	app.Provisioner = &p
+	a := app.App{
+		Name:     "otherapp",
+		Platform: "python",
+		Units:    []app.Unit{{Name: "i-0800", State: "started"}},
+	}
+	conn, err := db.Conn()
+	defer conn.Close()
+	err = conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Apps().Remove(bson.M{"name": a.Name})
+	p.Provision(&a)
+	defer p.Destroy(&a)
 	w := writer{b: make([]byte, 2048)}
-	err = p.Deploy(a, "master", &w)
+	err = app.DeployApp(&a, "master", &w)
 	c.Assert(err, gocheck.IsNil)
-	defer p.Destroy(a)
+	defer p.Destroy(&a)
 	q, err := getQueue()
-	message, err := q.Get(1e6)
 	c.Assert(err, gocheck.IsNil)
-	defer message.Delete()
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(message.Action, gocheck.Equals, app.BindService)
-	c.Assert(message.Args[0], gocheck.Equals, a.GetName())
-	c.Assert(message.Args[1], gocheck.Not(gocheck.Equals), "")
+	for _, u := range a.ProvisionedUnits() {
+		message, err := q.Get(1e6)
+		c.Assert(err, gocheck.IsNil)
+		defer message.Delete()
+		c.Assert(err, gocheck.IsNil)
+		c.Assert(message.Action, gocheck.Equals, app.BindService)
+		c.Assert(message.Args[0], gocheck.Equals, a.GetName())
+		c.Assert(message.Args[1], gocheck.Equals, u.GetName())
+	}
 }
 
 type writer struct {
@@ -170,6 +207,10 @@ func (w *writer) Write(c []byte) (int, error) {
 }
 
 func (s *S) TestDeployRemoveContainersEvenWhenTheyreNotInTheAppsCollection(c *gocheck.C) {
+	h := &tsrTesting.TestHandler{}
+	t := &tsrTesting.T{}
+	gandalfServer := t.StartGandalfTestServer(h)
+	defer gandalfServer.Close()
 	go s.stopContainers(3)
 	err := newImage("tsuru/python", s.server.URL())
 	c.Assert(err, gocheck.IsNil)
@@ -179,24 +220,37 @@ func (s *S) TestDeployRemoveContainersEvenWhenTheyreNotInTheAppsCollection(c *go
 	c.Assert(err, gocheck.IsNil)
 	defer rtesting.FakeRouter.RemoveBackend(cont1.AppName)
 	var p dockerProvisioner
-	app := testing.NewFakeApp(cont1.AppName, "python", 0)
-	p.Provision(app)
-	defer p.Destroy(app)
+	a := app.App{
+		Name:     "otherapp",
+		Platform: "python",
+		Units:    []app.Unit{{Name: "i-0800", State: "started"}},
+	}
+	conn, err := db.Conn()
+	defer conn.Close()
+	err = conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Apps().Remove(bson.M{"name": a.Name})
+	p.Provision(&a)
+	defer p.Destroy(&a)
 	fexec := &etesting.FakeExecutor{}
 	setExecut(fexec)
 	defer setExecut(nil)
 	var w bytes.Buffer
-	err = p.Deploy(app, "master", &w)
+	err = app.DeployApp(&a, "master", &w)
 	c.Assert(err, gocheck.IsNil)
 	time.Sleep(1e9)
-	defer p.Destroy(app)
+	defer p.Destroy(&a)
 	q, err := getQueue()
-	message, err := q.Get(1e6)
 	c.Assert(err, gocheck.IsNil)
-	defer message.Delete()
-	message, err = q.Get(1e6)
-	c.Assert(err, gocheck.IsNil)
-	defer message.Delete()
+	for _, u := range a.ProvisionedUnits() {
+		message, err := q.Get(1e6)
+		c.Assert(err, gocheck.IsNil)
+		defer message.Delete()
+		c.Assert(err, gocheck.IsNil)
+		c.Assert(message.Action, gocheck.Equals, app.BindService)
+		c.Assert(message.Args[0], gocheck.Equals, a.GetName())
+		c.Assert(message.Args[1], gocheck.Equals, u.GetName())
+	}
 	coll := collection()
 	defer coll.Close()
 	n, err := coll.Find(bson.M{"appname": cont1.AppName}).Count()
@@ -334,11 +388,6 @@ func (s *S) TestProvisionerRemoveUnit(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	_, err = getContainer(container.ID)
 	c.Assert(err, gocheck.NotNil)
-	images, err := client.ListImages(true)
-	c.Assert(err, gocheck.IsNil)
-	for _, image := range images {
-		c.Assert(image.Repository, gocheck.Not(gocheck.Equals), "tsuru/python")
-	}
 }
 
 func (s *S) TestProvisionerRemoveUnitNotFound(c *gocheck.C) {
@@ -569,4 +618,9 @@ func (s *S) TestExecuteCommandOnceWithoutContainers(c *gocheck.C) {
 	var stdout, stderr bytes.Buffer
 	err := p.ExecuteCommandOnce(&stdout, &stderr, app, "ls", "-lh")
 	c.Assert(err, gocheck.Not(gocheck.IsNil))
+}
+
+func (s *S) TestDeployPipeline(c *gocheck.C) {
+	p := dockerProvisioner{}
+	c.Assert(p.DeployPipeline(), gocheck.NotNil)
 }
