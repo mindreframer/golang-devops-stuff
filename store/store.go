@@ -26,6 +26,7 @@ type Storeable interface {
 type Store interface {
 	BumpDesiredFreshness(timestamp time.Time) error
 	BumpActualFreshness(timestamp time.Time) error
+	RevokeActualFreshness() error
 
 	IsDesiredStateFresh() (bool, error)
 	IsActualStateFresh(time.Time) (bool, error)
@@ -60,7 +61,7 @@ type Store interface {
 }
 
 type RealStore struct {
-	config  config.Config
+	config  *config.Config
 	adapter storeadapter.StoreAdapter
 	logger  logger.Logger
 
@@ -69,7 +70,7 @@ type RealStore struct {
 	instanceHeartbeatCacheTimestamp time.Time
 }
 
-func NewStore(config config.Config, adapter storeadapter.StoreAdapter, logger logger.Logger) *RealStore {
+func NewStore(config *config.Config, adapter storeadapter.StoreAdapter, logger logger.Logger) *RealStore {
 	return &RealStore{
 		config:                          config,
 		adapter:                         adapter,

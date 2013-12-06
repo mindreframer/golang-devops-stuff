@@ -1,4 +1,4 @@
-package md_test
+package mcat_test
 
 import (
 	"fmt"
@@ -38,12 +38,12 @@ var _ = Describe("Serving Metrics", func() {
 		guid := models.Guid()
 
 		coordinator.MessageBus.Subscribe(guid, func(message *yagnats.Message) {
-			Ω(message.Payload).Should(ContainSubstring("%s:%d", ip, coordinator.MetricsServerPort))
-			Ω(message.Payload).Should(ContainSubstring(`"bob","password"`))
+			Ω(string(message.Payload)).Should(ContainSubstring("%s:%d", ip, coordinator.MetricsServerPort))
+			Ω(string(message.Payload)).Should(ContainSubstring(`"bob","password"`))
 			close(done)
 		})
 
-		coordinator.MessageBus.PublishWithReplyTo("vcap.component.discover", "", guid)
+		coordinator.MessageBus.PublishWithReplyTo("vcap.component.discover", guid, []byte(""))
 	})
 
 	Context("when there is a desired app that failed to stage", func() {

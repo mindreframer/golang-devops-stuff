@@ -9,7 +9,7 @@ import (
 	"github.com/cloudfoundry/loggregatorlib/cfcomponent/registrars/collectorregistrar"
 )
 
-func ServeMetrics(steno *gosteno.Logger, l logger.Logger, conf config.Config) {
+func ServeMetrics(steno *gosteno.Logger, l logger.Logger, conf *config.Config) {
 	store, _ := connectToStore(l, conf)
 	cfMessageBus := connectToCFMessageBus(l, conf)
 

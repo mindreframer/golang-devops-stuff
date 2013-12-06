@@ -53,7 +53,7 @@ var _ = Describe("Evacuator", func() {
 		Context("when the message is malformed", func() {
 			It("does nothing", func() {
 				messageBus.Subscriptions["droplet.exited"][0].Callback(&yagnats.Message{
-					Payload: "ß",
+					Payload: []byte("ß"),
 				})
 
 				pendingStarts, err := store.GetPendingStartMessages()
@@ -65,7 +65,7 @@ var _ = Describe("Evacuator", func() {
 		Context("when the reason is DEA_EVACUATION", func() {
 			BeforeEach(func() {
 				messageBus.Subscriptions["droplet.exited"][0].Callback(&yagnats.Message{
-					Payload: string(app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonDEAEvacuation).ToJSON()),
+					Payload: app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonDEAEvacuation).ToJSON(),
 				})
 			})
 
@@ -83,7 +83,7 @@ var _ = Describe("Evacuator", func() {
 		Context("when the reason is DEA_SHUTDOWN", func() {
 			BeforeEach(func() {
 				messageBus.Subscriptions["droplet.exited"][0].Callback(&yagnats.Message{
-					Payload: string(app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonDEAShutdown).ToJSON()),
+					Payload: app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonDEAShutdown).ToJSON(),
 				})
 			})
 
@@ -101,7 +101,7 @@ var _ = Describe("Evacuator", func() {
 		Context("when the reason is STOPPED", func() {
 			BeforeEach(func() {
 				messageBus.Subscriptions["droplet.exited"][0].Callback(&yagnats.Message{
-					Payload: string(app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonStopped).ToJSON()),
+					Payload: app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonStopped).ToJSON(),
 				})
 			})
 
@@ -115,7 +115,7 @@ var _ = Describe("Evacuator", func() {
 		Context("when the reason is CRASHED", func() {
 			BeforeEach(func() {
 				messageBus.Subscriptions["droplet.exited"][0].Callback(&yagnats.Message{
-					Payload: string(app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonCrashed).ToJSON()),
+					Payload: app.InstanceAtIndex(1).DropletExited(models.DropletExitedReasonCrashed).ToJSON(),
 				})
 			})
 

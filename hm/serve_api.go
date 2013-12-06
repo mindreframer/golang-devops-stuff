@@ -7,7 +7,7 @@ import (
 	"github.com/cloudfoundry/hm9000/helpers/logger"
 )
 
-func ServeAPI(l logger.Logger, conf config.Config) {
+func ServeAPI(l logger.Logger, conf *config.Config) {
 	store, _ := connectToStore(l, conf)
 	messageBus := connectToMessageBus(l, conf)
 

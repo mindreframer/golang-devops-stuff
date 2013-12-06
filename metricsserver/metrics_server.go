@@ -23,11 +23,11 @@ type MetricsServer struct {
 	store             store.Store
 	logger            logger.Logger
 	timeProvider      timeprovider.TimeProvider
-	config            config.Config
+	config            *config.Config
 	metricsAccountant metricsaccountant.MetricsAccountant
 }
 
-func New(registrar CollectorRegistrar, steno *gosteno.Logger, metricsAccountant metricsaccountant.MetricsAccountant, logger logger.Logger, store store.Store, timeProvider timeprovider.TimeProvider, conf config.Config) *MetricsServer {
+func New(registrar CollectorRegistrar, steno *gosteno.Logger, metricsAccountant metricsaccountant.MetricsAccountant, logger logger.Logger, store store.Store, timeProvider timeprovider.TimeProvider, conf *config.Config) *MetricsServer {
 	return &MetricsServer{
 		registrar:         registrar,
 		store:             store,

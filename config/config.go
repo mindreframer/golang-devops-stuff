@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"time"
-	"tux21b.org/v1/gocql"
 )
 
 type Config struct {
@@ -41,7 +40,6 @@ type Config struct {
 	StoreType                  string   `json:"store_type"`
 	StoreURLs                  []string `json:"store_urls"`
 	StoreMaxConcurrentRequests int      `json:"store_max_concurrent_requests"`
-	CassandraConsistencyString string   `json:"cassandra_consistency"`
 
 	SenderNatsStartSubject string `json:"sender_nats_start_subject"`
 	SenderNatsStopSubject  string `json:"sender_nats_stop_subject"`
@@ -57,7 +55,7 @@ type Config struct {
 
 	LogLevelString string `json:"log_level"`
 
-	NATS struct {
+	NATS []struct {
 		Host     string `json:"host"`
 		Port     int    `json:"port"`
 		User     string `json:"user"`
@@ -133,17 +131,6 @@ func (conf *Config) StoreHeartbeatCacheRefreshInterval() time.Duration {
 	return time.Millisecond * time.Duration(conf.StoreHeartbeatCacheRefreshIntervalInMilliseconds)
 }
 
-func (conf *Config) CassandraConsistency() gocql.Consistency {
-	switch conf.CassandraConsistencyString {
-	case "ONE":
-		return gocql.One
-	case "ALL":
-		return gocql.All
-	default:
-		return gocql.Quorum
-	}
-}
-
 func (conf *Config) LogLevel() gosteno.LogLevel {
 	switch conf.LogLevelString {
 	case "INFO":
@@ -155,28 +142,28 @@ func (conf *Config) LogLevel() gosteno.LogLevel {
 	}
 }
 
-func DefaultConfig() (Config, error) {
+func DefaultConfig() (*Config, error) {
 	_, file, _, _ := runtime.Caller(0)
 	pathToJSON := filepath.Clean(filepath.Join(filepath.Dir(file), "default_config.json"))
 
 	return FromFile(pathToJSON)
 }
 
-func FromFile(path string) (Config, error) {
+func FromFile(path string) (*Config, error) {
 	json, err := ioutil.ReadFile(path)
 	if err != nil {
-		return Config{}, err
+		return nil, err
 	}
 
 	return FromJSON(json)
 }
 
-func FromJSON(JSON []byte) (Config, error) {
+func FromJSON(JSON []byte) (*Config, error) {
 	var config Config
 	err := json.Unmarshal(JSON, &config)
 	if err == nil {
-		return config, nil
+		return &config, nil
 	} else {
-		return Config{}, err
+		return nil, err
 	}
 }

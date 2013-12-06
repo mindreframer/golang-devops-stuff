@@ -13,10 +13,10 @@ type Analyzer struct {
 
 	logger       logger.Logger
 	timeProvider timeprovider.TimeProvider
-	conf         config.Config
+	conf         *config.Config
 }
 
-func New(store store.Store, timeProvider timeprovider.TimeProvider, logger logger.Logger, conf config.Config) *Analyzer {
+func New(store store.Store, timeProvider timeprovider.TimeProvider, logger logger.Logger, conf *config.Config) *Analyzer {
 	return &Analyzer{
 		store:        store,
 		timeProvider: timeProvider,

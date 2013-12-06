@@ -34,7 +34,7 @@ func (b *brokenReader) Close() error {
 
 var _ = Describe("DesiredStateFetcher", func() {
 	var (
-		conf              config.Config
+		conf              *config.Config
 		fetcher           *DesiredStateFetcher
 		httpClient        *fakehttpclient.FakeHttpClient
 		timeProvider      *faketimeprovider.FakeTimeProvider

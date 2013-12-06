@@ -14,7 +14,7 @@ var _ = Describe("Metrics", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 	)
 
 	conf, _ = config.DefaultConfig()

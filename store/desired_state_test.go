@@ -17,7 +17,7 @@ var _ = Describe("Desired State", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 		app1         appfixture.AppFixture
 		app2         appfixture.AppFixture
 		app3         appfixture.AppFixture

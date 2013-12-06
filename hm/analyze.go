@@ -9,7 +9,7 @@ import (
 	"os"
 )
 
-func Analyze(l logger.Logger, conf config.Config, poll bool) {
+func Analyze(l logger.Logger, conf *config.Config, poll bool) {
 	store, _ := connectToStore(l, conf)
 
 	if poll {
@@ -32,7 +32,7 @@ func Analyze(l logger.Logger, conf config.Config, poll bool) {
 	}
 }
 
-func analyze(l logger.Logger, conf config.Config, store store.Store) error {
+func analyze(l logger.Logger, conf *config.Config, store store.Store) error {
 	l.Info("Analyzing...")
 
 	analyzer := analyzer.New(store, buildTimeProvider(l), l, conf)

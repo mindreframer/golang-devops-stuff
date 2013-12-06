@@ -28,12 +28,12 @@ var _ = Describe("Apiserver", func() {
 	makeRequest := func(request string) (response string) {
 		replyToGuid := models.Guid()
 		messageBus.Subscriptions["app.state"][0].Callback(&yagnats.Message{
-			Payload: request,
+			Payload: []byte(request),
 			ReplyTo: replyToGuid,
 		})
 
 		Ω(messageBus.PublishedMessages[replyToGuid]).Should(HaveLen(1))
-		return messageBus.PublishedMessages[replyToGuid][0].Payload
+		return string(messageBus.PublishedMessages[replyToGuid][0].Payload)
 	}
 
 	BeforeEach(func() {
@@ -72,7 +72,7 @@ var _ = Describe("Apiserver", func() {
 		Context("when no reply-to is given", func() {
 			It("should drop the request on the floor", func() {
 				messageBus.Subscriptions["app.state"][0].Callback(&yagnats.Message{
-					Payload: "{}",
+					Payload: []byte("{}"),
 				})
 
 				Ω(messageBus.PublishedMessages).Should(BeEmpty())

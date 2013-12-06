@@ -15,6 +15,10 @@ func (store *RealStore) BumpActualFreshness(timestamp time.Time) error {
 	return store.bumpFreshness(store.SchemaRoot()+store.config.ActualFreshnessKey, store.config.ActualFreshnessTTL(), timestamp)
 }
 
+func (store *RealStore) RevokeActualFreshness() error {
+	return store.adapter.Delete(store.SchemaRoot() + store.config.ActualFreshnessKey)
+}
+
 func (store *RealStore) bumpFreshness(key string, ttl uint64, timestamp time.Time) error {
 	var jsonTimestamp []byte
 	oldTimestamp, err := store.adapter.Get(key)

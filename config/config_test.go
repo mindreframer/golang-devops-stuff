@@ -7,7 +7,6 @@ import (
 	. "github.com/onsi/gomega"
 	"io/ioutil"
 	"time"
-	"tux21b.org/v1/gocql"
 )
 
 var _ = Describe("Config", func() {
@@ -29,7 +28,6 @@ var _ = Describe("Config", func() {
         "store_schema_version": 1,
         "store_type": "etcd",
         "store_urls": ["http://127.0.0.1:4001"],
-        "cassandra_consistency": "QUORUM",
         "store_max_concurrent_requests": 30,
         "sender_nats_start_subject": "hm9000.start",
         "sender_nats_stop_subject": "hm9000.stop",
@@ -54,12 +52,12 @@ var _ = Describe("Config", func() {
         "api_server_user": "magnet",
         "api_server_password": "orangutan4sale",
         "log_level": "INFO",
-        "nats": {
+        "nats": [{
             "host": "127.0.0.1",
             "port": 4222,
             "user": "",
             "password": ""
-        }
+        }]
     }
     `
 
@@ -101,7 +99,6 @@ var _ = Describe("Config", func() {
 			Ω(config.StoreType).Should(Equal("etcd"))
 			Ω(config.StoreURLs).Should(Equal([]string{"http://127.0.0.1:4001"}))
 			Ω(config.StoreMaxConcurrentRequests).Should(Equal(30))
-			Ω(config.CassandraConsistency()).Should(Equal(gocql.Quorum))
 
 			Ω(config.SenderNatsStartSubject).Should(Equal("hm9000.start"))
 			Ω(config.SenderNatsStopSubject).Should(Equal("hm9000.stop"))
@@ -111,10 +108,10 @@ var _ = Describe("Config", func() {
 			Ω(config.MetricsServerUser).Should(Equal("metrics_server_user"))
 			Ω(config.MetricsServerPassword).Should(Equal("canHazMetrics?"))
 
-			Ω(config.NATS.Host).Should(Equal("127.0.0.1"))
-			Ω(config.NATS.Port).Should(Equal(4222))
-			Ω(config.NATS.User).Should(Equal(""))
-			Ω(config.NATS.Password).Should(Equal(""))
+			Ω(config.NATS[0].Host).Should(Equal("127.0.0.1"))
+			Ω(config.NATS[0].Port).Should(Equal(4222))
+			Ω(config.NATS[0].User).Should(Equal(""))
+			Ω(config.NATS[0].Password).Should(Equal(""))
 
 			Ω(config.LogLevelString).Should(Equal("INFO"))
 		})
@@ -129,20 +126,6 @@ var _ = Describe("Config", func() {
 			Ω(config.LogLevel()).Should(Equal(gosteno.LOG_DEBUG))
 			config.LogLevelString = "Eggplant"
 			Ω(config.LogLevel()).Should(Equal(gosteno.LOG_INFO))
-		})
-	})
-
-	Describe("CassandraConsistency", func() {
-		It("should support ONE, QUORUM, and ALL", func() {
-			config, _ := FromJSON([]byte(configJSON))
-			config.CassandraConsistencyString = "QUORUM"
-			Ω(config.CassandraConsistency()).Should(Equal(gocql.Quorum))
-			config.CassandraConsistencyString = "ALL"
-			Ω(config.CassandraConsistency()).Should(Equal(gocql.All))
-			config.CassandraConsistencyString = "ONE"
-			Ω(config.CassandraConsistency()).Should(Equal(gocql.One))
-			config.CassandraConsistencyString = "Eggplant"
-			Ω(config.CassandraConsistency()).Should(Equal(gocql.Quorum))
 		})
 	})
 
@@ -168,11 +151,11 @@ var _ = Describe("Config", func() {
 		})
 	})
 
-	Context("when passed valid JSON", func() {
-		It("deserializes", func() {
+	Context("when passed invalid JSON", func() {
+		It("should not deserialize", func() {
 			config, err := FromJSON([]byte("¥"))
 			Ω(err).Should(HaveOccured())
-			Ω(config).Should(BeZero())
+			Ω(config).Should(BeNil())
 		})
 	})
 })

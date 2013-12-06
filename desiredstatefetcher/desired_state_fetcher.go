@@ -26,7 +26,7 @@ type DesiredStateFetcherResult struct {
 const initialBulkToken = "{}"
 
 type DesiredStateFetcher struct {
-	config            config.Config
+	config            *config.Config
 	httpClient        httpclient.HttpClient
 	store             store.Store
 	metricsAccountant metricsaccountant.MetricsAccountant
@@ -35,7 +35,7 @@ type DesiredStateFetcher struct {
 	logger            logger.Logger
 }
 
-func New(config config.Config,
+func New(config *config.Config,
 	store store.Store,
 	metricsAccountant metricsaccountant.MetricsAccountant,
 	httpClient httpclient.HttpClient,

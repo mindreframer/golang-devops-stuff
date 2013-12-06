@@ -16,7 +16,7 @@ var _ = Describe("Storing PendingStartMessages", func() {
 	var (
 		store        Store
 		storeAdapter storeadapter.StoreAdapter
-		conf         config.Config
+		conf         *config.Config
 		message1     models.PendingStartMessage
 		message2     models.PendingStartMessage
 		message3     models.PendingStartMessage

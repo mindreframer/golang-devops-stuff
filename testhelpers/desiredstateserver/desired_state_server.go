@@ -14,7 +14,7 @@ type DesiredStateServerInterface interface {
 }
 
 type DesiredStateServer struct {
-	apps                    []DesiredAppState
+	Apps                    []DesiredAppState
 	NumberOfCompleteFetches int
 }
 
@@ -49,11 +49,11 @@ func (server *DesiredStateServer) SpinUp(port int) {
 }
 
 func (server *DesiredStateServer) SetDesiredState(newState []DesiredAppState) {
-	server.apps = newState
+	server.Apps = newState
 }
 
 func (server *DesiredStateServer) Reset() {
-	server.apps = make([]DesiredAppState, 0)
+	server.Apps = make([]DesiredAppState, 0)
 	server.NumberOfCompleteFetches = 0
 }
 
@@ -72,15 +72,15 @@ func (server *DesiredStateServer) handleApps(w http.ResponseWriter, r *http.Requ
 	bulkToken := server.extractBulkToken(r)
 
 	endIndex := bulkToken + batchSize
-	endIndex = min(endIndex, len(server.apps))
+	endIndex = min(endIndex, len(server.Apps))
 
 	results := make(map[string]DesiredAppState, 0)
 
-	for _, app := range server.apps[bulkToken:endIndex] {
+	for _, app := range server.Apps[bulkToken:endIndex] {
 		results[app.AppGuid] = app
 	}
 
-	if bulkToken == len(server.apps) {
+	if bulkToken == len(server.Apps) {
 		server.NumberOfCompleteFetches += 1
 	}
 
