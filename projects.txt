@@ -2,6 +2,7 @@ https://github.com/abh/geodns.git
 https://github.com/adnaan/hamster.git
 https://github.com/apcera/gnatsd.git
 https://github.com/apcera/nats.git
+https://github.com/ARolek/lilpinger.git
 https://github.com/benbjohnson/go-raft.git
 https://github.com/bitly/google_auth_proxy.git
 https://github.com/bitly/nsq.git
@@ -46,4 +47,3 @@ https://github.com/spf13/nitro.git
 https://github.com/uniqush/uniqush-push.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
-https://github.com/ARolek/lilpinger.git
