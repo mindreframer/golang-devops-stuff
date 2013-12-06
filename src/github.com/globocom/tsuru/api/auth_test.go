@@ -155,13 +155,14 @@ func (s *AuthSuite) TestCreateUserHandlerSavesTheUserInTheDatabase(c *gocheck.C)
 	recorder := httptest.NewRecorder()
 	err = createUser(recorder, request)
 	c.Assert(err, gocheck.IsNil)
-	_, err = auth.GetUserByEmail("nobody@globo.com")
+	user, err := auth.GetUserByEmail("nobody@globo.com")
 	c.Assert(err, gocheck.IsNil)
 	action := testing.Action{
 		Action: "create-user",
 		User:   "nobody@globo.com",
 	}
 	c.Assert(action, testing.IsRecorded)
+	c.Assert(user.Quota, gocheck.DeepEquals, quota.Unlimited)
 }
 
 func (s *AuthSuite) TestCreateUserQuota(c *gocheck.C) {
@@ -177,12 +178,10 @@ func (s *AuthSuite) TestCreateUserQuota(c *gocheck.C) {
 	recorder := httptest.NewRecorder()
 	err = createUser(recorder, request)
 	c.Assert(err, gocheck.IsNil)
-	defer quota.Delete("nobody@globo.com")
-	err = quota.Reserve("nobody@globo.com", "something/0")
+	user, err := auth.GetUserByEmail("nobody@globo.com")
 	c.Assert(err, gocheck.IsNil)
-	err = quota.Reserve("nobody@globo.com", "something/1")
-	_, ok := err.(*quota.QuotaExceededError)
-	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(user.Quota.Limit, gocheck.Equals, 1)
+	c.Assert(user.Quota.InUse, gocheck.Equals, 0)
 }
 
 func (s *AuthSuite) TestCreateUserUnlimitedQuota(c *gocheck.C) {
@@ -196,25 +195,9 @@ func (s *AuthSuite) TestCreateUserUnlimitedQuota(c *gocheck.C) {
 	recorder := httptest.NewRecorder()
 	err = createUser(recorder, request)
 	c.Assert(err, gocheck.IsNil)
-	err = quota.Reserve("nobody@globo.com", "something/0")
-	c.Assert(err, gocheck.Equals, quota.ErrQuotaNotFound)
-}
-
-func (s *AuthSuite) TestCreateUserNegativeQuota(c *gocheck.C) {
-	config.Set("quota:apps-per-user", -20)
-	defer config.Unset("quota:apps-per-user")
-	h := testHandler{}
-	ts := s.startGandalfTestServer(&h)
-	defer ts.Close()
-	b := bytes.NewBufferString(`{"email":"nobody@globo.com","password":"123456"}`)
-	request, err := http.NewRequest("POST", "/users", b)
+	user, err := auth.GetUserByEmail("nobody@globo.com")
 	c.Assert(err, gocheck.IsNil)
-	request.Header.Set("Content-type", "application/json")
-	recorder := httptest.NewRecorder()
-	err = createUser(recorder, request)
-	c.Assert(err, gocheck.IsNil)
-	err = quota.Reserve("nobody@globo.com", "something/0")
-	c.Assert(err, gocheck.Equals, quota.ErrQuotaNotFound)
+	c.Assert(user.Quota, gocheck.DeepEquals, quota.Unlimited)
 }
 
 func (s *AuthSuite) TestCreateUserHandlerReturnsStatus201AfterCreateTheUser(c *gocheck.C) {
@@ -1488,31 +1471,6 @@ func (s *AuthSuite) TestRemoveUser(c *gocheck.C) {
 	c.Assert(action, testing.IsRecorded)
 }
 
-func (s *AuthSuite) TestRemoveUserWithQuota(c *gocheck.C) {
-	// The setting doesn't matter, it must always delete the quota.
-	err := quota.Create("clap@yes.com", 10)
-	c.Assert(err, gocheck.IsNil)
-	h := testHandler{}
-	ts := s.startGandalfTestServer(&h)
-	defer ts.Close()
-	conn, _ := db.Conn()
-	defer conn.Close()
-	u := auth.User{Email: "clap@yes.com", Password: "clapyes"}
-	err = u.Create()
-	c.Assert(err, gocheck.IsNil)
-	defer conn.Users().Remove(bson.M{"email": u.Email})
-	token, err := u.CreateToken("clapyes")
-	c.Assert(err, gocheck.IsNil)
-	defer conn.Tokens().Remove(bson.M{"token": token.Token})
-	request, err := http.NewRequest("DELETE", "/users", nil)
-	c.Assert(err, gocheck.IsNil)
-	recorder := httptest.NewRecorder()
-	err = removeUser(recorder, request, token)
-	c.Assert(err, gocheck.IsNil)
-	err = quota.Reserve("clap@yes.com", "something")
-	c.Assert(err, gocheck.Equals, quota.ErrQuotaNotFound)
-}
-
 func (s *AuthSuite) TestRemoveUserWithTheUserBeingLastMemberOfATeam(c *gocheck.C) {
 	h := testHandler{}
 	ts := s.startGandalfTestServer(&h)
@@ -1540,7 +1498,7 @@ func (s *AuthSuite) TestRemoveUserWithTheUserBeingLastMemberOfATeam(c *gocheck.C
 	c.Assert(e.Code, gocheck.Equals, http.StatusForbidden)
 	expected := `This user is the last member of the team "painofsalvation", so it cannot be removed.
 
-Please remove the team, them remove the user.`
+Please remove the team, then remove the user.`
 	c.Assert(e.Message, gocheck.Equals, expected)
 }
 

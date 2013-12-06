@@ -50,11 +50,12 @@ func createUser(w http.ResponseWriter, r *http.Request) error {
 	if _, err := c.NewUser(u.Email, keyToMap(u.Keys)); err != nil {
 		return fmt.Errorf("Failed to create user in the git server: %s", err)
 	}
+	u.Quota = quota.Unlimited
+	if limit, err := config.GetInt("quota:apps-per-user"); err == nil && limit > -1 {
+		u.Quota.Limit = limit
+	}
 	if err := u.Create(); err == nil {
 		rec.Log(u.Email, "create-user")
-		if limit, err := config.GetUint("quota:apps-per-user"); err == nil {
-			quota.Create(u.Email, uint(limit))
-		}
 		w.WriteHeader(http.StatusCreated)
 		return nil
 	}
@@ -576,7 +577,7 @@ func removeUser(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 		if len(team.Users) < 2 {
 			msg := fmt.Sprintf(`This user is the last member of the team "%s", so it cannot be removed.
 
-Please remove the team, them remove the user.`, team.Name)
+Please remove the team, then remove the user.`, team.Name)
 			return &errors.HTTP{Code: http.StatusForbidden, Message: msg}
 		}
 		err = team.RemoveUser(u)
@@ -594,7 +595,6 @@ Please remove the team, them remove the user.`, team.Name)
 		log.Errorf("Failed to remove user from gandalf: %s", err)
 		return fmt.Errorf("Failed to remove the user from the git server: %s", err)
 	}
-	quota.Delete(u.Email)
 	return conn.Users().Remove(bson.M{"email": u.Email})
 }
 

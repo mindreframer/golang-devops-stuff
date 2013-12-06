@@ -46,10 +46,21 @@ func (s *S) TestGet(c *gocheck.C) {
 	c.Assert(myApp.Name, gocheck.Equals, newApp.Name)
 }
 
+func (s *S) TestGetNotFound(c *gocheck.C) {
+	app := App{Name: "wat"}
+	err := app.Get()
+	c.Assert(err, gocheck.Equals, ErrAppNotFound)
+}
+
 func (s *S) TestDelete(c *gocheck.C) {
-	err := quota.Create(s.user.Email, 1)
-	c.Assert(err, gocheck.IsNil)
-	defer quota.Delete(s.user.Email)
+	s.conn.Users().Update(
+		bson.M{"email": s.user.Email},
+		bson.M{"$set": bson.M{"quota.limit": 1, "quota.inuse": 1}},
+	)
+	defer s.conn.Users().Update(
+		bson.M{"email": s.user.Email},
+		bson.M{"$set": bson.M{"quota": quota.Unlimited}},
+	)
 	h := testHandler{}
 	ts := s.t.StartGandalfTestServer(&h)
 	defer ts.Close()
@@ -59,9 +70,7 @@ func (s *S) TestDelete(c *gocheck.C) {
 		Units:    []Unit{{Name: "duvido", Machine: 3}},
 		Owner:    s.user.Email,
 	}
-	err = s.conn.Apps().Insert(&a)
-	c.Assert(err, gocheck.IsNil)
-	err = quota.Reserve(s.user.Email, a.Name)
+	err := s.conn.Apps().Insert(&a)
 	c.Assert(err, gocheck.IsNil)
 	err = quota.Create(a.Name, 1)
 	c.Assert(err, gocheck.IsNil)
@@ -74,7 +83,7 @@ func (s *S) TestDelete(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(qt, gocheck.Equals, 0)
 	c.Assert(s.provisioner.Provisioned(&a), gocheck.Equals, false)
-	err = quota.Reserve(s.user.Email, a.Name)
+	err = auth.ReserveApp(s.user)
 	c.Assert(err, gocheck.IsNil)
 	err = quota.Reserve(a.Name, "something")
 	c.Assert(err, gocheck.Equals, quota.ErrQuotaNotFound)
@@ -171,6 +180,8 @@ func (s *S) TestCreateApp(c *gocheck.C) {
 	}
 	expectedHost := "localhost"
 	config.Set("host", expectedHost)
+	s.conn.Users().Update(bson.M{"email": s.user.Email}, bson.M{"$set": bson.M{"quota.limit": 1}})
+	defer s.conn.Users().Update(bson.M{"email": s.user.Email}, bson.M{"$set": bson.M{"quota.limit": -1}})
 	err := quota.Create(s.user.Email, 1)
 	c.Assert(err, gocheck.IsNil)
 	defer quota.Delete(s.user.Email)
@@ -218,7 +229,7 @@ func (s *S) TestCreateApp(c *gocheck.C) {
 	c.Assert(message.Action, gocheck.Equals, expectedMessage.Action)
 	c.Assert(message.Args, gocheck.DeepEquals, expectedMessage.Args)
 	c.Assert(s.provisioner.GetUnits(&a), gocheck.HasLen, 1)
-	err = quota.Reserve(s.user.Email, a.Name)
+	err = auth.ReserveApp(s.user)
 	_, ok = err.(*quota.QuotaExceededError)
 	c.Assert(ok, gocheck.Equals, true)
 	_, _, err = quota.Items(retrievedApp.Name)
@@ -227,12 +238,15 @@ func (s *S) TestCreateApp(c *gocheck.C) {
 
 func (s *S) TestCreateAppUserQuotaExceeded(c *gocheck.C) {
 	app := App{Name: "america", Platform: "python"}
-	err := quota.Create(s.user.Email, 1)
-	c.Assert(err, gocheck.IsNil)
-	defer quota.Delete(s.user.Email)
-	err = quota.Reserve(s.user.Email, app.Name)
-	c.Assert(err, gocheck.IsNil)
-	err = CreateApp(&app, s.user)
+	s.conn.Users().Update(
+		bson.M{"email": s.user.Email},
+		bson.M{"$set": bson.M{"quota.limit": 0}},
+	)
+	defer s.conn.Users().Update(
+		bson.M{"email": s.user.Email},
+		bson.M{"$set": bson.M{"quota.limit": -1}},
+	)
+	err := CreateApp(&app, s.user)
 	e, ok := err.(*AppCreationError)
 	c.Assert(ok, gocheck.Equals, true)
 	_, ok = e.Err.(*quota.QuotaExceededError)
@@ -1862,19 +1876,40 @@ func (s *S) TestGetDeploys(c *gocheck.C) {
 	c.Assert(a.GetDeploys(), gocheck.Equals, a.Deploys)
 }
 
-func (s *S) TestListDeploys(c *gocheck.C) {
+func (s *S) TestListAppDeploys(c *gocheck.C) {
+	s.conn.Deploys().RemoveAll(nil)
 	a := App{Name: "g1"}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
 	insert := []interface{}{
-		Deploy{App: "g1", Timestamp: time.Now().Add(-60 * time.Second)},
+		Deploy{App: "g1", Timestamp: time.Now().Add(-3600 * time.Second)},
 		Deploy{App: "g1", Timestamp: time.Now()},
 	}
 	s.conn.Deploys().Insert(insert...)
 	defer s.conn.Deploys().RemoveAll(bson.M{"app": a.Name})
-	expected := []Deploy{insert[0].(Deploy), insert[1].(Deploy)}
+	expected := []Deploy{insert[1].(Deploy), insert[0].(Deploy)}
 	deploys, err := a.ListDeploys()
+	c.Assert(err, gocheck.IsNil)
+	for i := 0; i < 2; i++ {
+		ts := expected[i].Timestamp
+		expected[i].Timestamp = time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, time.UTC)
+		ts = deploys[i].Timestamp
+		deploys[i].Timestamp = time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, time.UTC)
+	}
+	c.Assert(deploys, gocheck.DeepEquals, expected)
+}
+
+func (s *S) TestListAllDeploys(c *gocheck.C) {
+	s.conn.Deploys().RemoveAll(nil)
+	insert := []interface{}{
+		Deploy{App: "g1", Timestamp: time.Now().Add(-3600 * time.Second)},
+		Deploy{App: "ge", Timestamp: time.Now()},
+	}
+	s.conn.Deploys().Insert(insert...)
+	defer s.conn.Deploys().RemoveAll(nil)
+	expected := []Deploy{insert[1].(Deploy), insert[0].(Deploy)}
+	deploys, err := ListDeploys()
 	c.Assert(err, gocheck.IsNil)
 	for i := 0; i < 2; i++ {
 		ts := expected[i].Timestamp
@@ -1968,4 +2003,26 @@ func (s *S) TestDeployAppIncrementDeployNumber(c *gocheck.C) {
 	now := time.Now()
 	diff := now.Sub(result["timestamp"].(time.Time))
 	c.Assert(diff < 60*time.Second, gocheck.Equals, true)
+}
+
+func (s *S) TestDeployCustomPipeline(c *gocheck.C) {
+	a := App{
+		Name:     "otherapp",
+		Platform: "zend",
+		Teams:    []string{s.team.Name},
+		Units:    []Unit{{Name: "i-0800", State: "started"}},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	writer := &bytes.Buffer{}
+	err = DeployApp(&a, "version", writer)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(s.provisioner.ExecutedPipeline(), gocheck.Equals, false)
+	s.provisioner.CustomPipeline = true
+	err = DeployApp(&a, "version", writer)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(s.provisioner.ExecutedPipeline(), gocheck.Equals, true)
 }

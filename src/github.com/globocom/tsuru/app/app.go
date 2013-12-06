@@ -23,6 +23,7 @@ import (
 	"github.com/globocom/tsuru/repository"
 	"github.com/globocom/tsuru/service"
 	"io"
+	"labix.org/v2/mgo"
 	"labix.org/v2/mgo/bson"
 	"os"
 	"regexp"
@@ -52,6 +53,7 @@ type App struct {
 	Owner    string
 	State    string
 	Deploys  uint
+	quota.Quota
 
 	hr hookRunner
 }
@@ -92,7 +94,11 @@ func (app *App) Get() error {
 		return err
 	}
 	defer conn.Close()
-	return conn.Apps().Find(bson.M{"name": app.Name}).One(app)
+	err = conn.Apps().Find(bson.M{"name": app.Name}).One(app)
+	if err == mgo.ErrNotFound {
+		return ErrAppNotFound
+	}
+	return err
 }
 
 // CreateApp creates a new app.
@@ -196,7 +202,9 @@ func Delete(app *App) error {
 	}
 	token := app.Env["TSURU_APP_TOKEN"].Value
 	auth.DeleteToken(token)
-	quota.Release(app.Owner, app.Name)
+	if owner, err := auth.GetUserByEmail(app.Owner); err == nil {
+		auth.ReleaseApp(owner)
+	}
 	conn, err := db.Conn()
 	if err != nil {
 		return err
@@ -263,7 +271,7 @@ func (app *App) RemoveUnit(id string) error {
 		return stderr.New("Unit not found.")
 	}
 	if err := Provisioner.RemoveUnit(app, unit.GetName()); err != nil {
-		return err
+		log.Error(err.Error())
 	}
 	app.removeUnits([]int{i})
 	app.unbindUnit(&unit)
@@ -607,18 +615,28 @@ type Deploy struct {
 }
 
 func (app *App) ListDeploys() ([]Deploy, error) {
+	return listDeploys(app)
+}
+
+func ListDeploys() ([]Deploy, error) {
+	return listDeploys(nil)
+}
+
+func listDeploys(app *App) ([]Deploy, error) {
 	var list []Deploy
 	conn, err := db.Conn()
 	if err != nil {
 		return nil, err
 	}
-	if err := conn.Deploys().Find(nil).All(&list); err != nil {
-		return []Deploy{}, err
+	defer conn.Close()
+	var qr interface{}
+	if app != nil {
+		qr = bson.M{"app": app.Name}
 	}
-	if err := conn.Deploys().Find(bson.M{"app": app.Name}).All(&list); err != nil {
-		return []Deploy{}, err
+	if err := conn.Deploys().Find(qr).Sort("-timestamp").All(&list); err != nil {
+		return nil, err
 	}
-	return list, nil
+	return list, err
 }
 
 // ProvisionedUnits returns the internal list of units converted to
@@ -872,12 +890,13 @@ func Swap(app1, app2 *App) error {
 
 // DeployApp calls the Provisioner.Deploy
 func DeployApp(app *App, version string, writer io.Writer) error {
-	logWriter := LogWriter{App: app, Writer: writer}
-	err := Provisioner.Deploy(app, version, &logWriter)
-	if err != nil {
-		return err
+	pipeline := Provisioner.DeployPipeline()
+	if pipeline == nil {
+		actions := []*action.Action{&ProvisionerDeploy, &IncrementDeploy}
+		pipeline = action.NewPipeline(actions...)
 	}
-	return incrementDeploy(app)
+	logWriter := LogWriter{App: app, Writer: writer}
+	return pipeline.Execute(app, version, &logWriter)
 }
 
 func incrementDeploy(app *App) error {
