@@ -65,6 +65,18 @@ func (self *QueryApiSuite) TestGetReferencedColumns(c *C) {
 	}
 }
 
+func (self *QueryApiSuite) TestGetReferencedColumnsWithInClause(c *C) {
+	queryStr := "select value1, sum(value2) from t where value In (90.0, 100.0) group by value3;"
+	query, err := ParseQuery(queryStr)
+	c.Assert(err, IsNil)
+	columns := query.GetReferencedColumns()
+	c.Assert(columns, HasLen, 1)
+	for v, columns := range columns {
+		c.Assert(columns, DeepEquals, []string{"value", "value1", "value2", "value3"})
+		c.Assert(v.Name, Equals, "t")
+	}
+}
+
 func (self *QueryApiSuite) TestGetReferencedColumnsReturnsTheStarAsAColumn(c *C) {
 	queryStr := "select * from events;"
 	query, err := ParseQuery(queryStr)
@@ -118,7 +130,7 @@ func (self *QueryApiSuite) TestGetReferencedColumnsWithARegexTable(c *C) {
 }
 
 func (self *QueryApiSuite) TestGetReferencedColumnsWithWhereClause(c *C) {
-	queryStr := "select * from foo where a == 5;"
+	queryStr := "select * from foo where a = 5;"
 	query, err := ParseQuery(queryStr)
 	c.Assert(err, IsNil)
 	columns := query.GetReferencedColumns()
@@ -130,7 +142,7 @@ func (self *QueryApiSuite) TestGetReferencedColumnsWithWhereClause(c *C) {
 }
 
 func (self *QueryApiSuite) TestGetReferencedColumnsWithInnerJoin(c *C) {
-	queryStr := "select f2.b from foo as f1 inner join foo as f2 where f1.a == 5 and f2.a == 6;"
+	queryStr := "select f2.b from foo as f1 inner join foo as f2 where f1.a = 5 and f2.a = 6;"
 	query, err := ParseQuery(queryStr)
 	c.Assert(err, IsNil)
 	columns := query.GetReferencedColumns()
@@ -213,11 +225,11 @@ func (self *QueryApiSuite) TestGetStartTimeWithOr(c *C) {
 
 func (self *QueryApiSuite) TestErrorInStartTime(c *C) {
 	queriesAndErrors := map[string]string{
-		"select * from t where time > now() * 1d and time < now() - 1h;":  ".*'\\*'.*",
-		"select * from t where time > blah * 1d and time < now() - 1h;":   ".*strconv.ParseInt.*",
-		"select * from t where time == now() * 1d and time < now() - 1h;": ".*Cannot use time with '=='.*",
-		"select * from t where time > now() - 1d or time > now() - 1h;":   ".*Invalid where.*",
-		"select * from t where time > foo() - 1d or time > now() - 1h;":   ".*Invalid use of function foo.*",
+		"select * from t where time > now() * 1d and time < now() - 1h;": ".*'\\*'.*",
+		"select * from t where time > blah * 1d and time < now() - 1h;":  ".*strconv.ParseFloat.*",
+		"select * from t where time = now() * 1d and time < now() - 1h;": ".*Cannot use time with '='.*",
+		"select * from t where time > now() - 1d or time > now() - 1h;":  ".*Invalid where.*",
+		"select * from t where time > foo() - 1d or time > now() - 1h;":  ".*Invalid use of function foo.*",
 	}
 
 	for queryStr, error := range queriesAndErrors {

@@ -4,19 +4,8 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include "query_types.h"
-
-#if !defined(__APPLE_CC__) && defined(__x86_64__)
-__asm__(".symver memcpy,memcpy@GLIBC_2.2.5");
-#endif
-
-expression *create_expression(expression *left, char op, expression *right) {
-  expression *expr = malloc(sizeof(expression));
-  expr->left = left;
-  expr->op = op;
-  expr->right = right;
-  return expr;
-}
 
 value *create_value(char *name, int type, char is_case_insensitive, value_array *args) {
   value *v = malloc(sizeof(value));
@@ -27,6 +16,26 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
   return v;
 }
 
+value *create_expression_value(char *operator, size_t size, ...) {
+  value *v = malloc(sizeof(value));
+  v->name = operator;
+  v->value_type = VALUE_EXPRESSION;
+  v->is_case_insensitive = FALSE;
+  v->args = malloc(sizeof(value_array));
+  v->args->size = size;
+  v->args->elems = malloc(sizeof(value*) * size);
+  va_list ap;
+  va_start(ap, size);
+
+  int i;
+  for (i = 0; i < size; i++) {
+    value *x = va_arg(ap, value*);
+    v->args->elems[i] = x;
+  }
+  va_end(ap);
+  return v;
+}
+
 %}
 
 %union {
@@ -34,8 +43,6 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
   char*                 string;
   int                   integer;
   condition*            condition;
-  bool_expression*      bool_expression;
-  expression*           expression;
   value_array*          value_array;
   value*                v;
   from_clause*          from_clause;
@@ -46,7 +53,6 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
   } limit_and_order;
 }
 
-// debugging
 %debug
 
 // better error/location reporting
@@ -67,7 +73,7 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
 // define the precedence of these operators
 %left  OR
 %left  AND
-%nonassoc <string> OPERATION_EQUAL OPERATION_NE OPERATION_GT OPERATION_LT OPERATION_LE OPERATION_GE
+%nonassoc <string> OPERATION_EQUAL OPERATION_NE OPERATION_GT OPERATION_LT OPERATION_LE OPERATION_GE OPERATION_IN
 %left  <character> '+' '-'
 %left  <character> '*' '/'
 
@@ -77,11 +83,10 @@ value *create_value(char *name, int type, char is_case_insensitive, value_array 
 %type <value_array>     COLUMN_NAMES
 %type <string>          BOOL_OPERATION ALIAS_CLAUSE
 %type <condition>       CONDITION
-%type <bool_expression> BOOL_EXPRESSION
+%type <v>               BOOL_EXPRESSION
 %type <value_array>     VALUES
 %type <v>               VALUE TABLE_VALUE SIMPLE_TABLE_VALUE TABLE_NAME_VALUE SIMPLE_NAME_VALUE
 %type <v>               WILDCARD REGEX_VALUE DURATION_VALUE FUNCTION_CALL
-%type <expression>      EXPRESSION
 %type <value_array>     GROUP_BY_CLAUSE
 %type <integer>         LIMIT_CLAUSE
 %type <character>       ORDER_CLAUSE
@@ -327,6 +332,19 @@ VALUE:
         TABLE_NAME_VALUE
         |
         FUNCTION_CALL
+        |
+        '(' VALUE ')'
+        {
+          $$ = $2;
+        }
+        |
+        VALUE '*' VALUE { $$ = create_expression_value(strdup("*"), 2, $1, $3); }
+        |
+        VALUE '/' VALUE { $$ = create_expression_value(strdup("/"), 2, $1, $3); }
+        |
+        VALUE '+' VALUE { $$ = create_expression_value(strdup("+"), 2, $1, $3); }
+        |
+        VALUE '-' VALUE { $$ = create_expression_value(strdup("-"), 2, $1, $3); }
 
 TABLE_VALUE:
         SIMPLE_NAME_VALUE | TABLE_NAME_VALUE | REGEX_VALUE
@@ -370,65 +388,32 @@ REGEX_VALUE:
           $$ = create_value($1, VALUE_REGEX, TRUE, NULL);
         }
 
-EXPRESSION:
-        VALUE
-        {
-          $$ = malloc(sizeof(expression));
-          $$->left = $1;
-          $$->op = '\0';
-          $$->right = NULL;
-        }
-        |
-        '(' EXPRESSION ')'
-        {
-          $$ = $2;
-        }
-        |
-        EXPRESSION '*' EXPRESSION { $$ = create_expression($1, $2, $3); }
-        |
-        EXPRESSION '/' EXPRESSION { $$ = create_expression($1, $2, $3); }
-        |
-        EXPRESSION '+' EXPRESSION { $$ = create_expression($1, $2, $3); }
-        |
-        EXPRESSION '-' EXPRESSION { $$ = create_expression($1, $2, $3); }
-
 BOOL_EXPRESSION:
-        EXPRESSION
+        VALUE
+        |
+        VALUE BOOL_OPERATION VALUE
         {
-          $$ = malloc(sizeof(bool_expression));
-          $$->left = $1;
-          $$->op = NULL;
-          $$->right = NULL;
+          $$ = create_expression_value($2, 2, $1, $3);
         }
         |
-        EXPRESSION BOOL_OPERATION EXPRESSION
+        VALUE OPERATION_IN '(' VALUES ')'
         {
-          $$ = malloc(sizeof(bool_expression));
-          $$->left = $1;
-          $$->op = $2;
-          $$->right = $3;
+          $$ = create_expression_value($2, 1, $1);
+          $$->args->elems = realloc($$->args->elems, sizeof(value*) * ($4->size + 1));
+          memcpy($$->args->elems + 1, $4->elems, $4->size * sizeof(value*));
+          $$->args->size = $4->size + 1;
+          free($4->elems);
+          free($4);
         }
         |
-        EXPRESSION REGEX_OP REGEX_VALUE
+        VALUE REGEX_OP REGEX_VALUE
         {
-          $$ = malloc(sizeof(bool_expression));
-          $$->left = $1;
-          $$->op = $2;
-          $$->right = malloc(sizeof(expression));
-          $$->right->left = $3;
-          $$->right->op = '\0';
-          $$->right->right = NULL;
+          $$ = create_expression_value($2, 2, $1, $3);
         }
         |
-        EXPRESSION NEGATION_REGEX_OP REGEX_VALUE
+        VALUE NEGATION_REGEX_OP REGEX_VALUE
         {
-          $$ = malloc(sizeof(bool_expression));
-          $$->left = $1;
-          $$->op = $2;
-          $$->right = malloc(sizeof(expression));
-          $$->right->left = $3;
-          $$->right->op = '\0';
-          $$->right->right = NULL;
+          $$ = create_expression_value($2, 2, $1, $3);
         }
 
 CONDITION:
@@ -485,9 +470,12 @@ query
 parse_query(char *const query_s)
 {
   query q = {NULL, NULL, NULL, NULL, NULL};
-  /* yydebug = 1; */
   void *scanner;
   yylex_init(&scanner);
+#ifdef DEBUG
+  yydebug = 1;
+  yyset_debug(1, scanner);
+#endif
   void *buffer = yy_scan_string(query_s, scanner);
   yyparse (&q, scanner);
   yy_delete_buffer(buffer, scanner);

@@ -3,12 +3,14 @@ package engine
 import (
 	"common"
 	"coordinator"
+	"datastore"
 	"fmt"
 	"os"
 	"parser"
 	"protocol"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -40,6 +42,8 @@ func (self *QueryEngine) RunQuery(user common.User, database string, query strin
 
 	if isAggregateQuery(q) {
 		return self.executeCountQueryWithGroupBy(user, database, q, yield)
+	} else if containsArithmeticOperators(q) {
+		return self.executeArithmeticQuery(user, database, q, yield)
 	} else {
 		return self.distributeQuery(user, database, q, yield)
 	}
@@ -63,6 +67,15 @@ func (self *QueryEngine) distributeQuery(user common.User, database string, quer
 
 func NewQueryEngine(c coordinator.Coordinator) (EngineI, error) {
 	return &QueryEngine{c}, nil
+}
+
+func containsArithmeticOperators(query *parser.Query) bool {
+	for _, column := range query.GetColumnNames() {
+		if column.Type == parser.ValueExpression {
+			return true
+		}
+	}
+	return false
 }
 
 func isAggregateQuery(query *parser.Query) bool {
@@ -148,11 +161,6 @@ func createValuesToInterface(groupBy parser.GroupByClause, fields []string) (Map
 			}, nil
 
 	case 2:
-		names := []string{}
-		for _, value := range groupBy {
-			names = append(names, value.Name)
-		}
-
 		idx1, idx2 := -1, -1
 		for index, fieldName := range fields {
 			if fieldName == names[0] {
@@ -163,6 +171,14 @@ func createValuesToInterface(groupBy parser.GroupByClause, fields []string) (Map
 			if idx1 > 0 && idx2 > 0 {
 				break
 			}
+		}
+
+		if idx1 == -1 {
+			return nil, nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", names[0]))
+		}
+
+		if idx2 == -1 {
+			return nil, nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", names[1]))
 		}
 
 		if window != nil {
@@ -264,6 +280,10 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 	var inverse InverseMapper
 
 	err = self.distributeQuery(user, database, query, func(series *protocol.Series) error {
+		if len(series.Points) == 0 {
+			return nil
+		}
+
 		var mapper Mapper
 		mapper, inverse, err = createValuesToInterface(groupBy, series.Fields)
 		if err != nil {
@@ -279,7 +299,10 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 		for _, point := range series.Points {
 			value := mapper(point)
 			for _, aggregator := range aggregators {
-				aggregator.AggregatePoint(*series.Name, value, point)
+				err := aggregator.AggregatePoint(*series.Name, value, point)
+				if err != nil {
+					return err
+				}
 			}
 
 			timestampAggregator.AggregatePoint(*series.Name, value, point)
@@ -380,4 +403,56 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 	}
 
 	return nil
+}
+
+func (self *QueryEngine) executeArithmeticQuery(user common.User, database string, query *parser.Query,
+	yield func(*protocol.Series) error) error {
+
+	names := map[string]*parser.Value{}
+	for idx, v := range query.GetColumnNames() {
+		switch v.Type {
+		case parser.ValueSimpleName:
+			names[v.Name] = v
+		case parser.ValueFunctionCall:
+			names[v.Name] = v
+		case parser.ValueExpression:
+			names["expr"+strconv.Itoa(idx)] = v
+		}
+	}
+
+	return self.distributeQuery(user, database, query, func(series *protocol.Series) error {
+		if len(series.Points) == 0 {
+			yield(series)
+			return nil
+		}
+
+		newSeries := &protocol.Series{
+			Name: series.Name,
+		}
+
+		// create the new column names
+		for name, _ := range names {
+			newSeries.Fields = append(newSeries.Fields, name)
+		}
+
+		for _, point := range series.Points {
+			newPoint := &protocol.Point{
+				Timestamp:      point.Timestamp,
+				SequenceNumber: point.SequenceNumber,
+			}
+			for _, field := range newSeries.Fields {
+				value := names[field]
+				v, err := datastore.GetValue(value, series.Fields, point)
+				if err != nil {
+					return err
+				}
+				newPoint.Values = append(newPoint.Values, v)
+			}
+			newSeries.Points = append(newSeries.Points, newPoint)
+		}
+
+		yield(newSeries)
+
+		return nil
+	})
 }

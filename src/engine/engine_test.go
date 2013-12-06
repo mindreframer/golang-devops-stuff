@@ -3,6 +3,7 @@ package engine
 import (
 	. "checkers"
 	"common"
+	"coordinator"
 	"encoding/json"
 	"fmt"
 	. "launchpad.net/gocheck"
@@ -45,7 +46,7 @@ func (self *MockCoordinator) WriteSeriesData(user common.User, database string, 
 	return nil
 }
 
-func (self *MockCoordinator) CreateDatabase(user common.User, db string) error {
+func (self *MockCoordinator) CreateDatabase(user common.User, db string, rf uint8) error {
 	return nil
 }
 
@@ -53,8 +54,16 @@ func (self *MockCoordinator) DropDatabase(user common.User, db string) error {
 	return nil
 }
 
-func (self *MockCoordinator) ListDatabases(user common.User) ([]string, error) {
+func (self *MockCoordinator) ListDatabases(user common.User) ([]*coordinator.Database, error) {
 	return nil, nil
+}
+
+func (self *MockCoordinator) ReplicateWrite(request *protocol.Request) error {
+	return nil
+}
+
+func (self *MockCoordinator) ReplayReplication(request *protocol.Request, replicationFactor *uint8, owningServerId *uint32, lastSeenSequenceNumber *uint64) {
+	return
 }
 
 func createEngine(c *C, seriesString string) EngineI {
@@ -1101,6 +1110,26 @@ func (self *EngineSuite) TestDerivativeQuery(c *C) {
         { "values": [{ "double_value": 1 } ], "timestamp": 1381347700000000},
         { "values": [{ "double_value": -2 }], "timestamp": 1381347702000000}
       ],
+      "name": "foo",
+      "fields": ["derivative"]
+    }
+  ]`)
+}
+
+func (self *EngineSuite) TestDerivativeQueryWithOnePoint(c *C) {
+	engine := createEngine(c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381347700000000, "sequence_number": 1 }
+      ],
+      "name": "foo",
+      "fields": ["column_one"]
+    }
+  ]`)
+
+	runQuery(engine, "select derivative(column_one) from foo", c, `[
+    {
+      "points": [],
       "name": "foo",
       "fields": ["derivative"]
     }

@@ -12,22 +12,36 @@ import (
 	"io/ioutil"
 	"net"
 	libhttp "net/http"
+	"path/filepath"
 	"protocol"
+	"regexp"
 	"strings"
 )
 
-type HttpServer struct {
-	conn        net.Listener
-	httpAddr    string
-	engine      engine.EngineI
-	coordinator coordinator.Coordinator
-	userManager coordinator.UserManager
-	shutdown    chan bool
+var VALID_TABLE_NAMES *regexp.Regexp
+
+func init() {
+	var err error
+	VALID_TABLE_NAMES, err = regexp.Compile("^[a-zA-Z][a-zA-Z0-9._-]*$")
+	if err != nil {
+		panic(err)
+	}
 }
 
-func NewHttpServer(httpAddr string, theEngine engine.EngineI, theCoordinator coordinator.Coordinator, userManager coordinator.UserManager) *HttpServer {
+type HttpServer struct {
+	conn           net.Listener
+	httpPort       string
+	adminAssetsDir string
+	engine         engine.EngineI
+	coordinator    coordinator.Coordinator
+	userManager    coordinator.UserManager
+	shutdown       chan bool
+}
+
+func NewHttpServer(httpPort string, adminAssetsDir string, theEngine engine.EngineI, theCoordinator coordinator.Coordinator, userManager coordinator.UserManager) *HttpServer {
 	self := &HttpServer{}
-	self.httpAddr = httpAddr
+	self.httpPort = httpPort
+	self.adminAssetsDir = adminAssetsDir
 	self.engine = theEngine
 	self.coordinator = theCoordinator
 	self.userManager = userManager
@@ -36,7 +50,7 @@ func NewHttpServer(httpAddr string, theEngine engine.EngineI, theCoordinator coo
 }
 
 func (self *HttpServer) ListenAndServe() {
-	conn, err := net.Listen("tcp", self.httpAddr)
+	conn, err := net.Listen("tcp", self.httpPort)
 	if err != nil {
 		log.Error("Listen: ", err)
 	}
@@ -65,13 +79,11 @@ func (self *HttpServer) Serve(listener net.Listener) {
 
 	// Write points to the given database
 	self.registerEndpoint(p, "post", "/db/:db/series", self.writePoints)
-	self.registerEndpoint(p, "get", "/dbs", self.listDatabases)
 	self.registerEndpoint(p, "get", "/db", self.listDatabases)
 	self.registerEndpoint(p, "post", "/db", self.createDatabase)
 	self.registerEndpoint(p, "del", "/db/:name", self.dropDatabase)
 
 	// cluster admins management interface
-
 	self.registerEndpoint(p, "get", "/cluster_admins", self.listClusterAdmins)
 	self.registerEndpoint(p, "get", "/cluster_admins/authenticate", self.authenticateClusterAdmin)
 	self.registerEndpoint(p, "post", "/cluster_admins", self.createClusterAdmin)
@@ -87,6 +99,9 @@ func (self *HttpServer) Serve(listener net.Listener) {
 	self.registerEndpoint(p, "post", "/db/:db/admins/:user", self.setDbAdmin)
 	self.registerEndpoint(p, "del", "/db/:db/admins/:user", self.unsetDbAdmin)
 
+	// fetch current list of available interfaces
+	self.registerEndpoint(p, "get", "/interfaces", self.listInterfaces)
+
 	if err := libhttp.Serve(listener, p); err != nil && !strings.Contains(err.Error(), "closed network") {
 		panic(err)
 	}
@@ -94,10 +109,12 @@ func (self *HttpServer) Serve(listener net.Listener) {
 }
 
 func (self *HttpServer) Close() {
-	log.Info("Closing http server")
-	self.conn.Close()
-	log.Info("Waiting for all requests to finish before killing the process")
-	<-self.shutdown
+	if self.conn != nil {
+		log.Info("Closing http server")
+		self.conn.Close()
+		log.Info("Waiting for all requests to finish before killing the process")
+		<-self.shutdown
+	}
 }
 
 type Writer interface {
@@ -234,6 +251,10 @@ func removeTimestampFieldDefinition(fields []string) []string {
 }
 
 func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*protocol.Series, error) {
+	if !VALID_TABLE_NAMES.MatchString(s.Name) {
+		return nil, fmt.Errorf("%s is not a valid series name", s.Name)
+	}
+
 	points := []*protocol.Point{}
 	for _, point := range s.Points {
 		values := []*protocol.FieldValue{}
@@ -349,22 +370,15 @@ func (self *HttpServer) writePoints(w libhttp.ResponseWriter, r *libhttp.Request
 }
 
 type createDatabaseRequest struct {
-	Name string `json:"name"`
-}
-
-type Database struct {
-	Name string `json:"name"`
+	Name              string `json:"name"`
+	ReplicationFactor uint8  `json:"replicationFactor"`
 }
 
 func (self *HttpServer) listDatabases(w libhttp.ResponseWriter, r *libhttp.Request) {
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
-		dbNames, err := self.coordinator.ListDatabases(u)
+		databases, err := self.coordinator.ListDatabases(u)
 		if err != nil {
 			return errorToStatusCode(err), err.Error()
-		}
-		databases := make([]*Database, 0, len(dbNames))
-		for _, db := range dbNames {
-			databases = append(databases, &Database{db})
 		}
 		return libhttp.StatusOK, databases
 	})
@@ -381,7 +395,7 @@ func (self *HttpServer) createDatabase(w libhttp.ResponseWriter, r *libhttp.Requ
 		if err != nil {
 			return libhttp.StatusBadRequest, err.Error()
 		}
-		err = self.coordinator.CreateDatabase(user, createRequest.Name)
+		err = self.coordinator.CreateDatabase(user, createRequest.Name, createRequest.ReplicationFactor)
 		if err != nil {
 			return errorToStatusCode(err), err.Error()
 		}
@@ -564,7 +578,6 @@ func (self *HttpServer) tryAsClusterAdmin(w libhttp.ResponseWriter, r *libhttp.R
 }
 
 type NewUser struct {
-	Username string `json:"username"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
 }
@@ -614,9 +627,6 @@ func (self *HttpServer) createClusterAdmin(w libhttp.ResponseWriter, r *libhttp.
 
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		username := newUser.Name
-		if username == "" {
-			username = newUser.Username
-		}
 		if err := self.userManager.CreateClusterAdminUser(u, username); err != nil {
 			errorStr := err.Error()
 			return errorToStatusCode(err), errorStr
@@ -754,9 +764,6 @@ func (self *HttpServer) createDbUser(w libhttp.ResponseWriter, r *libhttp.Reques
 
 	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		username := newUser.Name
-		if username == "" {
-			username = newUser.Username
-		}
 		if err := self.userManager.CreateDbUser(u, db, username); err != nil {
 			return errorToStatusCode(err), err.Error()
 		}
@@ -842,4 +849,28 @@ func (self *HttpServer) commonSetDbAdmin(w libhttp.ResponseWriter, r *libhttp.Re
 		}
 		return libhttp.StatusOK, nil
 	})
+}
+
+func (self *HttpServer) listInterfaces(w libhttp.ResponseWriter, r *libhttp.Request) {
+	statusCode, contentType, body := yieldUser(nil, func(u common.User) (int, interface{}) {
+		entries, err := ioutil.ReadDir(filepath.Join(self.adminAssetsDir, "interfaces"))
+
+		if err != nil {
+			return errorToStatusCode(err), err.Error()
+		}
+
+		directories := make([]string, 0, len(entries))
+		for _, entry := range entries {
+			if entry.IsDir() {
+				directories = append(directories, entry.Name())
+			}
+		}
+		return libhttp.StatusOK, directories
+	})
+
+	w.Header().Add("content-type", contentType)
+	w.WriteHeader(statusCode)
+	if len(body) > 0 {
+		w.Write(body)
+	}
 }

@@ -15,6 +15,7 @@
 static int yycolumn = 1;
 
 %option reentrant
+%option debug
 %option bison-bridge
 %option bison-locations
 %option noyywrap
@@ -32,6 +33,7 @@ static int yycolumn = 1;
 "limit"                   { return LIMIT; }
 "order"                   { return ORDER; }
 "asc"                     { return ASC; }
+"in"                      { yylval->string = strdup(yytext); return OPERATION_IN; }
 "desc"                    { return DESC; }
 "group"                   { return GROUP; }
 "by"                      { return BY; }
@@ -43,10 +45,10 @@ static int yycolumn = 1;
 "/"                       { yylval->character = *yytext; return *yytext; }
 "and"                     { return AND; }
 "or"                      { return OR; }
-"=="                      { yylval->string = strdup(yytext); return OPERATION_EQUAL; }
 "=~"                      { yylval->string = strdup(yytext); return REGEX_OP; }
+"="                       { yylval->string = strdup(yytext); return OPERATION_EQUAL; }
 "!~"                      { yylval->string = strdup(yytext); return NEGATION_REGEX_OP; }
-"!="                      { yylval->string = strdup(yytext); return OPERATION_NE; }
+"<>"                      { yylval->string = strdup(yytext); return OPERATION_NE; }
 "<"                       { yylval->string = strdup(yytext); return OPERATION_LT; }
 ">"                       { yylval->string = strdup(yytext); return OPERATION_GT; }
 "<="                      { yylval->string = strdup(yytext); return OPERATION_LE; }
@@ -54,9 +56,9 @@ static int yycolumn = 1;
 
 [0-9]+                    { yylval->string = strdup(yytext); return INT_VALUE; }
 
-[0-9]*\.[0-9]+|[0-9]+\.[0-9]* { yylval->string = strdup(yytext); return FLOAT_VALUE; }
+([0-9]+|[0-9]*\.[0-9]+|[0-9]+\.[0-9]*)[smhdw]             { yylval->string = strdup(yytext); return DURATION; }
 
-[0-9]+[smhdw]             { yylval->string = strdup(yytext); return DURATION; }
+[0-9]*\.[0-9]+|[0-9]+\.[0-9]* { yylval->string = strdup(yytext); return FLOAT_VALUE; }
 
 \/.+\/                    { yytext[strlen(yytext)-1]='\0';yylval->string=strdup(yytext+1);return REGEX_STRING; }
 \/.+\/i                   { yytext[strlen(yytext)-2]='\0';yylval->string=strdup(yytext+1);return INSENSITIVE_REGEX_STRING; }
@@ -65,8 +67,11 @@ static int yycolumn = 1;
 
 [a-zA-Z][a-zA-Z0-9._-]*   { yylval->string = strdup(yytext); return TABLE_NAME; }
 
-\'.*\'                    {
+\'[^\']*\'                    {
   yytext[yyleng-1] = '\0';
   yylval->string = strdup(yytext+1);
   return STRING_VALUE;
 }
+
+[\t ]*                    {}
+.                         { return *yytext; }

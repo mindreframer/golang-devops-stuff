@@ -2,6 +2,7 @@ package parser
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -166,9 +167,44 @@ func (self *Query) GetEndTime() time.Time {
 	return self.endTime
 }
 
+// parse time that matches the following format:
+//   2006-01-02 [15[:04[:05[.000]]]]
+// notice, hour, minute and seconds are optional
+var time_regex *regexp.Regexp
+
+func init() {
+	var err error
+	time_regex, err = regexp.Compile(
+		"^([0-9]{4}|[0-9]{2})-[0-9]{1,2}-[0-9]{1,2}( [0-9]{1,2}(:[0-9]{1,2}(:[0-9]{1,2}?(\\.[0-9]+)?)?)?)?$")
+	if err != nil {
+		panic(err)
+	}
+}
+
+func parseTimeString(t string) (time.Time, error) {
+	submatches := time_regex.FindStringSubmatch(t)
+	if len(submatches) == 0 {
+		return ZERO_TIME, fmt.Errorf("%s isn't a valid time string", t)
+	}
+
+	if submatches[5] != "" || submatches[4] != "" {
+		return time.Parse("2006-01-02 15:04:05", t)
+	}
+
+	if submatches[3] != "" {
+		return time.Parse("2006-01-02 15:04", t)
+	}
+
+	if submatches[2] != "" {
+		return time.Parse("2006-01-02 15", t)
+	}
+
+	return time.Parse("2006-01-02", t)
+}
+
 // parse time expressions, e.g. now() - 1d
-func parseTime(expr *Expression) (int64, error) {
-	if value, ok := expr.GetLeftValue(); ok {
+func parseTime(value *Value) (int64, error) {
+	if value.Type != ValueExpression {
 		if value.IsFunctionCall() && value.Name == "now" {
 			return time.Now().UnixNano(), nil
 		}
@@ -177,54 +213,60 @@ func parseTime(expr *Expression) (int64, error) {
 			return 0, fmt.Errorf("Invalid use of function %s", value.Name)
 		}
 
+		if value.Type == ValueString {
+			t, err := parseTimeString(value.Name)
+			return t.UnixNano(), err
+		}
+
 		name := value.Name
 
-		parsedInt, err := strconv.ParseInt(name[:len(name)-1], 10, 64)
+		parsedFloat, err := strconv.ParseFloat(name[:len(name)-1], 64)
 		if err != nil {
 			return 0, err
 		}
 
 		switch name[len(name)-1] {
 		case 'u':
-			return parsedInt * int64(time.Microsecond), nil
+			return int64(parsedFloat * float64(time.Microsecond)), nil
 		case 's':
-			return parsedInt * int64(time.Second), nil
+			return int64(parsedFloat * float64(time.Second)), nil
 		case 'm':
-			return parsedInt * int64(time.Minute), nil
+			return int64(parsedFloat * float64(time.Minute)), nil
 		case 'h':
-			return parsedInt * int64(time.Hour), nil
+			return int64(parsedFloat * float64(time.Hour)), nil
 		case 'd':
-			return parsedInt * 24 * int64(time.Hour), nil
+			return int64(parsedFloat * 24 * float64(time.Hour)), nil
 		case 'w':
-			return parsedInt * 7 * 24 * int64(time.Hour), nil
+			return int64(parsedFloat * 7 * 24 * float64(time.Hour)), nil
 		}
 
 		lastChar := name[len(name)-1]
-		if !unicode.IsDigit(rune(lastChar)) {
+		if !unicode.IsDigit(rune(lastChar)) && lastChar != '.' {
 			return 0, fmt.Errorf("Invalid character '%c'", lastChar)
 		}
 
-		extraDigit := int64(lastChar - '0')
-		parsedInt = parsedInt*10 + extraDigit
-		return int64(parsedInt), err
+		if name[len(name)-2] != '.' {
+			extraDigit := float64(lastChar - '0')
+			parsedFloat = parsedFloat*10 + extraDigit
+		}
+		return int64(parsedFloat), nil
 	}
 
-	leftExpression, _ := expr.GetLeftExpression()
-	leftValue, err := parseTime(leftExpression)
+	leftValue, err := parseTime(value.Elems[0])
 	if err != nil {
 		return 0, err
 	}
-	rightValue, err := parseTime(expr.Right)
+	rightValue, err := parseTime(value.Elems[1])
 	if err != nil {
 		return 0, err
 	}
-	switch expr.Operation {
-	case '+':
+	switch value.Name {
+	case "+":
 		return leftValue + rightValue, nil
-	case '-':
+	case "-":
 		return leftValue - rightValue, nil
 	default:
-		return 0, fmt.Errorf("Cannot use '%c' in a time expression", expr.Operation)
+		return 0, fmt.Errorf("Cannot use '%s' in a time expression", value.Name)
 	}
 }
 
@@ -240,7 +282,7 @@ func getReferencedColumnsFromValue(v *Value, mapping map[string][]string) (notAs
 		notAssigned = append(notAssigned, v.Name)
 	case ValueWildcard:
 		notAssigned = append(notAssigned, "*")
-	case ValueFunctionCall:
+	case ValueExpression, ValueFunctionCall:
 		for _, value := range v.Elems {
 			newNotAssignedColumns := getReferencedColumnsFromValue(value, mapping)
 			if len(newNotAssignedColumns) > 0 && newNotAssignedColumns[0] == "*" {
@@ -253,24 +295,6 @@ func getReferencedColumnsFromValue(v *Value, mapping map[string][]string) (notAs
 	return
 }
 
-func getReferencedColumnsFromExpression(expr *Expression, mapping map[string][]string) (notAssigned []string) {
-	if left, ok := expr.GetLeftExpression(); ok {
-		notAssigned = append(notAssigned, getReferencedColumnsFromExpression(left, mapping)...)
-		notAssigned = append(notAssigned, getReferencedColumnsFromExpression(expr.Right, mapping)...)
-		return
-	}
-
-	value, _ := expr.GetLeftValue()
-	notAssigned = append(notAssigned, getReferencedColumnsFromValue(value, mapping)...)
-	return
-}
-
-func getReferencedColumnsFromBool(expr *BoolExpression, mapping map[string][]string) (notAssigned []string) {
-	notAssigned = append(notAssigned, getReferencedColumnsFromExpression(expr.Right, mapping)...)
-	notAssigned = append(notAssigned, getReferencedColumnsFromExpression(expr.Left, mapping)...)
-	return
-}
-
 func getReferencedColumnsFromCondition(condition *WhereCondition, mapping map[string][]string) (notPrefixed []string) {
 	if left, ok := condition.GetLeftWhereCondition(); ok {
 		notPrefixed = append(notPrefixed, getReferencedColumnsFromCondition(left, mapping)...)
@@ -279,8 +303,17 @@ func getReferencedColumnsFromCondition(condition *WhereCondition, mapping map[st
 	}
 
 	expr, _ := condition.GetBoolExpression()
-	notPrefixed = append(notPrefixed, getReferencedColumnsFromBool(expr, mapping)...)
+	notPrefixed = append(notPrefixed, getReferencedColumnsFromValue(expr, mapping)...)
 	return
+}
+
+func isNumericValue(value *Value) bool {
+	switch value.Type {
+	case ValueDuration, ValueFloat, ValueInt, ValueString:
+		return true
+	default:
+		return false
+	}
 }
 
 // parse the start time or end time from the where conditions and return the new condition
@@ -291,8 +324,21 @@ func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereConditio
 	}
 
 	if expr, ok := condition.GetBoolExpression(); ok {
-		leftValue, isLeftValue := expr.Left.GetLeftValue()
-		rightValue, isRightValue := expr.Right.GetLeftValue()
+		leftValue := expr.Elems[0]
+		isLeftValue := leftValue.Type != ValueExpression
+		rightValue := expr.Elems[1]
+		isRightValue := rightValue.Type != ValueExpression
+
+		// this can only be the case if the where condition
+		// is of the form `"time" > 123456789`, so let's see
+		// which side is a float value
+		if isLeftValue && isRightValue {
+			if isNumericValue(rightValue) {
+				isRightValue = false
+			} else {
+				isLeftValue = false
+			}
+		}
 
 		// if this expression isn't "time > xxx" or "xxx < time" then return
 		// TODO: we should do a check to make sure "time" doesn't show up in
@@ -301,20 +347,22 @@ func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereConditio
 			return condition, ZERO_TIME, nil
 		}
 
-		var timeExpression *Expression
+		var timeExpression *Value
 		if !isRightValue {
 			if leftValue.Name != "time" {
 				return condition, ZERO_TIME, nil
 			}
-			timeExpression = expr.Right
-		} else {
+			timeExpression = rightValue
+		} else if !isLeftValue {
 			if rightValue.Name != "time" {
 				return condition, ZERO_TIME, nil
 			}
-			timeExpression = expr.Left
+			timeExpression = leftValue
+		} else {
+			return nil, ZERO_TIME, fmt.Errorf("Invalid time condition %v", condition)
 		}
 
-		switch expr.Operation {
+		switch expr.Name {
 		case ">":
 			if isParsingStartTime && !isLeftValue || !isParsingStartTime && !isRightValue {
 				return condition, ZERO_TIME, nil
@@ -324,14 +372,14 @@ func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereConditio
 				return condition, ZERO_TIME, nil
 			}
 		default:
-			return nil, ZERO_TIME, fmt.Errorf("Cannot use time with '%s'", expr.Operation)
+			return nil, ZERO_TIME, fmt.Errorf("Cannot use time with '%s'", expr.Name)
 		}
 
 		nanoseconds, err := parseTime(timeExpression)
 		if err != nil {
 			return nil, ZERO_TIME, err
 		}
-		return nil, time.Unix(nanoseconds/int64(time.Second), nanoseconds%int64(time.Second)), nil
+		return nil, time.Unix(nanoseconds/int64(time.Second), nanoseconds%int64(time.Second)).UTC(), nil
 	}
 
 	leftCondition, _ := condition.GetLeftWhereCondition()
