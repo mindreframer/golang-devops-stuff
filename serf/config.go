@@ -14,6 +14,7 @@ var ProtocolVersionMap map[uint8]uint8
 
 func init() {
 	ProtocolVersionMap = map[uint8]uint8{
+		2: 2,
 		1: 1,
 		0: 0,
 	}
@@ -108,6 +109,11 @@ type Config struct {
 	// faster than they can be disseminated
 	QueueDepthWarning int
 
+	// MaxQueueDepth is used to start dropping messages if the number
+	// of queued messages to broadcast exceeds this number. This is to
+	// prevent an unbounded growth of memory utilization
+	MaxQueueDepth int
+
 	// RecentIntentBuffer is used to set the size of recent join and leave intent
 	// messages that will be buffered. This is used to guard against
 	// the case where Serf broadcasts an intent that arrives before the
@@ -140,6 +146,12 @@ type Config struct {
 	// LogOutput is the location to write logs to. If this is not set,
 	// logs will go to stderr.
 	LogOutput io.Writer
+
+	// SnapshotPath if provided is used to snapshot live nodes as well
+	// as lamport clock values. When Serf is started with a snapshot,
+	// it will attempt to join all the previously known nodes until one
+	// succeeds and will also avoid replaying old user events.
+	SnapshotPath string
 }
 
 // DefaultConfig returns a Config struct that contains reasonable defaults
@@ -161,7 +173,8 @@ func DefaultConfig() *Config {
 		ReconnectInterval:  30 * time.Second,
 		ReconnectTimeout:   24 * time.Hour,
 		QueueDepthWarning:  128,
+		MaxQueueDepth:      4096,
 		TombstoneTimeout:   24 * time.Hour,
-		MemberlistConfig:   memberlist.DefaultConfig(),
+		MemberlistConfig:   memberlist.DefaultLANConfig(),
 	}
 }

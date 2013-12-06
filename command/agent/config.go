@@ -18,10 +18,12 @@ const DefaultBindPort int = 7946
 
 // DefaultConfig contains the defaults for configurations.
 var DefaultConfig = &Config{
-	BindAddr: "0.0.0.0",
-	LogLevel: "INFO",
-	RPCAddr:  "127.0.0.1:7373",
-	Protocol: serf.ProtocolVersionMax,
+	BindAddr:     "0.0.0.0",
+	LogLevel:     "INFO",
+	RPCAddr:      "127.0.0.1:7373",
+	Protocol:     serf.ProtocolVersionMax,
+	ReplayOnJoin: false,
+	Profile:      "lan",
 }
 
 // Config is the configuration that can be set for an Agent. Some of these
@@ -49,6 +51,7 @@ type Config struct {
 	EncryptKey string `mapstructure:"encrypt_key"`
 
 	// LogLevel is the level of the logs to output.
+	// This can be updated during a reload.
 	LogLevel string `mapstructure:"log_level"`
 
 	// RPCAddr is the address and port to listen on for the agent's RPC
@@ -58,23 +61,53 @@ type Config struct {
 	// Protocol is the Serf protocol version to use.
 	Protocol int `mapstructure:"protocol"`
 
+	// ReplayOnJoin tells Serf to replay past user events
+	// when joining based on a `StartJoin`.
+	ReplayOnJoin bool `mapstructure:"replay_on_join"`
+
 	// StartJoin is a list of addresses to attempt to join when the
 	// agent starts. If Serf is unable to communicate with any of these
 	// addresses, then the agent will error and exit.
 	StartJoin []string `mapstructure:"start_join"`
 
 	// EventHandlers is a list of event handlers that will be invoked.
+	// These can be updated during a reload.
 	EventHandlers []string `mapstructure:"event_handlers"`
+
+	// Profile is used to select a timing profile for Serf. The supported choices
+	// are "wan", "lan", and "local". The default is "lan"
+	Profile string `mapstructure:"profile"`
+
+	// SnapshotPath is used to allow Serf to snapshot important transactional
+	// state to make a more graceful recovery possible. This enables auto
+	// re-joining a cluster on failure and avoids old message replay.
+	SnapshotPath string `mapstructure:"snapshot_path"`
+
+	// LeaveOnTerm controls if Serf does a graceful leave when receiving
+	// the TERM signal. Defaults false. This can be changed on reload.
+	LeaveOnTerm bool `mapstructure:"leave_on_terminate"`
+
+	// SkipLeaveOnInt controls if Serf skips a graceful leave when receiving
+	// the INT signal. Defaults false. This can be changed on reload.
+	SkipLeaveOnInt bool `mapstructure:"skip_leave_on_interrupt"`
 }
 
 // BindAddrParts returns the parts of the BindAddr that should be
 // used to configure Serf.
 func (c *Config) BindAddrParts() (string, int, error) {
 	checkAddr := c.BindAddr
-	if !strings.Contains(checkAddr, ":") {
-		checkAddr += fmt.Sprintf(":%d", DefaultBindPort)
+
+START:
+	_, _, err := net.SplitHostPort(checkAddr)
+	if ae, ok := err.(*net.AddrError); ok && ae.Err == "missing port in address" {
+		checkAddr = fmt.Sprintf("%s:%d", checkAddr, DefaultBindPort)
+		goto START
+	}
+	if err != nil {
+		return "", 0, err
 	}
 
+	// Get the address
 	addr, err := net.ResolveTCPAddr("tcp", checkAddr)
 	if err != nil {
 		return "", 0, err
@@ -90,18 +123,13 @@ func (c *Config) EncryptBytes() ([]byte, error) {
 
 // EventScripts returns the list of EventScripts associated with this
 // configuration and specified by the "event_handlers" configuration.
-func (c *Config) EventScripts() ([]EventScript, error) {
+func (c *Config) EventScripts() []EventScript {
 	result := make([]EventScript, 0, len(c.EventHandlers))
 	for _, v := range c.EventHandlers {
-		part, err := ParseEventScript(v)
-		if err != nil {
-			return nil, err
-		}
-
+		part := ParseEventScript(v)
 		result = append(result, part...)
 	}
-
-	return result, nil
+	return result
 }
 
 // DecodeConfig reads the configuration from the given reader in JSON
@@ -129,19 +157,22 @@ func DecodeConfig(r io.Reader) (*Config, error) {
 	}
 
 	// If we never set the protocol, then set it to the default
-	found := false
-	for _, k := range md.Keys {
-		if k == "protocol" {
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if !containsKey(md.Keys, "protocol") {
 		result.Protocol = DefaultConfig.Protocol
 	}
 
 	return &result, nil
+}
+
+// containsKey is used to check if a slice of string keys contains
+// another key
+func containsKey(keys []string, key string) bool {
+	for _, k := range keys {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }
 
 // MergeConfig merges two configurations together to make a single new
@@ -170,6 +201,21 @@ func MergeConfig(a, b *Config) *Config {
 	}
 	if b.RPCAddr != "" {
 		result.RPCAddr = b.RPCAddr
+	}
+	if b.ReplayOnJoin != false {
+		result.ReplayOnJoin = b.ReplayOnJoin
+	}
+	if b.Profile != "" {
+		result.Profile = b.Profile
+	}
+	if b.SnapshotPath != "" {
+		result.SnapshotPath = b.SnapshotPath
+	}
+	if b.LeaveOnTerm == true {
+		result.LeaveOnTerm = true
+	}
+	if b.SkipLeaveOnInt == true {
+		result.SkipLeaveOnInt = true
 	}
 
 	// Copy the event handlers

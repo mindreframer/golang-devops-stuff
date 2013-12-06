@@ -4,39 +4,41 @@ import (
 	"flag"
 	"fmt"
 	"github.com/hashicorp/logutils"
+	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/serf"
 	"github.com/mitchellh/cli"
+	"io"
+	"log"
+	"net"
 	"os"
+	"os/signal"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 )
+
+// gracefulTimeout controls how long we wait before forcefully terminating
+var gracefulTimeout = 3 * time.Second
 
 // Command is a Command implementation that runs a Serf agent.
 // The command will not end unless a shutdown message is sent on the
 // ShutdownCh. If two messages are sent on the ShutdownCh it will forcibly
 // exit.
 type Command struct {
-	ShutdownCh <-chan struct{}
-	Ui         cli.Ui
-
-	lock         sync.Mutex
-	shuttingDown bool
+	Ui            cli.Ui
+	ShutdownCh    <-chan struct{}
+	args          []string
+	scriptHandler *ScriptEventHandler
+	logFilter     *logutils.LevelFilter
 }
 
-func (c *Command) Run(args []string) int {
-	ui := &cli.PrefixedUi{
-		OutputPrefix: "==> ",
-		InfoPrefix:   "    ",
-		ErrorPrefix:  "==> ",
-		Ui:           c.Ui,
-	}
-
+// readConfig is responsible for setup of our configuration using
+// the command line and any file configs
+func (c *Command) readConfig() *Config {
 	var cmdConfig Config
 	var configFiles []string
-
 	cmdFlags := flag.NewFlagSet("agent", flag.ContinueOnError)
-	cmdFlags.Usage = func() { ui.Output(c.Help()) }
+	cmdFlags.Usage = func() { c.Ui.Output(c.Help()) }
 	cmdFlags.StringVar(&cmdConfig.BindAddr, "bind", "", "address to bind listeners to")
 	cmdFlags.Var((*AppendSliceValue)(&configFiles), "config-file",
 		"json file to read config from")
@@ -47,14 +49,18 @@ func (c *Command) Run(args []string) int {
 		"command to execute when events occur")
 	cmdFlags.Var((*AppendSliceValue)(&cmdConfig.StartJoin), "join",
 		"address of agent to join on startup")
+	cmdFlags.BoolVar(&cmdConfig.ReplayOnJoin, "replay", false,
+		"replay events for startup join")
 	cmdFlags.StringVar(&cmdConfig.LogLevel, "log-level", "", "log level")
 	cmdFlags.StringVar(&cmdConfig.NodeName, "node", "", "node name")
 	cmdFlags.IntVar(&cmdConfig.Protocol, "protocol", -1, "protocol version")
 	cmdFlags.StringVar(&cmdConfig.Role, "role", "", "role name")
 	cmdFlags.StringVar(&cmdConfig.RPCAddr, "rpc-addr", "",
 		"address to bind RPC listener to")
-	if err := cmdFlags.Parse(args); err != nil {
-		return 1
+	cmdFlags.StringVar(&cmdConfig.Profile, "profile", "", "timing profile to use (lan, wan, local)")
+	cmdFlags.StringVar(&cmdConfig.SnapshotPath, "snapshot", "", "path to the snapshot file")
+	if err := cmdFlags.Parse(c.args); err != nil {
+		return nil
 	}
 
 	config := DefaultConfig
@@ -62,7 +68,7 @@ func (c *Command) Run(args []string) int {
 		fileConfig, err := ReadConfigPaths(configFiles)
 		if err != nil {
 			c.Ui.Error(err.Error())
-			return 1
+			return nil
 		}
 
 		config = MergeConfig(config, fileConfig)
@@ -74,37 +80,73 @@ func (c *Command) Run(args []string) int {
 		hostname, err := os.Hostname()
 		if err != nil {
 			c.Ui.Error(fmt.Sprintf("Error determining hostname: %s", err))
-			return 1
+			return nil
 		}
-
 		config.NodeName = hostname
 	}
 
-	eventScripts, err := config.EventScripts()
-	if err != nil {
-		c.Ui.Error(err.Error())
-		return 1
-	}
-
+	eventScripts := config.EventScripts()
 	for _, script := range eventScripts {
 		if !script.Valid() {
 			c.Ui.Error(fmt.Sprintf("Invalid event script: %s", script.String()))
-			return 1
+			return nil
 		}
 	}
 
+	return config
+}
+
+// setupAgent is used to create the agent we use
+func (c *Command) setupAgent(config *Config, logOutput io.Writer) *Agent {
 	bindIP, bindPort, err := config.BindAddrParts()
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Invalid bind address: %s", err))
-		return 1
+		return nil
 	}
 
 	encryptKey, err := config.EncryptBytes()
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Invalid encryption key: %s", err))
-		return 1
+		return nil
 	}
 
+	serfConfig := serf.DefaultConfig()
+	switch config.Profile {
+	case "lan":
+		serfConfig.MemberlistConfig = memberlist.DefaultLANConfig()
+	case "wan":
+		serfConfig.MemberlistConfig = memberlist.DefaultWANConfig()
+	case "local":
+		serfConfig.MemberlistConfig = memberlist.DefaultLocalConfig()
+	default:
+		c.Ui.Error(fmt.Sprintf("Unknown profile: %s", config.Profile))
+		return nil
+	}
+
+	serfConfig.MemberlistConfig.BindAddr = bindIP
+	serfConfig.MemberlistConfig.Port = bindPort
+	serfConfig.MemberlistConfig.SecretKey = encryptKey
+	serfConfig.NodeName = config.NodeName
+	serfConfig.Role = config.Role
+	serfConfig.SnapshotPath = config.SnapshotPath
+	serfConfig.ProtocolVersion = uint8(config.Protocol)
+	serfConfig.CoalescePeriod = 3 * time.Second
+	serfConfig.QuiescentPeriod = time.Second
+	serfConfig.UserCoalescePeriod = 3 * time.Second
+	serfConfig.UserQuiescentPeriod = time.Second
+
+	// Start Serf
+	c.Ui.Output("Starting Serf agent...")
+	agent, err := Create(serfConfig, logOutput)
+	if err != nil {
+		c.Ui.Error(fmt.Sprintf("Failed to start the Serf agent: %v", err))
+		return nil
+	}
+	return agent
+}
+
+// setupLoggers is used to setup the logGate, logWriter, and our logOutput
+func (c *Command) setupLoggers(config *Config) (*GatedWriter, *logWriter, io.Writer) {
 	// Setup logging. First create the gated log writer, which will
 	// store logs until we're ready to show them. Then create the level
 	// filter, filtering logs of the specified level.
@@ -112,112 +154,216 @@ func (c *Command) Run(args []string) int {
 		Writer: &cli.UiWriter{Ui: c.Ui},
 	}
 
-	logLevelFilter := LevelFilter()
-	logLevelFilter.MinLevel = logutils.LogLevel(strings.ToUpper(config.LogLevel))
-	logLevelFilter.Writer = logGate
-	if !ValidateLevelFilter(logLevelFilter) {
-		ui.Error(fmt.Sprintf(
+	c.logFilter = LevelFilter()
+	c.logFilter.MinLevel = logutils.LogLevel(strings.ToUpper(config.LogLevel))
+	c.logFilter.Writer = logGate
+	if !ValidateLevelFilter(c.logFilter.MinLevel, c.logFilter) {
+		c.Ui.Error(fmt.Sprintf(
 			"Invalid log level: %s. Valid log levels are: %v",
-			logLevelFilter.MinLevel, logLevelFilter.Levels))
+			c.logFilter.MinLevel, c.logFilter.Levels))
+		return nil, nil, nil
+	}
+
+	// Create a log writer, and wrap a logOutput around it
+	logWriter := NewLogWriter(512)
+	logOutput := io.MultiWriter(c.logFilter, logWriter)
+	return logGate, logWriter, logOutput
+}
+
+// startAgent is used to start the agent and IPC
+func (c *Command) startAgent(config *Config, agent *Agent,
+	logWriter *logWriter, logOutput io.Writer) *AgentIPC {
+	// Add the script event handlers
+	c.scriptHandler = &ScriptEventHandler{
+		Self: serf.Member{
+			Name: config.NodeName,
+			Role: config.Role,
+		},
+		Scripts: config.EventScripts(),
+		Logger:  log.New(logOutput, "", log.LstdFlags),
+	}
+	agent.RegisterEventHandler(c.scriptHandler)
+
+	// Start the agent after the handler is registered
+	if err := agent.Start(); err != nil {
+		c.Ui.Error(fmt.Sprintf("Failed to start the Serf agent: %v", err))
+		return nil
+	}
+
+	// Setup the RPC listener
+	rpcListener, err := net.Listen("tcp", config.RPCAddr)
+	if err != nil {
+		c.Ui.Error(fmt.Sprintf("Error starting RPC listener: %s", err))
+		return nil
+	}
+
+	// Start the IPC layer
+	c.Ui.Output("Starting Serf agent RPC...")
+	ipc := NewAgentIPC(agent, rpcListener, logOutput, logWriter)
+
+	bindIP, bindPort, err := config.BindAddrParts()
+	bindAddr := (&net.TCPAddr{IP: net.ParseIP(bindIP), Port: bindPort}).String()
+	c.Ui.Output("Serf agent running!")
+	c.Ui.Info(fmt.Sprintf("Node name: '%s'", config.NodeName))
+	c.Ui.Info(fmt.Sprintf("Bind addr: '%s'", bindAddr))
+	c.Ui.Info(fmt.Sprintf(" RPC addr: '%s'", config.RPCAddr))
+	c.Ui.Info(fmt.Sprintf("Encrypted: %#v", config.EncryptKey != ""))
+	c.Ui.Info(fmt.Sprintf(" Snapshot: %v", config.SnapshotPath != ""))
+	c.Ui.Info(fmt.Sprintf("  Profile: %s", config.Profile))
+	return ipc
+}
+
+// startupJoin is invoked to handle any joins specified to take place at start time
+func (c *Command) startupJoin(config *Config, agent *Agent) error {
+	if len(config.StartJoin) == 0 {
+		return nil
+	}
+
+	c.Ui.Output(fmt.Sprintf("Joining cluster...(replay: %v)", config.ReplayOnJoin))
+	n, err := agent.Join(config.StartJoin, config.ReplayOnJoin)
+	if err != nil {
+		return err
+	}
+
+	c.Ui.Info(fmt.Sprintf("Join completed. Synced with %d initial agents", n))
+	return nil
+}
+
+func (c *Command) Run(args []string) int {
+	c.Ui = &cli.PrefixedUi{
+		OutputPrefix: "==> ",
+		InfoPrefix:   "    ",
+		ErrorPrefix:  "==> ",
+		Ui:           c.Ui,
+	}
+
+	// Parse our configs
+	c.args = args
+	config := c.readConfig()
+	if config == nil {
 		return 1
 	}
 
-	serfConfig := serf.DefaultConfig()
-	serfConfig.MemberlistConfig.BindAddr = bindIP
-	serfConfig.MemberlistConfig.TCPPort = bindPort
-	serfConfig.MemberlistConfig.UDPPort = bindPort
-	serfConfig.MemberlistConfig.SecretKey = encryptKey
-	serfConfig.NodeName = config.NodeName
-	serfConfig.Role = config.Role
-	serfConfig.ProtocolVersion = uint8(config.Protocol)
-	serfConfig.CoalescePeriod = 3 * time.Second
-	serfConfig.QuiescentPeriod = time.Second
-	serfConfig.UserCoalescePeriod = 3 * time.Second
-	serfConfig.UserQuiescentPeriod = time.Second
-
-	agent := &Agent{
-		EventHandler: &ScriptEventHandler{
-			Self: serf.Member{
-				Name: serfConfig.NodeName,
-				Role: serfConfig.Role,
-			},
-			Scripts: eventScripts,
-		},
-		LogOutput:  logLevelFilter,
-		RPCAddr:    config.RPCAddr,
-		SerfConfig: serfConfig,
+	// Setup the log outputs
+	logGate, logWriter, logOutput := c.setupLoggers(config)
+	if logWriter == nil {
+		return 1
 	}
 
-	ui.Output("Starting Serf agent...")
-	if err := agent.Start(); err != nil {
-		ui.Error(err.Error())
+	// Setup serf
+	agent := c.setupAgent(config, logOutput)
+	if agent == nil {
 		return 1
 	}
 	defer agent.Shutdown()
 
-	ui.Output("Serf agent running!")
-	ui.Info(fmt.Sprintf("Node name: '%s'", config.NodeName))
-	ui.Info(fmt.Sprintf("Bind addr: '%s:%d'", bindIP, bindPort))
-	ui.Info(fmt.Sprintf(" RPC addr: '%s'", config.RPCAddr))
-	ui.Info(fmt.Sprintf("Encrypted: %#v", config.EncryptKey != ""))
-
-	if len(config.StartJoin) > 0 {
-		ui.Output("Joining cluster...")
-		n, err := agent.Join(config.StartJoin, true)
-		if err != nil {
-			ui.Error(err.Error())
-			return 1
-		}
-
-		ui.Info(fmt.Sprintf("Join completed. Synced with %d initial agents", n))
+	// Start the agent
+	ipc := c.startAgent(config, agent, logWriter, logOutput)
+	if ipc == nil {
+		return 1
 	}
+	defer ipc.Shutdown()
 
-	ui.Info("")
-	ui.Output("Log data will now stream in as it occurs:\n")
-	logGate.Flush()
-
-	graceful, forceful := c.startShutdownWatcher(agent, ui)
-	select {
-	case <-graceful:
-	case <-forceful:
-		// Forcefully shut down, return a bad exit status.
+	// Join startup nodes if specified
+	if err := c.startupJoin(config, agent); err != nil {
+		c.Ui.Error(err.Error())
 		return 1
 	}
 
-	return 0
+	// Enable log streaming
+	c.Ui.Info("")
+	c.Ui.Output("Log data will now stream in as it occurs:\n")
+	logGate.Flush()
+
+	// Wait for exit
+	return c.handleSignals(config, agent)
 }
 
-func (c *Command) startShutdownWatcher(agent *Agent, ui cli.Ui) (graceful <-chan struct{}, forceful <-chan struct{}) {
-	g := make(chan struct{})
-	f := make(chan struct{})
-	graceful = g
-	forceful = f
+// handleSignals blocks until we get an exit-causing signal
+func (c *Command) handleSignals(config *Config, agent *Agent) int {
+	signalCh := make(chan os.Signal, 4)
+	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 
+	// Wait for a signal
+WAIT:
+	var sig os.Signal
+	select {
+	case s := <-signalCh:
+		sig = s
+	case <-c.ShutdownCh:
+		sig = os.Interrupt
+	case <-agent.ShutdownCh():
+		// Agent is already shutdown!
+		return 0
+	}
+	c.Ui.Output(fmt.Sprintf("Caught signal: %v", sig))
+
+	// Check if this is a SIGHUP
+	if sig == syscall.SIGHUP {
+		config = c.handleReload(config, agent)
+		goto WAIT
+	}
+
+	// Check if we should do a graceful leave
+	graceful := false
+	if sig == os.Interrupt && !config.SkipLeaveOnInt {
+		graceful = true
+	} else if sig == syscall.SIGTERM && config.LeaveOnTerm {
+		graceful = true
+	}
+
+	// Bail fast if not doing a graceful leave
+	if !graceful {
+		return 1
+	}
+
+	// Attempt a graceful leave
+	gracefulCh := make(chan struct{})
+	c.Ui.Output("Gracefully shutting down agent...")
 	go func() {
-		<-c.ShutdownCh
-
-		c.lock.Lock()
-		c.shuttingDown = true
-		c.lock.Unlock()
-
-		ui.Output("Gracefully shutting down agent...")
-		go func() {
-			if err := agent.Shutdown(); err != nil {
-				ui.Error(fmt.Sprintf("Error: %s", err))
-				return
-			}
-			close(g)
-		}()
-
-		select {
-		case <-g:
-			// Gracefully shut down properly
-		case <-c.ShutdownCh:
-			close(f)
+		if err := agent.Leave(); err != nil {
+			c.Ui.Error(fmt.Sprintf("Error: %s", err))
+			return
 		}
+		close(gracefulCh)
 	}()
 
-	return
+	// Wait for leave or another signal
+	select {
+	case <-signalCh:
+		return 1
+	case <-time.After(gracefulTimeout):
+		return 1
+	case <-gracefulCh:
+		return 0
+	}
+}
+
+// handleReload is invoked when we should reload our configs, e.g. SIGHUP
+func (c *Command) handleReload(config *Config, agent *Agent) *Config {
+	c.Ui.Output("Reloading configuration...")
+	newConf := c.readConfig()
+	if newConf == nil {
+		c.Ui.Error(fmt.Sprintf("Failed to reload configs"))
+		return config
+	}
+
+	// Change the log level
+	minLevel := logutils.LogLevel(strings.ToUpper(newConf.LogLevel))
+	if ValidateLevelFilter(minLevel, c.logFilter) {
+		c.logFilter.SetMinLevel(minLevel)
+	} else {
+		c.Ui.Error(fmt.Sprintf(
+			"Invalid log level: %s. Valid log levels are: %v",
+			minLevel, c.logFilter.Levels))
+
+		// Keep the current log level
+		newConf.LogLevel = config.LogLevel
+	}
+
+	// Change the event handlers
+	c.scriptHandler.UpdateScripts(config.EventScripts())
+	return newConf
 }
 
 func (c *Command) Synopsis() string {
@@ -249,12 +395,17 @@ Options:
                            specified multiple times.
   -log-level=info          Log level of the agent.
   -node=hostname           Name of this node. Must be unique in the cluster
+  -profile=[lan|wan|local] Profile is used to control the timing profiles used in Serf.
+						   The default if not provided is lan.
   -protocol=n              Serf protocol version to use. This defaults to
                            the latest version, but can be set back for upgrades.
   -role=foo                The role of this node, if any. This can be used
                            by event scripts to differentiate different types
                            of nodes that may be part of the same cluster.
   -rpc-addr=127.0.0.1:7373 Address to bind the RPC listener.
+  -snapshot=path/to/file   The snapshot file is used to store alive nodes and
+                           event information so that Serf can rejoin a cluster
+						   and avoid event replay on restart.
 
 Event handlers:
 

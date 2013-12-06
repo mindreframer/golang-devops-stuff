@@ -17,7 +17,7 @@ import (
 // version to memberlist below.
 const (
 	ProtocolVersionMin uint8 = 0
-	ProtocolVersionMax       = 1
+	ProtocolVersionMax       = 2
 )
 
 func init() {
@@ -58,9 +58,12 @@ type Serf struct {
 	eventLock       sync.RWMutex
 
 	logger     *log.Logger
+	joinLock   sync.Mutex
 	stateLock  sync.Mutex
 	state      SerfState
 	shutdownCh chan struct{}
+
+	snapshotter *Snapshotter
 }
 
 // SerfState is the state of the Serf instance.
@@ -77,6 +80,7 @@ const (
 type Member struct {
 	Name   string
 	Addr   net.IP
+	Port   uint16
 	Role   string
 	Status MemberStatus
 
@@ -157,7 +161,8 @@ type userEvents struct {
 }
 
 const (
-	UserEventSizeLimit = 128 // Maximum byte size for event name and payload
+	UserEventSizeLimit = 128        // Maximum byte size for event name and payload
+	snapshotSizeLimit  = 128 * 1024 // Maximum 128 KB snapshot
 )
 
 // Create creates a new Serf instance, starting all the background tasks
@@ -203,6 +208,23 @@ func Create(conf *Config) (*Serf, error) {
 			conf.UserCoalescePeriod, conf.UserQuiescentPeriod, c)
 	}
 
+	// Try access the snapshot
+	var oldClock, oldEventClock LamportTime
+	var prev []*PreviousNode
+	if conf.SnapshotPath != "" {
+		eventCh, snap, err := NewSnapshotter(conf.SnapshotPath, snapshotSizeLimit,
+			serf.logger, &serf.clock, conf.EventCh, serf.shutdownCh)
+		if err != nil {
+			return nil, fmt.Errorf("Failed to setup snapshot: %v", err)
+		}
+		serf.snapshotter = snap
+		conf.EventCh = eventCh
+		prev = snap.AliveNodes()
+		oldClock = snap.LastClock()
+		oldEventClock = snap.LastEventClock()
+		serf.eventMinTime = oldEventClock + 1
+	}
+
 	// Setup the broadcast queue, which we use to send our own custom
 	// broadcasts along the gossip channel.
 	serf.broadcasts = &memberlist.TransmitLimitedQueue{
@@ -230,6 +252,10 @@ func Create(conf *Config) (*Serf, error) {
 	serf.clock.Increment()
 	serf.eventClock.Increment()
 
+	// Restore the clock from snap if we have one
+	serf.clock.Witness(oldClock)
+	serf.eventClock.Witness(oldEventClock)
+
 	// Modify the memberlist configuration with keys that we set
 	conf.MemberlistConfig.Events = &eventDelegate{serf: serf}
 	conf.MemberlistConfig.Delegate = &delegate{serf: serf}
@@ -252,10 +278,13 @@ func Create(conf *Config) (*Serf, error) {
 	// for more information on their role.
 	go serf.handleReap()
 	go serf.handleReconnect()
-	go serf.checkQueueDepth(conf.QueueDepthWarning, "Intent",
-		serf.broadcasts, serf.shutdownCh)
-	go serf.checkQueueDepth(conf.QueueDepthWarning, "Event",
-		serf.eventBroadcasts, serf.shutdownCh)
+	go serf.checkQueueDepth("Intent", serf.broadcasts)
+	go serf.checkQueueDepth("Event", serf.eventBroadcasts)
+
+	// Attempt to re-join the cluster if we have known nodes
+	if len(prev) != 0 {
+		go serf.handleRejoin(prev)
+	}
 
 	return serf, nil
 }
@@ -305,15 +334,17 @@ func (s *Serf) UserEvent(name string, payload []byte, coalesce bool) error {
 // case that no nodes could be contacted. If ignoreOld is true, then any
 // user messages sent prior to the join will be ignored.
 func (s *Serf) Join(existing []string, ignoreOld bool) (int, error) {
-	s.stateLock.Lock()
-	defer s.stateLock.Unlock()
-
-	if s.state == SerfShutdown {
-		return 0, fmt.Errorf("Serf can't Join after Shutdown")
+	// Do a quick state check
+	if s.State() != SerfAlive {
+		return 0, fmt.Errorf("Serf can't Join after Leave or Shutdown")
 	}
 
+	// Hold the joinLock, this is to make eventJoinIgnore safe
+	s.joinLock.Lock()
+	defer s.joinLock.Unlock()
+
 	// Ignore any events from a potential join. This is safe since we hold
-	// the stateLock and nobody else can be doing a Join
+	// the joinLock and nobody else can be doing a Join
 	if ignoreOld {
 		s.eventJoinIgnore = true
 		defer func() {
@@ -361,22 +392,25 @@ func (s *Serf) broadcastJoin(ltime LamportTime) error {
 // Leave gracefully exits the cluster. It is safe to call this multiple
 // times.
 func (s *Serf) Leave() error {
+	// Check the current state
 	s.stateLock.Lock()
-	defer s.stateLock.Unlock()
-
 	if s.state == SerfLeft {
+		s.stateLock.Unlock()
 		return nil
+	} else if s.state == SerfLeaving {
+		s.stateLock.Unlock()
+		return fmt.Errorf("Leave already in progress")
 	} else if s.state == SerfShutdown {
+		s.stateLock.Unlock()
 		return fmt.Errorf("Leave called after Shutdown")
 	}
-
-	// Moving into a temporary Leaving state, rollback on failure
 	s.state = SerfLeaving
-	defer func() {
-		if s.state != SerfLeft {
-			s.state = SerfAlive
-		}
-	}()
+	s.stateLock.Unlock()
+
+	// If we have a snapshot, mark we are leaving
+	if s.snapshotter != nil {
+		s.snapshotter.Leave()
+	}
 
 	// Construct the message for the graceful leave
 	msg := messageLeave{
@@ -403,12 +437,18 @@ func (s *Serf) Leave() error {
 		}
 	}
 
+	// Attempt the memberlist leave
 	err := s.memberlist.Leave(s.config.BroadcastTimeout)
 	if err != nil {
 		return err
 	}
 
-	s.state = SerfLeft
+	// Transition to Left only if we not already shutdown
+	s.stateLock.Lock()
+	if s.state != SerfShutdown {
+		s.state = SerfLeft
+	}
+	s.stateLock.Unlock()
 	return nil
 }
 
@@ -502,13 +542,19 @@ func (s *Serf) Shutdown() error {
 		s.logger.Println("[WARN] Shutdown without a Leave")
 	}
 
+	s.state = SerfShutdown
+	close(s.shutdownCh)
+
 	err := s.memberlist.Shutdown()
 	if err != nil {
 		return err
 	}
 
-	s.state = SerfShutdown
-	close(s.shutdownCh)
+	// Wait for the snapshoter to finish if we have one
+	if s.snapshotter != nil {
+		s.snapshotter.Wait()
+	}
+
 	return nil
 }
 
@@ -550,6 +596,7 @@ func (s *Serf) handleNodeJoin(n *memberlist.Node) {
 			Member: Member{
 				Name:   n.Name,
 				Addr:   net.IP(n.Addr),
+				Port:   n.Port,
 				Role:   string(n.Meta),
 				Status: StatusAlive,
 			},
@@ -574,6 +621,7 @@ func (s *Serf) handleNodeJoin(n *memberlist.Node) {
 		member.Status = StatusAlive
 		member.leaveTime = time.Time{}
 		member.Addr = net.IP(n.Addr)
+		member.Port = n.Port
 		member.Role = string(n.Meta)
 	}
 
@@ -900,15 +948,20 @@ func (s *Serf) reconnect() {
 
 // checkQueueDepth periodically checks the size of a queue to see if
 // it is too large
-func (s *Serf) checkQueueDepth(limit int, name string, queue *memberlist.TransmitLimitedQueue, shutdownCh chan struct{}) {
+func (s *Serf) checkQueueDepth(name string, queue *memberlist.TransmitLimitedQueue) {
 	for {
 		select {
 		case <-time.After(time.Second):
 			numq := queue.NumQueued()
-			if numq >= limit {
+			if numq >= s.config.QueueDepthWarning {
 				s.logger.Printf("[WARN] %s queue depth: %d", name, numq)
 			}
-		case <-shutdownCh:
+			if numq > s.config.MaxQueueDepth {
+				s.logger.Printf("[WARN] %s queue depth (%d) exceeds limit (%d), dropping messages!",
+					name, numq, s.config.MaxQueueDepth)
+				queue.Prune(s.config.MaxQueueDepth)
+			}
+		case <-s.shutdownCh:
 			return
 		}
 	}
@@ -946,4 +999,22 @@ func recentIntent(recent []nodeIntent, node string) (intent *nodeIntent) {
 		}
 	}
 	return
+}
+
+// handleRejoin attempts to reconnect to previously known alive nodes
+func (s *Serf) handleRejoin(previous []*PreviousNode) {
+	for _, prev := range previous {
+		// Do not attempt to join ourself
+		if prev.Name == s.config.NodeName {
+			continue
+		}
+
+		s.logger.Printf("[INFO] Attempting re-join to previously known node: %s", prev)
+		_, err := s.memberlist.Join([]string{prev.Addr})
+		if err == nil {
+			s.logger.Printf("[INFO] Re-joined to previously known node: %s", prev)
+			return
+		}
+	}
+	s.logger.Printf("[WARN] Failed to re-join any previously known node")
 }
