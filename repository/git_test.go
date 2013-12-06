@@ -90,7 +90,7 @@ func (s *S) TestRemoveBareShouldRemoveBareDirFromFileSystem(c *gocheck.C) {
 
 func (s *S) TestRemoveBareShouldReturnDescriptiveErrorWhenRemovalFails(c *gocheck.C) {
 	rfs := &testing.RecordingFs{FileContent: "foo"}
-	fs.Fsystem = &testing.FailureFs{RecordingFs: *rfs}
+	fs.Fsystem = &testing.FileNotFoundFs{RecordingFs: *rfs}
 	defer func() { fs.Fsystem = nil }()
 	err := removeBare("fooo")
 	c.Assert(err, gocheck.ErrorMatches, "^Could not remove git bare repository: .*")
