@@ -5,6 +5,7 @@ import (
 	"github.com/goraft/raft"
 	"github.com/rcrowley/go-metrics"
 	"github.com/rcrowley/go-metrics/stathat"
+	"github.com/skynetservices/skydns/server"
 	"log"
 	"net"
 	"os"
@@ -63,7 +64,7 @@ func main() {
 		members = strings.Split(join, ",")
 	}
 
-	s := NewServer(members, domain, ldns, lhttp, dataDir, rtimeout, wtimeout, secret)
+	s := server.NewServer(members, domain, ldns, lhttp, dataDir, rtimeout, wtimeout, secret)
 
 	// Set up metrics if specified on the command line
 	if metricsToStdErr {
