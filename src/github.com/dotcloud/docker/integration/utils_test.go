@@ -46,7 +46,7 @@ func createNamedTestContainer(eng *engine.Engine, config *docker.Config, f utils
 	if err := job.ImportEnv(config); err != nil {
 		f.Fatal(err)
 	}
-	job.StdoutParseString(&shortId)
+	job.Stdout.AddString(&shortId)
 	if err := job.Run(); err != nil {
 		f.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func containerKill(eng *engine.Engine, id string, t utils.Fataler) {
 }
 
 func containerRunning(eng *engine.Engine, id string, t utils.Fataler) bool {
-	return getContainer(eng, id, t).State.Running
+	return getContainer(eng, id, t).State.IsRunning()
 }
 
 func containerAssertExists(eng *engine.Engine, id string, t utils.Fataler) {

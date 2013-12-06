@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
+	"github.com/dotcloud/docker/graphdriver"
 	"github.com/dotcloud/docker/term"
 	"github.com/dotcloud/docker/utils"
 	"github.com/kr/pty"
@@ -17,15 +17,22 @@ import (
 	"os"
 	"os/exec"
 	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
 
+var (
+	ErrNotATTY = errors.New("The PTY is not a file")
+	ErrNoTTY   = errors.New("No PTY found")
+)
+
 type Container struct {
-	root string
+	sync.Mutex
+	root   string // Path to the "home" of the container, including metadata.
+	rootfs string // Path to the root filesystem of the container.
 
 	ID string
 
@@ -46,6 +53,7 @@ type Container struct {
 	HostnamePath   string
 	HostsPath      string
 	Name           string
+	Driver         string
 
 	cmd       *exec.Cmd
 	stdout    *utils.WriteBroadcaster
@@ -156,218 +164,6 @@ func NewPort(proto, port string) Port {
 	return Port(fmt.Sprintf("%s/%s", port, proto))
 }
 
-func ParseRun(args []string, capabilities *Capabilities) (*Config, *HostConfig, *flag.FlagSet, error) {
-	cmd := Subcmd("run", "[OPTIONS] IMAGE [COMMAND] [ARG...]", "Run a command in a new container")
-	if os.Getenv("TEST") != "" {
-		cmd.SetOutput(ioutil.Discard)
-		cmd.Usage = nil
-	}
-
-	flHostname := cmd.String("h", "", "Container host name")
-	flWorkingDir := cmd.String("w", "", "Working directory inside the container")
-	flUser := cmd.String("u", "", "Username or UID")
-	flDetach := cmd.Bool("d", false, "Detached mode: Run container in the background, print new container id")
-	flAttach := NewAttachOpts()
-	cmd.Var(flAttach, "a", "Attach to stdin, stdout or stderr.")
-	flStdin := cmd.Bool("i", false, "Keep stdin open even if not attached")
-	flTty := cmd.Bool("t", false, "Allocate a pseudo-tty")
-	flMemoryString := cmd.String("m", "", "Memory limit (format: <number><optional unit>, where unit = b, k, m or g)")
-	flContainerIDFile := cmd.String("cidfile", "", "Write the container ID to the file")
-	flNetwork := cmd.Bool("n", true, "Enable networking for this container")
-	flPrivileged := cmd.Bool("privileged", false, "Give extended privileges to this container")
-	flAutoRemove := cmd.Bool("rm", false, "Automatically remove the container when it exits (incompatible with -d)")
-	cmd.Bool("sig-proxy", true, "Proxify all received signal to the process (even in non-tty mode)")
-	cmd.String("name", "", "Assign a name to the container")
-	flPublishAll := cmd.Bool("P", false, "Publish all exposed ports to the host interfaces")
-
-	if capabilities != nil && *flMemoryString != "" && !capabilities.MemoryLimit {
-		//fmt.Fprintf(stdout, "WARNING: Your kernel does not support memory limit capabilities. Limitation discarded.\n")
-		*flMemoryString = ""
-	}
-
-	flCpuShares := cmd.Int64("c", 0, "CPU shares (relative weight)")
-
-	var flPublish utils.ListOpts
-	cmd.Var(&flPublish, "p", "Publish a container's port to the host (use 'docker port' to see the actual mapping)")
-
-	var flExpose utils.ListOpts
-	cmd.Var(&flExpose, "expose", "Expose a port from the container without publishing it to your host")
-
-	var flEnv utils.ListOpts
-	cmd.Var(&flEnv, "e", "Set environment variables")
-
-	var flDns utils.ListOpts
-	cmd.Var(&flDns, "dns", "Set custom dns servers")
-
-	flVolumes := NewPathOpts()
-	cmd.Var(flVolumes, "v", "Bind mount a volume (e.g. from the host: -v /host:/container, from docker: -v /container)")
-
-	var flVolumesFrom utils.ListOpts
-	cmd.Var(&flVolumesFrom, "volumes-from", "Mount volumes from the specified container(s)")
-
-	flEntrypoint := cmd.String("entrypoint", "", "Overwrite the default entrypoint of the image")
-
-	var flLxcOpts utils.ListOpts
-	cmd.Var(&flLxcOpts, "lxc-conf", "Add custom lxc options -lxc-conf=\"lxc.cgroup.cpuset.cpus = 0,1\"")
-
-	var flLinks utils.ListOpts
-	cmd.Var(&flLinks, "link", "Add link to another container (name:alias)")
-
-	if err := cmd.Parse(args); err != nil {
-		return nil, nil, cmd, err
-	}
-	if *flDetach && len(flAttach) > 0 {
-		return nil, nil, cmd, ErrConflictAttachDetach
-	}
-	if *flWorkingDir != "" && !path.IsAbs(*flWorkingDir) {
-		return nil, nil, cmd, ErrInvalidWorikingDirectory
-	}
-	if *flDetach && *flAutoRemove {
-		return nil, nil, cmd, ErrConflictDetachAutoRemove
-	}
-
-	// If neither -d or -a are set, attach to everything by default
-	if len(flAttach) == 0 && !*flDetach {
-		if !*flDetach {
-			flAttach.Set("stdout")
-			flAttach.Set("stderr")
-			if *flStdin {
-				flAttach.Set("stdin")
-			}
-		}
-	}
-
-	envs := []string{}
-
-	for _, env := range flEnv {
-		arr := strings.Split(env, "=")
-		if len(arr) > 1 {
-			envs = append(envs, env)
-		} else {
-			v := os.Getenv(env)
-			envs = append(envs, env+"="+v)
-		}
-	}
-
-	var flMemory int64
-
-	if *flMemoryString != "" {
-		parsedMemory, err := utils.RAMInBytes(*flMemoryString)
-
-		if err != nil {
-			return nil, nil, cmd, err
-		}
-
-		flMemory = parsedMemory
-	}
-
-	var binds []string
-
-	// add any bind targets to the list of container volumes
-	for bind := range flVolumes {
-		arr := strings.Split(bind, ":")
-		if len(arr) > 1 {
-			if arr[0] == "/" {
-				return nil, nil, cmd, fmt.Errorf("Invalid bind mount: source can't be '/'")
-			}
-			dstDir := arr[1]
-			flVolumes[dstDir] = struct{}{}
-			binds = append(binds, bind)
-			delete(flVolumes, bind)
-		}
-	}
-
-	parsedArgs := cmd.Args()
-	runCmd := []string{}
-	entrypoint := []string{}
-	image := ""
-	if len(parsedArgs) >= 1 {
-		image = cmd.Arg(0)
-	}
-	if len(parsedArgs) > 1 {
-		runCmd = parsedArgs[1:]
-	}
-	if *flEntrypoint != "" {
-		entrypoint = []string{*flEntrypoint}
-	}
-
-	var lxcConf []KeyValuePair
-	lxcConf, err := parseLxcConfOpts(flLxcOpts)
-	if err != nil {
-		return nil, nil, cmd, err
-	}
-
-	hostname := *flHostname
-	domainname := ""
-
-	parts := strings.SplitN(hostname, ".", 2)
-	if len(parts) > 1 {
-		hostname = parts[0]
-		domainname = parts[1]
-	}
-
-	ports, portBindings, err := parsePortSpecs(flPublish)
-	if err != nil {
-		return nil, nil, cmd, err
-	}
-
-	// Merge in exposed ports to the map of published ports
-	for _, e := range flExpose {
-		if strings.Contains(e, ":") {
-			return nil, nil, cmd, fmt.Errorf("Invalid port format for -expose: %s", e)
-		}
-		p := NewPort(splitProtoPort(e))
-		if _, exists := ports[p]; !exists {
-			ports[p] = struct{}{}
-		}
-	}
-
-	config := &Config{
-		Hostname:        hostname,
-		Domainname:      domainname,
-		PortSpecs:       nil, // Deprecated
-		ExposedPorts:    ports,
-		User:            *flUser,
-		Tty:             *flTty,
-		NetworkDisabled: !*flNetwork,
-		OpenStdin:       *flStdin,
-		Memory:          flMemory,
-		CpuShares:       *flCpuShares,
-		AttachStdin:     flAttach.Get("stdin"),
-		AttachStdout:    flAttach.Get("stdout"),
-		AttachStderr:    flAttach.Get("stderr"),
-		Env:             envs,
-		Cmd:             runCmd,
-		Dns:             flDns,
-		Image:           image,
-		Volumes:         flVolumes,
-		VolumesFrom:     strings.Join(flVolumesFrom, ","),
-		Entrypoint:      entrypoint,
-		WorkingDir:      *flWorkingDir,
-	}
-
-	hostConfig := &HostConfig{
-		Binds:           binds,
-		ContainerIDFile: *flContainerIDFile,
-		LxcConf:         lxcConf,
-		Privileged:      *flPrivileged,
-		PortBindings:    portBindings,
-		Links:           flLinks,
-		PublishAllPorts: *flPublishAll,
-	}
-
-	if capabilities != nil && flMemory > 0 && !capabilities.SwapLimit {
-		//fmt.Fprintf(stdout, "WARNING: Your kernel does not support swap limit capabilities. Limitation discarded.\n")
-		config.MemorySwap = -1
-	}
-
-	// When allocating stdin in attached mode, close stdin at client disconnect
-	if config.OpenStdin && config.AttachStdin {
-		config.StdinOnce = true
-	}
-	return config, hostConfig, cmd, nil
-}
-
 type PortMapping map[string]string // Deprecated
 
 type NetworkSettings struct {
@@ -406,8 +202,13 @@ func (settings *NetworkSettings) PortMappingAPI() []APIPort {
 
 // Inject the io.Reader at the given path. Note: do not close the reader
 func (container *Container) Inject(file io.Reader, pth string) error {
+	if err := container.EnsureMounted(); err != nil {
+		return fmt.Errorf("inject: error mounting container %s: %s", container.ID, err)
+	}
+
 	// Return error if path exists
-	if _, err := os.Stat(path.Join(container.rwPath(), pth)); err == nil {
+	destPath := path.Join(container.RootfsPath(), pth)
+	if _, err := os.Stat(destPath); err == nil {
 		// Since err is nil, the path could be stat'd and it exists
 		return fmt.Errorf("%s exists", pth)
 	} else if !os.IsNotExist(err) {
@@ -418,14 +219,16 @@ func (container *Container) Inject(file io.Reader, pth string) error {
 	}
 
 	// Make sure the directory exists
-	if err := os.MkdirAll(path.Join(container.rwPath(), path.Dir(pth)), 0755); err != nil {
+	if err := os.MkdirAll(path.Join(container.RootfsPath(), path.Dir(pth)), 0755); err != nil {
 		return err
 	}
 
-	dest, err := os.Create(path.Join(container.rwPath(), pth))
+	dest, err := os.Create(destPath)
 	if err != nil {
 		return err
 	}
+	defer dest.Close()
+
 	if _, err := io.Copy(dest, file); err != nil {
 		return err
 	}
@@ -700,9 +503,10 @@ func (container *Container) Attach(stdin io.ReadCloser, stdinCloser io.Closer, s
 }
 
 func (container *Container) Start() (err error) {
-	container.State.Lock()
-	defer container.State.Unlock()
-	if container.State.Running {
+	container.Lock()
+	defer container.Unlock()
+
+	if container.State.IsRunning() {
 		return fmt.Errorf("The container %s is already running.", container.ID)
 	}
 	defer func() {
@@ -737,157 +541,18 @@ func (container *Container) Start() (err error) {
 		log.Printf("WARNING: IPv4 forwarding is disabled. Networking will not work")
 	}
 
-	// Create the requested bind mounts
-	binds := make(map[string]BindMap)
-	// Define illegal container destinations
-	illegalDsts := []string{"/", "."}
-
-	for _, bind := range container.hostConfig.Binds {
-		// FIXME: factorize bind parsing in parseBind
-		var src, dst, mode string
-		arr := strings.Split(bind, ":")
-		if len(arr) == 2 {
-			src = arr[0]
-			dst = arr[1]
-			mode = "rw"
-		} else if len(arr) == 3 {
-			src = arr[0]
-			dst = arr[1]
-			mode = arr[2]
-		} else {
-			return fmt.Errorf("Invalid bind specification: %s", bind)
-		}
-
-		// Bail if trying to mount to an illegal destination
-		for _, illegal := range illegalDsts {
-			if dst == illegal {
-				return fmt.Errorf("Illegal bind destination: %s", dst)
-			}
-		}
-
-		bindMap := BindMap{
-			SrcPath: src,
-			DstPath: dst,
-			Mode:    mode,
-		}
-		binds[path.Clean(dst)] = bindMap
-	}
-
 	if container.Volumes == nil || len(container.Volumes) == 0 {
 		container.Volumes = make(map[string]string)
 		container.VolumesRW = make(map[string]bool)
 	}
 
 	// Apply volumes from another container if requested
-	if container.Config.VolumesFrom != "" {
-		containerSpecs := strings.Split(container.Config.VolumesFrom, ",")
-		for _, containerSpec := range containerSpecs {
-			mountRW := true
-			specParts := strings.SplitN(containerSpec, ":", 2)
-			switch len(specParts) {
-			case 0:
-				return fmt.Errorf("Malformed volumes-from specification: %s", container.Config.VolumesFrom)
-			case 2:
-				switch specParts[1] {
-				case "ro":
-					mountRW = false
-				case "rw": // mountRW is already true
-				default:
-					return fmt.Errorf("Malformed volumes-from speficication: %s", containerSpec)
-				}
-			}
-			c := container.runtime.Get(specParts[0])
-			if c == nil {
-				return fmt.Errorf("Container %s not found. Impossible to mount its volumes", container.ID)
-			}
-			for volPath, id := range c.Volumes {
-				if _, exists := container.Volumes[volPath]; exists {
-					continue
-				}
-				if err := os.MkdirAll(path.Join(container.RootfsPath(), volPath), 0755); err != nil {
-					return err
-				}
-				container.Volumes[volPath] = id
-				if isRW, exists := c.VolumesRW[volPath]; exists {
-					container.VolumesRW[volPath] = isRW && mountRW
-				}
-			}
-
-		}
+	if err := container.applyExternalVolumes(); err != nil {
+		return err
 	}
 
-	// Create the requested volumes if they don't exist
-	for volPath := range container.Config.Volumes {
-		volPath = path.Clean(volPath)
-		// Skip existing volumes
-		if _, exists := container.Volumes[volPath]; exists {
-			continue
-		}
-		var srcPath string
-		var isBindMount bool
-		srcRW := false
-		// If an external bind is defined for this volume, use that as a source
-		if bindMap, exists := binds[volPath]; exists {
-			isBindMount = true
-			srcPath = bindMap.SrcPath
-			if strings.ToLower(bindMap.Mode) == "rw" {
-				srcRW = true
-			}
-			// Otherwise create an directory in $ROOT/volumes/ and use that
-		} else {
-			c, err := container.runtime.volumes.Create(nil, container, "", "", nil)
-			if err != nil {
-				return err
-			}
-			srcPath, err = c.layer()
-			if err != nil {
-				return err
-			}
-			srcRW = true // RW by default
-		}
-		container.Volumes[volPath] = srcPath
-		container.VolumesRW[volPath] = srcRW
-		// Create the mountpoint
-		rootVolPath := path.Join(container.RootfsPath(), volPath)
-		if err := os.MkdirAll(rootVolPath, 0755); err != nil {
-			return err
-		}
-
-		// Do not copy or change permissions if we are mounting from the host
-		if srcRW && !isBindMount {
-			volList, err := ioutil.ReadDir(rootVolPath)
-			if err != nil {
-				return err
-			}
-			if len(volList) > 0 {
-				srcList, err := ioutil.ReadDir(srcPath)
-				if err != nil {
-					return err
-				}
-				if len(srcList) == 0 {
-					// If the source volume is empty copy files from the root into the volume
-					if err := archive.CopyWithTar(rootVolPath, srcPath); err != nil {
-						return err
-					}
-
-					var stat syscall.Stat_t
-					if err := syscall.Stat(rootVolPath, &stat); err != nil {
-						return err
-					}
-					var srcStat syscall.Stat_t
-					if err := syscall.Stat(srcPath, &srcStat); err != nil {
-						return err
-					}
-					// Change the source volume's ownership if it differs from the root
-					// files that where just copied
-					if stat.Uid != srcStat.Uid || stat.Gid != srcStat.Gid {
-						if err := os.Chown(srcPath, int(stat.Uid), int(stat.Gid)); err != nil {
-							return err
-						}
-					}
-				}
-			}
-		}
+	if err := container.createVolumes(); err != nil {
+		return err
 	}
 
 	if err := container.generateLXCConfig(); err != nil {
@@ -1031,7 +696,7 @@ func (container *Container) Start() (err error) {
 	}
 	// FIXME: save state on disk *first*, then converge
 	// this way disk state is used as a journal, eg. we can restore after crash etc.
-	container.State.setRunning(container.cmd.Process.Pid)
+	container.State.SetRunning(container.cmd.Process.Pid)
 
 	// Init the lock
 	container.waitLock = make(chan struct{})
@@ -1039,14 +704,14 @@ func (container *Container) Start() (err error) {
 	container.ToDisk()
 	go container.monitor()
 
-	defer utils.Debugf("Container running: %v", container.State.Running)
+	defer utils.Debugf("Container running: %v", container.State.IsRunning())
 	// We wait for the container to be fully running.
 	// Timeout after 5 seconds. In case of broken pipe, just retry.
 	// Note: The container can run and finish correctly before
 	//       the end of this loop
 	for now := time.Now(); time.Since(now) < 5*time.Second; {
 		// If the container dies while waiting for it, just return
-		if !container.State.Running {
+		if !container.State.IsRunning() {
 			return nil
 		}
 		output, err := exec.Command("lxc-info", "-s", "-n", container.ID).CombinedOutput()
@@ -1063,14 +728,212 @@ func (container *Container) Start() (err error) {
 		if strings.Contains(string(output), "RUNNING") {
 			return nil
 		}
-		utils.Debugf("Waiting for the container to start (running: %v): %s", container.State.Running, bytes.TrimSpace(output))
+		utils.Debugf("Waiting for the container to start (running: %v): %s", container.State.IsRunning(), bytes.TrimSpace(output))
 		time.Sleep(50 * time.Millisecond)
 	}
 
-	if container.State.Running {
+	if container.State.IsRunning() {
 		return ErrContainerStartTimeout
 	}
 	return ErrContainerStart
+}
+
+func (container *Container) getBindMap() (map[string]BindMap, error) {
+	// Create the requested bind mounts
+	binds := make(map[string]BindMap)
+	// Define illegal container destinations
+	illegalDsts := []string{"/", "."}
+
+	for _, bind := range container.hostConfig.Binds {
+		// FIXME: factorize bind parsing in parseBind
+		var src, dst, mode string
+		arr := strings.Split(bind, ":")
+		if len(arr) == 2 {
+			src = arr[0]
+			dst = arr[1]
+			mode = "rw"
+		} else if len(arr) == 3 {
+			src = arr[0]
+			dst = arr[1]
+			mode = arr[2]
+		} else {
+			return nil, fmt.Errorf("Invalid bind specification: %s", bind)
+		}
+
+		// Bail if trying to mount to an illegal destination
+		for _, illegal := range illegalDsts {
+			if dst == illegal {
+				return nil, fmt.Errorf("Illegal bind destination: %s", dst)
+			}
+		}
+
+		bindMap := BindMap{
+			SrcPath: src,
+			DstPath: dst,
+			Mode:    mode,
+		}
+		binds[path.Clean(dst)] = bindMap
+	}
+  return binds, nil
+}
+
+func (container *Container) createVolumes() error {
+  binds, err := container.getBindMap()
+  if err != nil {
+    return err
+  }
+	volumesDriver := container.runtime.volumes.driver
+	// Create the requested volumes if they don't exist
+	for volPath := range container.Config.Volumes {
+		volPath = path.Clean(volPath)
+		volIsDir := true
+		// Skip existing volumes
+		if _, exists := container.Volumes[volPath]; exists {
+			continue
+		}
+		var srcPath string
+		var isBindMount bool
+		srcRW := false
+		// If an external bind is defined for this volume, use that as a source
+		if bindMap, exists := binds[volPath]; exists {
+			isBindMount = true
+			srcPath = bindMap.SrcPath
+			if strings.ToLower(bindMap.Mode) == "rw" {
+				srcRW = true
+			}
+			if file, err := os.Open(bindMap.SrcPath); err != nil {
+				return err
+			} else {
+				defer file.Close()
+				if stat, err := file.Stat(); err != nil {
+					return err
+				} else {
+					volIsDir = stat.IsDir()
+				}
+			}
+			// Otherwise create an directory in $ROOT/volumes/ and use that
+		} else {
+
+			// Do not pass a container as the parameter for the volume creation.
+			// The graph driver using the container's information ( Image ) to
+			// create the parent.
+			c, err := container.runtime.volumes.Create(nil, nil, "", "", nil)
+			if err != nil {
+				return err
+			}
+			srcPath, err = volumesDriver.Get(c.ID)
+			if err != nil {
+				return fmt.Errorf("Driver %s failed to get volume rootfs %s: %s", volumesDriver, c.ID, err)
+			}
+			srcRW = true // RW by default
+		}
+		container.Volumes[volPath] = srcPath
+		container.VolumesRW[volPath] = srcRW
+		// Create the mountpoint
+		rootVolPath := path.Join(container.RootfsPath(), volPath)
+		if volIsDir {
+			if err := os.MkdirAll(rootVolPath, 0755); err != nil {
+				return err
+			}
+		}
+
+		volPath = path.Join(container.RootfsPath(), volPath)
+		if _, err := os.Stat(volPath); err != nil {
+			if os.IsNotExist(err) {
+				if volIsDir {
+					if err := os.MkdirAll(volPath, 0755); err != nil {
+						return err
+					}
+				} else {
+					if err := os.MkdirAll(path.Dir(volPath), 0755); err != nil {
+						return err
+					}
+					if f, err := os.OpenFile(volPath, os.O_CREATE, 0755); err != nil {
+						return err
+					} else {
+						f.Close()
+					}
+				}
+			}
+		}
+
+		// Do not copy or change permissions if we are mounting from the host
+		if srcRW && !isBindMount {
+			volList, err := ioutil.ReadDir(rootVolPath)
+			if err != nil {
+				return err
+			}
+			if len(volList) > 0 {
+				srcList, err := ioutil.ReadDir(srcPath)
+				if err != nil {
+					return err
+				}
+				if len(srcList) == 0 {
+					// If the source volume is empty copy files from the root into the volume
+					if err := archive.CopyWithTar(rootVolPath, srcPath); err != nil {
+						return err
+					}
+
+					var stat syscall.Stat_t
+					if err := syscall.Stat(rootVolPath, &stat); err != nil {
+						return err
+					}
+					var srcStat syscall.Stat_t
+					if err := syscall.Stat(srcPath, &srcStat); err != nil {
+						return err
+					}
+					// Change the source volume's ownership if it differs from the root
+					// files that where just copied
+					if stat.Uid != srcStat.Uid || stat.Gid != srcStat.Gid {
+						if err := os.Chown(srcPath, int(stat.Uid), int(stat.Gid)); err != nil {
+							return err
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func (container *Container) applyExternalVolumes() error {
+	if container.Config.VolumesFrom != "" {
+		containerSpecs := strings.Split(container.Config.VolumesFrom, ",")
+		for _, containerSpec := range containerSpecs {
+			mountRW := true
+			specParts := strings.SplitN(containerSpec, ":", 2)
+			switch len(specParts) {
+			case 0:
+				return fmt.Errorf("Malformed volumes-from specification: %s", container.Config.VolumesFrom)
+			case 2:
+				switch specParts[1] {
+				case "ro":
+					mountRW = false
+				case "rw": // mountRW is already true
+				default:
+					return fmt.Errorf("Malformed volumes-from speficication: %s", containerSpec)
+				}
+			}
+			c := container.runtime.Get(specParts[0])
+			if c == nil {
+				return fmt.Errorf("Container %s not found. Impossible to mount its volumes", container.ID)
+			}
+			for volPath, id := range c.Volumes {
+				if _, exists := container.Volumes[volPath]; exists {
+					continue
+				}
+				if err := os.MkdirAll(path.Join(container.RootfsPath(), volPath), 0755); err != nil {
+					return err
+				}
+				container.Volumes[volPath] = id
+				if isRW, exists := c.VolumesRW[volPath]; exists {
+					container.VolumesRW[volPath] = isRW && mountRW
+				}
+			}
+
+		}
+	}
+	return nil
 }
 
 func (container *Container) Run() error {
@@ -1148,11 +1011,12 @@ func (container *Container) allocateNetwork() error {
 		return nil
 	}
 
-	var iface *NetworkInterface
-	var err error
-	if container.State.Ghost {
-		manager := container.runtime.networkManager
-		if manager.disabled {
+	var (
+		iface *NetworkInterface
+		err   error
+	)
+	if container.State.IsGhost() {
+		if manager := container.runtime.networkManager; manager.disabled {
 			iface = &NetworkInterface{disabled: true}
 		} else {
 			iface = &NetworkInterface{
@@ -1188,10 +1052,12 @@ func (container *Container) allocateNetwork() error {
 		}
 	}
 
-	portSpecs := make(map[Port]struct{})
-	bindings := make(map[Port][]PortBinding)
+	var (
+		portSpecs = make(map[Port]struct{})
+		bindings  = make(map[Port][]PortBinding)
+	)
 
-	if !container.State.Ghost {
+	if !container.State.IsGhost() {
 		if container.Config.ExposedPorts != nil {
 			portSpecs = container.Config.ExposedPorts
 		}
@@ -1300,7 +1166,7 @@ func (container *Container) monitor() {
 	}
 
 	// Report status back
-	container.State.setStopped(exitCode)
+	container.State.SetStopped(exitCode)
 
 	// Release the lock
 	close(container.waitLock)
@@ -1350,10 +1216,10 @@ func (container *Container) cleanup() {
 }
 
 func (container *Container) kill(sig int) error {
-	container.State.Lock()
-	defer container.State.Unlock()
+	container.Lock()
+	defer container.Unlock()
 
-	if !container.State.Running {
+	if !container.State.IsRunning() {
 		return nil
 	}
 
@@ -1366,7 +1232,7 @@ func (container *Container) kill(sig int) error {
 }
 
 func (container *Container) Kill() error {
-	if !container.State.Running {
+	if !container.State.IsRunning() {
 		return nil
 	}
 
@@ -1391,7 +1257,7 @@ func (container *Container) Kill() error {
 }
 
 func (container *Container) Stop(seconds int) error {
-	if !container.State.Running {
+	if !container.State.IsRunning() {
 		return nil
 	}
 
@@ -1425,7 +1291,7 @@ func (container *Container) Restart(seconds int) error {
 // Wait blocks until the container stops running, then returns its exit code.
 func (container *Container) Wait() int {
 	<-container.waitLock
-	return container.State.ExitCode
+	return container.State.GetExitCode()
 }
 
 func (container *Container) Resize(h, w int) error {
@@ -1437,15 +1303,14 @@ func (container *Container) Resize(h, w int) error {
 }
 
 func (container *Container) ExportRw() (archive.Archive, error) {
-	return archive.Tar(container.rwPath(), archive.Uncompressed)
-}
-
-func (container *Container) RwChecksum() (string, error) {
-	rwData, err := archive.Tar(container.rwPath(), archive.Xz)
-	if err != nil {
-		return "", err
+	if err := container.EnsureMounted(); err != nil {
+		return nil, err
 	}
-	return utils.HashData(rwData)
+	if container.runtime == nil {
+		return nil, fmt.Errorf("Can't load storage driver for unregistered container %s", container.ID)
+	}
+
+	return container.runtime.Diff(container)
 }
 
 func (container *Container) Export() (archive.Archive, error) {
@@ -1471,28 +1336,17 @@ func (container *Container) WaitTimeout(timeout time.Duration) error {
 }
 
 func (container *Container) EnsureMounted() error {
-	if mounted, err := container.Mounted(); err != nil {
-		return err
-	} else if mounted {
-		return nil
-	}
+	// FIXME: EnsureMounted is deprecated because drivers are now responsible
+	// for re-entrant mounting in their Get() method.
 	return container.Mount()
 }
 
 func (container *Container) Mount() error {
-	image, err := container.GetImage()
-	if err != nil {
-		return err
-	}
-	return image.Mount(container.RootfsPath(), container.rwPath())
+	return container.runtime.Mount(container)
 }
 
-func (container *Container) Changes() ([]Change, error) {
-	image, err := container.GetImage()
-	if err != nil {
-		return nil, err
-	}
-	return image.Changes(container.rwPath())
+func (container *Container) Changes() ([]archive.Change, error) {
+	return container.runtime.Changes(container)
 }
 
 func (container *Container) GetImage() (*Image, error) {
@@ -1502,18 +1356,8 @@ func (container *Container) GetImage() (*Image, error) {
 	return container.runtime.graph.Get(container.Image)
 }
 
-func (container *Container) Mounted() (bool, error) {
-	return Mounted(container.RootfsPath())
-}
-
 func (container *Container) Unmount() error {
-	if _, err := os.Stat(container.RootfsPath()); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return err
-	}
-	return Unmount(container.RootfsPath())
+	return container.runtime.Unmount(container)
 }
 
 func (container *Container) logPath(name string) string {
@@ -1542,11 +1386,7 @@ func (container *Container) lxcConfigPath() string {
 
 // This method must be exported to be used from the lxc template
 func (container *Container) RootfsPath() string {
-	return path.Join(container.root, "rootfs")
-}
-
-func (container *Container) rwPath() string {
-	return path.Join(container.root, "rw")
+	return container.rootfs
 }
 
 func validateID(id string) error {
@@ -1558,23 +1398,38 @@ func validateID(id string) error {
 
 // GetSize, return real size, virtual size
 func (container *Container) GetSize() (int64, int64) {
-	var sizeRw, sizeRootfs int64
+	var (
+		sizeRw, sizeRootfs int64
+		err                error
+		driver             = container.runtime.driver
+	)
 
-	filepath.Walk(container.rwPath(), func(path string, fileInfo os.FileInfo, err error) error {
-		if fileInfo != nil {
-			sizeRw += fileInfo.Size()
+	if err := container.EnsureMounted(); err != nil {
+		utils.Errorf("Warning: failed to compute size of container rootfs %s: %s", container.ID, err)
+		return sizeRw, sizeRootfs
+	}
+
+	if differ, ok := container.runtime.driver.(graphdriver.Differ); ok {
+		sizeRw, err = differ.DiffSize(container.ID)
+		if err != nil {
+			utils.Errorf("Warning: driver %s couldn't return diff size of container %s: %s", driver, container.ID, err)
+			// FIXME: GetSize should return an error. Not changing it now in case
+			// there is a side-effect.
+			sizeRw = -1
 		}
-		return nil
-	})
+	} else {
+		changes, _ := container.Changes()
+		if changes != nil {
+			sizeRw = archive.ChangesSize(container.RootfsPath(), changes)
+		} else {
+			sizeRw = -1
+		}
+	}
 
-	_, err := os.Stat(container.RootfsPath())
-	if err == nil {
-		filepath.Walk(container.RootfsPath(), func(path string, fileInfo os.FileInfo, err error) error {
-			if fileInfo != nil {
-				sizeRootfs += fileInfo.Size()
-			}
-			return nil
-		})
+	if _, err = os.Stat(container.RootfsPath()); err != nil {
+		if sizeRootfs, err = utils.TreeSize(container.RootfsPath()); err != nil {
+			sizeRootfs = -1
+		}
 	}
 	return sizeRw, sizeRootfs
 }
@@ -1597,11 +1452,25 @@ func (container *Container) Copy(resource string) (archive.Archive, error) {
 		filter = []string{path.Base(basePath)}
 		basePath = path.Dir(basePath)
 	}
-	return archive.TarFilter(basePath, archive.Uncompressed, filter)
+	return archive.TarFilter(basePath, &archive.TarOptions{
+		Compression: archive.Uncompressed,
+		Includes:    filter,
+		Recursive:   true,
+	})
 }
 
 // Returns true if the container exposes a certain port
 func (container *Container) Exposes(p Port) bool {
 	_, exists := container.Config.ExposedPorts[p]
 	return exists
+}
+
+func (container *Container) GetPtyMaster() (*os.File, error) {
+	if container.ptyMaster == nil {
+		return nil, ErrNoTTY
+	}
+	if pty, ok := container.ptyMaster.(*os.File); ok {
+		return pty, nil
+	}
+	return nil, ErrNotATTY
 }

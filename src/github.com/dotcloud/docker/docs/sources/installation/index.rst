@@ -9,7 +9,7 @@ Installation
 
 There are a number of ways to install Docker, depending on where you
 want to run the daemon. The :ref:`ubuntu_linux` installation is the
-officially-tested version, and the community adds more techniques for
+officially-tested version. The community adds more techniques for
 installing Docker all the time.
 
 Contents:
@@ -18,13 +18,16 @@ Contents:
    :maxdepth: 1
 
    ubuntulinux
-   binaries
-   security
-   upgrading
-   kernel
+   rhel
+   fedora
+   archlinux
+   gentoolinux
    vagrant
    windows
    amazon
    rackspace
-   archlinux
-   gentoolinux
+   google
+   kernel
+   binaries
+   security
+   upgrading
