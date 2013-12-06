@@ -70,14 +70,16 @@ func (f *FakeYagnats) Publish(subject string, payload []byte) error {
 }
 
 func (f *FakeYagnats) PublishWithReplyTo(subject, reply string, payload []byte) error {
-	message := yagnats.Message{
+	message := &yagnats.Message{
 		Subject: subject,
 		ReplyTo: reply,
 		Payload: payload,
 	}
 
-	f.PublishedMessages[subject] = append(f.PublishedMessages[subject], message)
-
+	f.PublishedMessages[subject] = append(f.PublishedMessages[subject], *message)
+	if len(f.Subscriptions[subject]) > 0 {
+		f.Subscriptions[subject][0].Callback(message)
+	}
 	return f.PublishError
 }
 
@@ -95,7 +97,6 @@ func (f *FakeYagnats) SubscribeWithQueue(subject, queue string, callback yagnats
 	}
 
 	f.Subscriptions[subject] = append(f.Subscriptions[subject], subscription)
-
 	return subscription.ID, f.SubscribeError
 }
 
