@@ -1,0 +1,33 @@
+#	If response time is slower than this, send alert (in seconds)
+LagThreshold = 10
+
+#	How often to ping (in seconds)
+PingInterval = 60
+
+#	A text file of URLs to ping seperated by new lines.
+#	can be a relative our absolute reference
+URLsFile = "urls.txt"
+
+#	Twilio creds for SMS notifications
+[Twilio]
+	AccountSid 	= ""
+	AuthToken  	= ""
+	Number 		= "+16191234567"
+
+# 	SMTP email server credentials to send notifications from
+#	uses PlainAuth and has been tested to work with GMail
+[SMTP]
+	Email 		= "someone@domain.com"
+	Password 	= "xxx1234"
+	Server 		= "smtp.gmail.com"
+	Port 		= "587"
+
+#	emails and phone numbers to notify when there is a ping error 
+#	or the response is slower than the LagThreshold
+[Notify]
+	Phones	= [
+		"+16191234567"
+	]
+	Emails	= [
+		"someone@domain.com"
+	]
