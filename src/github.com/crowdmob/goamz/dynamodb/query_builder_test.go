@@ -66,7 +66,7 @@ func TestAddWriteRequestItems(t *testing.T) {
 	desiredString := "{\"RequestItems\":{\"FooData\":[{\"PutRequest\":{\"Item\":{\"testing\":{\"N\":\"4\"},\"testingbatch\":{\"N\":\"2111\"},\"testingstrbatch\":{\"S\":\"mystr\"}}}},{\"PutRequest\":{\"Item\":{\"testing\":{\"N\":\"444\"},\"testingbatch\":{\"N\":\"93748249272\"},\"testingstrbatch\":{\"S\":\"myotherstr\"}}}},{\"DeleteRequest\":{\"Key\":{\"TestHashKeyDel\":{\"S\":\"DelKey\"},\"TestRangeKeyDel\":{\"N\":\"7777777\"}}}}],\"TestTable\":[{\"PutRequest\":{\"Item\":{\"TestHashKey\":{\"S\":\"MyKey\"},\"TestRangeKey\":{\"N\":\"0193820384293\"}}}}]}}"
 	queryString := q.String()
 
-	if (queryString != desiredString) {
+	if queryString != desiredString {
 		t.Fatalf("Unexpected Query String : %s\n", queryString)
 	}
 }
@@ -167,4 +167,64 @@ func TestUpdateQuery(t *testing.T) {
 		t.Fatalf("Expected a RangeKeyElement found : %s", keyMap)
 	}
 
+}
+
+func TestAddUpdates(t *testing.T) {
+	auth := &aws.Auth{AccessKey: "", SecretKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}
+	server := dynamodb.Server{*auth, aws.USEast}
+	primary := dynamodb.NewStringAttribute("domain", "")
+	key := dynamodb.PrimaryKey{primary, nil}
+	table := server.NewTable("sites", key)
+
+	q := dynamodb.NewQuery(table)
+	q.AddKey(table, &dynamodb.Key{HashKey: "test"})
+
+	attr := dynamodb.NewStringSetAttribute("StringSet", []string{"str", "str2"})
+
+	q.AddUpdates([]dynamodb.Attribute{*attr}, "ADD")
+	queryString := []byte(q.String())
+
+	json, err := simplejson.NewJson(queryString)
+
+	if err != nil {
+		t.Logf("JSON err : %s\n", err)
+		t.Fatalf("Invalid JSON : %s\n", queryString)
+	}
+
+	attributeUpdates := json.Get("AttributeUpdates")
+	if _, err := attributeUpdates.Map(); err != nil {
+		t.Fatalf("Expected a AttributeUpdates found")
+	}
+
+	attributesModified := attributeUpdates.Get("StringSet")
+	if _, err := attributesModified.Map(); err != nil {
+		t.Fatalf("Expected a StringSet found : %s", err)
+	}
+
+	action := attributesModified.Get("Action")
+	if v, err := action.String(); err != nil {
+		t.Fatalf("Expected a action to be string : %s", err)
+	} else if v != "ADD" {
+		t.Fatalf("Expected a action to be ADD : %s", v)
+	}
+
+	value := attributesModified.Get("Value")
+	if _, err := value.Map(); err != nil {
+		t.Fatalf("Expected a Value found : %s", err)
+	}
+
+	string_set := value.Get("SS")
+	string_set_ary, err := string_set.StringArray()
+	if err != nil {
+		t.Fatalf("Expected a string set found : %s", err)
+	}
+	if len(string_set_ary) != 2 {
+		t.Fatalf("Expected a string set length to be 2 was : %d", len(string_set_ary))
+	}
+
+	for _, v := range string_set_ary {
+		if v != "str" && v != "str2" {
+			t.Fatalf("Expected a string to be str OR str2 was : %s", v)
+		}
+	}
 }

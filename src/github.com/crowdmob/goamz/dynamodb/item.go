@@ -3,8 +3,8 @@ package dynamodb
 import simplejson "github.com/bitly/go-simplejson"
 import (
 	"errors"
-	"log"
 	"fmt"
+	"log"
 )
 
 type BatchGetItem struct {
@@ -13,8 +13,8 @@ type BatchGetItem struct {
 }
 
 type BatchWriteItem struct {
-	Server  *Server
-	ItemActions   map[*Table]map[string][][]Attribute
+	Server      *Server
+	ItemActions map[*Table]map[string][][]Attribute
 }
 
 func (t *Table) BatchGetItems(keys []Key) *BatchGetItem {
@@ -139,7 +139,7 @@ func (t *Table) GetItem(key *Key) (map[string]*Attribute, error) {
 		// We got an empty from amz. The item doesn't exist.
 		return nil, ErrNotFound
 	}
-	
+
 	item, err := itemJson.Map()
 	if err != nil {
 		message := fmt.Sprintf("Unexpected response %s", jsonResponse)

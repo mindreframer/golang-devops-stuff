@@ -1,5 +1,21 @@
 package aws
 
+var USGovWest = Region{
+	"us-gov-west-1",
+	"https://ec2.us-gov-west-1.amazonaws.com",
+	"https://s3-fips-us-gov-west-1.amazonaws.com",
+	"",
+	true,
+	true,
+	"",
+	"https://sns.us-gov-west-1.amazonaws.com",
+	"https://sqs.us-gov-west-1.amazonaws.com",
+	"https://iam.us-gov.amazonaws.com",
+	"https://elasticloadbalancing.us-gov-west-1.amazonaws.com",
+	"https://dynamodb.us-gov-west-1.amazonaws.com",
+	ServiceInfo{"https://monitoring.us-gov-west-1.amazonaws.com", V2Signature},
+}
+
 var USEast = Region{
 	"us-east-1",
 	"https://ec2.us-east-1.amazonaws.com",

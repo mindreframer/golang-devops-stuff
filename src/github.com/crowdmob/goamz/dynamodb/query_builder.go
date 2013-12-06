@@ -164,8 +164,12 @@ func (q *Query) AddUpdates(attributes []Attribute, action string) {
 	updates := msi{}
 	for _, a := range attributes {
 		//UGH!!  (I miss the query operator)
-		updates[a.Name] = msi{a.Type: map[bool]interface{}{true: a.SetValues, false: a.Value}[a.SetType()]}
-		updates["Action"]=action
+		updates[a.Name] = msi{
+			"Value": msi{
+				a.Type: map[bool]interface{}{true: a.SetValues, false: a.Value}[a.SetType()],
+			},
+			"Action": action,
+		}
 	}
 
 	q.buffer["AttributeUpdates"] = updates

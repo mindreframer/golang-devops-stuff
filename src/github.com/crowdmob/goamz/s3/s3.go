@@ -51,8 +51,8 @@ type Owner struct {
 // Fold options into an Options struct
 //
 type Options struct {
-	SSE  bool
-	Meta map[string][]string
+	SSE             bool
+	Meta            map[string][]string
 	ContentEncoding string
 	// What else?
 	// Cache-Control string
@@ -196,17 +196,19 @@ func (b *Bucket) Exists(path string) (exists bool, err error) {
 	for attempt := attempts.Start(); attempt.Next(); {
 		resp, err := b.S3.run(req, nil)
 
-		// We can treat a 403 or 404 as non existance
-		if (*err.(*Error)).StatusCode == 403 || (*err.(*Error)).StatusCode == 404 {
-			return false, nil
-		}
-
 		if shouldRetry(err) && attempt.HasNext() {
 			continue
 		}
+
 		if err != nil {
-			return false, err
+			// We can treat a 403 or 404 as non existance
+			if (*err.(*Error)).StatusCode == 403 || (*err.(*Error)).StatusCode == 404 {
+				return false, nil
+			} else {
+				return false, err
+			}
 		}
+
 		if resp.StatusCode/100 == 2 {
 			exists = true
 		}
