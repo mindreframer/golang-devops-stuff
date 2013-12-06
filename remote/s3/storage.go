@@ -1,11 +1,11 @@
-package trousseau
+package s3
 
 import (
 	"errors"
 	"fmt"
+	"github.com/crowdmob/goamz/aws"
+	"github.com/crowdmob/goamz/s3"
 	"io/ioutil"
-	"launchpad.net/goamz/aws"
-	"launchpad.net/goamz/s3"
 )
 
 // S3Storage is an implementation of the RemoteStorage
@@ -39,20 +39,20 @@ func (ss *S3Storage) Connect() error {
 	return nil
 }
 
-func (ss *S3Storage) Push(remoteName string) error {
-	data, err := ioutil.ReadFile(gStorePath)
+func (ss *S3Storage) Push(localPath, remotePath string) error {
+	data, err := ioutil.ReadFile(localPath)
 	if err != nil {
 		return errors.New("Cannot push trousseau: Store file does not exist")
 	}
 
-	err = ss.connexion.Put(remoteName, data, "text/plain", s3.BucketOwnerFull)
+	err = ss.connexion.Put(remotePath, data, "text/plain", s3.BucketOwnerFull, s3.Options{})
 	if err != nil {
 		errMsg := "Unable to push trousseau file to S3: "
 
-		if remoteName == "" {
+		if remotePath == "" {
 			errMsg += fmt.Sprintf("Make sure you've set %s and %s env vars.",
-				"TROUSSEAU_S3_FILENAME",
-				"TROUSSEAU_S3_BUCKET")
+				ENV_S3_FILENAME_KEY,
+				ENV_S3_BUCKET_KEY)
 		} else {
 			errMsg += err.Error()
 		}
@@ -63,12 +63,12 @@ func (ss *S3Storage) Push(remoteName string) error {
 	return nil
 }
 
-func (ss *S3Storage) Pull(remoteName string) error {
-	data, err := ss.connexion.Get(remoteName)
+func (ss *S3Storage) Pull(remotePath, localPath string) error {
+	data, err := ss.connexion.Get(remotePath)
 	if err != nil {
 		errMsg := "Unable to pull trousseau file from S3: "
 
-		if remoteName == "" {
+		if remotePath == "" {
 			errMsg += fmt.Sprintf("Make sure you've set %s and %s env vars.",
 				"TROUSSEAU_S3_FILENAME",
 				"TROUSSEAU_S3_BUCKET")
@@ -80,7 +80,7 @@ func (ss *S3Storage) Pull(remoteName string) error {
 	}
 
 	// Write pulled json to trousseau file
-	err = ioutil.WriteFile(gStorePath, data, 0764)
+	err = ioutil.WriteFile(localPath, data, 0764)
 	if err != nil {
 		errMsg := "Your trousseau installation seems to be unconfigured. "
 		errMsg += "Please make sure you run trousseau configure before pulling"

@@ -19,13 +19,7 @@ func PushCommand() cli.Command {
 		Action: PushAction,
 		Flags: []cli.Flag{
 			OverwriteFlag(),
-			S3BucketFlag(),
 			SshPrivateKeyPathFlag(),
-			RemoteStorageFlag(),
-			RemoteFilenameFlag(),
-			RemoteHostFlag(),
-			RemotePortFlag(),
-			RemoteUserFlag(),
 		},
 	}
 }
@@ -37,13 +31,7 @@ func PullCommand() cli.Command {
 		Action: PullAction,
 		Flags: []cli.Flag{
 			OverwriteFlag(),
-			S3BucketFlag(),
 			SshPrivateKeyPathFlag(),
-			RemoteStorageFlag(),
-			RemoteFilenameFlag(),
-			RemoteHostFlag(),
-			RemotePortFlag(),
-			RemoteUserFlag(),
 		},
 	}
 }
