@@ -101,6 +101,10 @@ func (m *mockEmitter) Emit(appid, message string) {
 	m.message = message
 }
 
+func (m *mockEmitter) EmitError(appid, message string) {
+	
+}
+
 func (m *mockEmitter) EmitLogMessage(l *logmessage.LogMessage) {
 
 }
