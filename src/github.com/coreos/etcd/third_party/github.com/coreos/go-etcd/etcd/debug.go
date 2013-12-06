@@ -1,8 +1,9 @@
 package etcd
 
 import (
-	"github.com/coreos/go-log/log"
 	"os"
+
+	"github.com/coreos/go-log/log"
 )
 
 var logger *log.Logger

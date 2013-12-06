@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	etcdErr "github.com/coreos/etcd/error"
 	"github.com/coreos/etcd/log"
 	"github.com/coreos/etcd/store"
-	"github.com/coreos/go-raft"
+	"github.com/coreos/raft"
 	"github.com/gorilla/mux"
 )
 
@@ -23,10 +24,18 @@ func GetHandler(w http.ResponseWriter, req *http.Request, s Server) error {
 	// Help client to redirect the request to the current leader
 	if req.FormValue("consistent") == "true" && s.State() != raft.Leader {
 		leader := s.Leader()
-		hostname, _ := s.PeerURL(leader)
-		url := hostname + req.URL.Path
-		log.Debugf("Redirect consistent get to %s", url)
-		http.Redirect(w, req, url, http.StatusTemporaryRedirect)
+		hostname, _ := s.ClientURL(leader)
+
+		url, err := url.Parse(hostname)
+		if err != nil {
+			log.Warn("Redirect cannot parse hostName ", hostname)
+			return err
+		}
+		url.RawQuery = req.URL.RawQuery
+		url.Path = req.URL.Path
+
+		log.Debugf("Redirect consistent get to %s", url.String())
+		http.Redirect(w, req, url.String(), http.StatusTemporaryRedirect)
 		return nil
 	}
 
