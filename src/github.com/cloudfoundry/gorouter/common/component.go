@@ -106,7 +106,7 @@ func StartComponent(c *VcapComponent) {
 	go c.ListenAndServe()
 }
 
-func Register(c *VcapComponent, mbusClient *yagnats.Client) {
+func Register(c *VcapComponent, mbusClient yagnats.NATSClient) {
 	mbusClient.Subscribe("vcap.component.discover", func(msg *yagnats.Message) {
 		Component.Uptime = Component.Start.Elapsed()
 		b, e := json.Marshal(Component)

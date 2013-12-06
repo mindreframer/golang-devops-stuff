@@ -166,7 +166,7 @@ type registryMessage struct {
 
 func (r *Router) SubscribeRegister() {
 	r.subscribeRegistry("router.register", func(registryMessage *registryMessage) {
-		log.Infof("Got router.register: %v", registryMessage)
+		log.Debugf("Got router.register: %v", registryMessage)
 
 		for _, uri := range registryMessage.Uris {
 			r.registry.Register(
@@ -179,7 +179,7 @@ func (r *Router) SubscribeRegister() {
 
 func (r *Router) SubscribeUnregister() {
 	r.subscribeRegistry("router.unregister", func(registryMessage *registryMessage) {
-		log.Infof("Got router.unregister: %v", registryMessage)
+		log.Debugf("Got router.unregister: %v", registryMessage)
 
 		for _, uri := range registryMessage.Uris {
 			r.registry.Unregister(
