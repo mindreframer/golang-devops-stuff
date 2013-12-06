@@ -46,6 +46,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       NATS client for Go
        216 commits, last change: 2013-11-22 13:03:23, 59 stars, 7 forks
 
+    ARolek/lilpinger:
+      A small site pinging application with email and SMS notifications written in Golang
+       5 commits, last change: 2013-12-04 14:54:31, 13 stars, 1 forks
+
     benbjohnson/go-raft:
       A Go implementation of the Raft distributed consensus protocol.
        381 commits, last change: 2013-11-26 20:31:21, 535 stars, 56 forks
