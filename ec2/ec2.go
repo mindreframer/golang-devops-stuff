@@ -211,6 +211,7 @@ type RunInstancesOptions struct {
 	PrivateIPAddress       string
 	IamInstanceProfileArn  string
 	IamInstanceProfileName string
+	BlockDeviceMappings    []BlockDeviceMapping
 }
 
 // Response to a RunInstances request.
@@ -245,6 +246,19 @@ type Instance struct {
 	State              InstanceState `xml:"instanceState"`
 	Tags               []Tag         `xml:"tagSet>item"`
 	IamInstanceProfile string        `xml:"iamInstanceProfile"`
+	BlockDevices       []BlockDevice `xml:"blockDeviceMapping>item"`
+}
+
+type BlockDevice struct {
+	DeviceName         string        `xml:"deviceName"`
+	EBS EBS `xml:"ebs"`
+}
+
+type EBS struct {
+	VolumeId string `xml:"volumeId"`
+	Status string `xml:"status"`
+	AttachTime string `xml:"attachTime"`
+	DeleteOnTermination bool `xml:"deleteOnTermination"`
 }
 
 // RunInstances starts new instances in EC2.
@@ -280,6 +294,31 @@ func (ec2 *EC2) RunInstances(options *RunInstancesOptions) (resp *RunInstancesRe
 			j++
 		}
 	}
+
+	for i, d := range options.BlockDeviceMappings {
+		if d.DeviceName != "" {
+			params["BlockDeviceMapping."+strconv.Itoa(i)+".DeviceName"] = d.DeviceName
+		}
+		if d.VirtualName != "" {
+			params["BlockDeviceMapping."+strconv.Itoa(i)+".VirtualName"] = d.VirtualName
+		}
+		if d.SnapshotId != "" {
+			params["BlockDeviceMapping."+strconv.Itoa(i)+".Ebs.SnapshotId"] = d.SnapshotId
+		}
+		if d.VolumeType != "" {
+			params["BlockDeviceMapping."+strconv.Itoa(i)+".Ebs.VolumeType"] = d.VolumeType
+		}
+		if d.VolumeSize != 0 {
+			params["BlockDeviceMapping."+strconv.Itoa(i)+".Ebs.VolumeSize"] = strconv.FormatInt(d.VolumeSize, 10)
+		}
+		if d.DeleteOnTermination {
+			params["BlockDeviceMapping."+strconv.Itoa(i)+".Ebs.DeleteOnTermination"] = "true"
+		}
+		if d.IOPS != 0 {
+			params["BlockDeviceMapping."+strconv.Itoa(i)+".Ebs.Iops"] = strconv.FormatInt(d.IOPS, 10)
+		}
+	}
+
 	token, err := clientToken()
 	if err != nil {
 		return nil, err
