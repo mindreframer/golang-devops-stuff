@@ -1,0 +1,71 @@
+#!/bin/bash
+# vim: set ft=sh
+
+cd warden/warden
+sudo bundle install
+
+cat > warden-linux.yml <<EOF
+---
+server:
+  container_klass: Warden::Container::Linux
+
+  # Wait this long before destroying a container, after the last client
+  # referencing it disconnected. The timer is cancelled when during this
+  # period, another client references the container.
+  #
+  # Clients can be forced to specify this setting by setting the
+  # server-wide variable to an invalid value:
+  #   container_grace_time: invalid
+  #
+  # The grace time can be disabled by setting it to nil:
+  #   container_grace_time: ~
+  #
+  container_grace_time: 300
+
+  unix_domain_permissions: 0777
+
+  # Specifies the path to the base chroot used as the read-only root
+  # filesystem
+  container_rootfs_path: /opt/warden/rootfs
+
+  # Specifies the path to the parent directory under which all containers
+  # will live.
+  container_depot_path: /opt/warden/containers
+
+  # See getrlimit(2) for details. Integer values are passed verbatim.
+  container_rlimits:
+    as: 4294967296
+    nofile: 8192
+    nproc: 512
+
+  # Specifies the output limit of a job (stdout/stderr combined).
+  job_output_limit: 10485760
+
+  quota:
+    disk_quota_enabled: true
+
+  allow_nested_warden: false
+
+health_check_server:
+  port: 2345
+
+logging:
+  level: debug2
+
+network:
+  # Use this /30 network as offset for the network pool.
+  pool_start_address: 10.254.0.0
+
+  # Pool this many /30 networks.
+  pool_size: 256
+
+  # Interface MTU size
+  # (for OpenStack use 1454 to avoid problems with rubygems with GRE tunneling)
+  mtu: 1500
+
+user:
+  pool_start_uid: 10000
+  pool_size: 256
+EOF
+
+sudo bundle exec rake warden:start[warden-linux.yml]

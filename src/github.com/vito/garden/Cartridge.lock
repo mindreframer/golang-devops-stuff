@@ -1,0 +1,6 @@
+code.google.com/p/gogoprotobuf/proto	a2cbb9e3ce8ab9e350516a3cda5da7b61f926853
+code.google.com/p/gogoprotobuf/protoc-gen-gogo	a2cbb9e3ce8ab9e350516a3cda5da7b61f926853
+github.com/onsi/gomega	88f0d2817fdc1e2d1bc3ace4604a6ec75c8cec9b
+github.com/onsi/ginkgo	749c170ef7bce757ca878a29585d4ee548d527b0
+github.com/onsi/ginkgo/ginkgo	749c170ef7bce757ca878a29585d4ee548d527b0
+github.com/vito/cmdtest	4a7d54fd9ba82d865504964101bb2b3f04e52a0b

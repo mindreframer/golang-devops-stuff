@@ -1,0 +1,8 @@
+.vagrant/
+cookbooks/
+tmp/
+.DS_Store
+out/
+root/
+*.coverprofile
+.rootfs/

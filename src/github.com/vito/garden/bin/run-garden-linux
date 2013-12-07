@@ -1,0 +1,14 @@
+#!/bin/bash
+# vim: set ft=sh
+
+set -e
+
+go build -o out/garden
+
+sudo rm -f /tmp/warden.sock
+
+sudo ./out/garden \
+  -backend=linux \
+  -depot=/opt/warden/containers \
+  -root=$PWD/root \
+  -rootfs=/opt/warden/rootfs
