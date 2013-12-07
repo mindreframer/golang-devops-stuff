@@ -218,6 +218,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Uniqush is a free and open source software which provides a unified push service for server-side notification to apps on mobile devices.
        406 commits, last change: 2013-11-07 12:23:32, 372 stars, 47 forks
 
+    vito/garden:
+      Go Warden
+       153 commits, last change: 2013-12-07 00:24:00, 2 stars, 1 forks
+
     VividCortex/robustly:
       Run functions resiliently
        21 commits, last change: , 45 stars, 1 forks
