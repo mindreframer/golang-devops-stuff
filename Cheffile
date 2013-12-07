@@ -1,0 +1,5 @@
+site "http://community.opscode.com/api/v1"
+
+cookbook "apt", "1.7.0"
+cookbook "git"
+cookbook "chef-golang"
