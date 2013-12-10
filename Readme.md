@@ -233,4 +233,8 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     xtaci/gonet:
       a game server skeleton with golang
        911 commits, last change: 2013-12-03 22:10:28, 112 stars, 51 forks
+
+    zimbatm/socketmaster:
+      Zero downtime restarts for your apps
+       43 commits, last change: 2013-08-09 12:22:43, 47 stars, 7 forks
 <!-- PROJECTS_LIST_END -->
