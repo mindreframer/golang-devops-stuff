@@ -154,6 +154,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Scalable datastore for metrics, events, and real-time analytics
        501 commits, last change: 2013-12-04 14:21:29, 929 stars, 36 forks
 
+    joewalnes/websocketd:
+      Like inetd, but for WebSockets. Turn any application that uses STDIO/STDOUT into a WebSocket server.
+       75 commits, last change: 2013-11-26 09:44:27, 570 stars, 21 forks
+
     jondot/groundcontrol:
       Manage and monitor your Raspberry Pi with ease
        50 commits, last change: 2013-08-22 07:19:32, 621 stars, 42 forks
