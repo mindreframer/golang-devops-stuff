@@ -162,6 +162,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       An experiment to cut logs in preparation for processing elsewhere.
        533 commits, last change: 2013-12-02 13:58:44, 289 stars, 70 forks
 
+    mailgun/vulcan:
+      Rate limiting reverse proxy
+       108 commits, last change: 2013-10-04 10:53:08, 44 stars, 2 forks
+
     mindreframer/emtail:
       extract whitebox monitoring data from logs and insert into a timeseries database - mirror for https://code.google.com/p/emtail/
        273 commits, last change: , 0 stars, 0 forks
