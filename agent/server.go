@@ -1,10 +1,11 @@
-package discover
+package agent
 
 import (
 	"log"
 	"net/http"
+	"os"
 
-	"github.com/flynn/go-etcd/etcd"
+	"github.com/coreos/go-etcd/etcd"
 	"github.com/flynn/rpcplus"
 	rpc "github.com/flynn/rpcplus/comborpc"
 )
@@ -15,10 +16,11 @@ const (
 )
 
 type ServiceUpdate struct {
-	Name   string
-	Addr   string
-	Online bool
-	Attrs  map[string]string
+	Name    string
+	Addr    string
+	Online  bool
+	Attrs   map[string]string
+	Created uint
 }
 
 type Args struct {
@@ -44,9 +46,9 @@ type Agent struct {
 	Address string
 }
 
-func NewServer(addr string) *Agent {
+func NewServer(addr string, etcdAddrs []string) *Agent {
 	return &Agent{
-		Backend: &EtcdBackend{Client: etcd.NewClient(nil)},
+		Backend: &EtcdBackend{Client: etcd.NewClient(etcdAddrs)},
 		Address: addr,
 	}
 }
@@ -59,13 +61,21 @@ func ListenAndServe(server *Agent) error {
 	return http.ListenAndServe(server.Address, nil)
 }
 
+func expandAddr(addr string) string {
+	if addr[0] == ':' {
+		return os.Getenv("EXTERNAL_IP") + addr
+	}
+	return addr
+}
+
 func (s *Agent) Subscribe(args *Args, stream rpcplus.Stream) error {
 	updates, err := s.Backend.Subscribe(args.Name)
 	if err != nil {
-		log.Println("Subscribe: ", err)
+		log.Println("Subscribe: error:", err)
 		stream.Send <- &ServiceUpdate{} // be sure to unblock client
 		return err
 	}
+	log.Println("Subscribe:", args.Name)
 	for update := range updates.Chan() {
 		select {
 		case stream.Send <- update:
@@ -77,26 +87,36 @@ func (s *Agent) Subscribe(args *Args, stream rpcplus.Stream) error {
 	return nil
 }
 
-func (s *Agent) Register(args *Args, ret *struct{}) error {
-	err := s.Backend.Register(args.Name, args.Addr, args.Attrs)
+func (s *Agent) Register(args *Args, ret *string) error {
+	addr := expandAddr(args.Addr)
+	err := s.Backend.Register(args.Name, addr, args.Attrs)
 	if err != nil {
-		log.Println("Register: ", err)
+		log.Println("Register: error:", err)
+		return err
 	}
-	return err
+	*ret = addr
+	log.Println("Register:", args.Name, addr, args.Attrs)
+	return nil
 }
 
 func (s *Agent) Unregister(args *Args, ret *struct{}) error {
-	err := s.Backend.Unregister(args.Name, args.Addr)
+	addr := expandAddr(args.Addr)
+	err := s.Backend.Unregister(args.Name, addr)
 	if err != nil {
-		log.Println("Unregister: ", err)
+		log.Println("Unregister: error:", err)
+		return err
 	}
-	return err
+	log.Println("Unregister:", args.Name, addr)
+	return nil
 }
 
 func (s *Agent) Heartbeat(args *Args, ret *struct{}) error {
-	err := s.Backend.Heartbeat(args.Name, args.Addr)
+	addr := expandAddr(args.Addr)
+	err := s.Backend.Heartbeat(args.Name, addr)
 	if err != nil {
-		log.Println("Heartbeat: ", err)
+		log.Println("Heartbeat: error:", err)
+		return err
 	}
-	return err
+	log.Println("Heartbeat:", args.Name, addr)
+	return nil
 }
