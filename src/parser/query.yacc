@@ -47,6 +47,9 @@ value *create_expression_value(char *operator, size_t size, ...) {
   value*                v;
   from_clause*          from_clause;
   query*                query;
+  select_query*         select_query;
+  delete_query*         delete_query;
+  groupby_clause*       groupby_clause;
   struct {
     int limit;
     char ascending;
@@ -66,7 +69,7 @@ value *create_expression_value(char *operator, size_t size, ...) {
 %lex-param   {void *scanner}
 
 // define types of tokens (terminals)
-%token          SELECT FROM WHERE EQUAL GROUP BY LIMIT ORDER ASC DESC MERGE INNER JOIN AS
+%token          SELECT DELETE FROM WHERE EQUAL GROUP BY LIMIT ORDER ASC DESC MERGE INNER JOIN AS LIST SERIES
 %token <string> STRING_VALUE INT_VALUE FLOAT_VALUE TABLE_NAME SIMPLE_NAME REGEX_OP
 %token <string>  NEGATION_REGEX_OP REGEX_STRING INSENSITIVE_REGEX_STRING DURATION
 
@@ -87,11 +90,13 @@ value *create_expression_value(char *operator, size_t size, ...) {
 %type <value_array>     VALUES
 %type <v>               VALUE TABLE_VALUE SIMPLE_TABLE_VALUE TABLE_NAME_VALUE SIMPLE_NAME_VALUE
 %type <v>               WILDCARD REGEX_VALUE DURATION_VALUE FUNCTION_CALL
-%type <value_array>     GROUP_BY_CLAUSE
+%type <groupby_clause>  GROUP_BY_CLAUSE
 %type <integer>         LIMIT_CLAUSE
 %type <character>       ORDER_CLAUSE
 %type <limit_and_order> LIMIT_AND_ORDER_CLAUSES
 %type <query>           QUERY
+%type <delete_query>    DELETE_QUERY
+%type <select_query>    SELECT_QUERY
 
 // the initial token
 %start                  QUERIES
@@ -103,6 +108,7 @@ value *create_expression_value(char *operator, size_t size, ...) {
 %destructor { free($$); } <string>
 %destructor { free_expression($$); } <expression>
 %destructor { if ($$) free_value_array($$); } <value_array>
+%destructor { free_groupby_clause($$); } <groupby_clause>
 %destructor { close_query($$); free($$); } <query>
 
 // grammar
@@ -127,9 +133,36 @@ QUERIES:
         }
 
 QUERY:
-        SELECT COLUMN_NAMES FROM_CLAUSE GROUP_BY_CLAUSE WHERE_CLAUSE LIMIT_AND_ORDER_CLAUSES
+        SELECT_QUERY
         {
           $$ = calloc(1, sizeof(query));
+          $$->select_query = $1;
+        }
+        |
+        DELETE_QUERY
+        {
+          $$ = calloc(1, sizeof(query));
+          $$->delete_query = $1;
+        }
+        |
+        LIST SERIES
+        {
+          $$ = calloc(1, sizeof(query));
+          $$->list_series_query = TRUE;
+        }
+
+DELETE_QUERY:
+        DELETE FROM_CLAUSE WHERE_CLAUSE
+        {
+          $$ = calloc(1, sizeof(delete_query));
+          $$->from_clause = $2;
+          $$->where_condition = $3;
+        }
+
+SELECT_QUERY:
+        SELECT COLUMN_NAMES FROM_CLAUSE GROUP_BY_CLAUSE WHERE_CLAUSE LIMIT_AND_ORDER_CLAUSES
+        {
+          $$ = calloc(1, sizeof(select_query));
           $$->c = $2;
           $$->from_clause = $3;
           $$->group_by = $4;
@@ -140,7 +173,7 @@ QUERY:
         |
         SELECT COLUMN_NAMES FROM_CLAUSE WHERE_CLAUSE GROUP_BY_CLAUSE LIMIT_AND_ORDER_CLAUSES
         {
-          $$ = calloc(1, sizeof(query));
+          $$ = calloc(1, sizeof(select_query));
           $$->c = $2;
           $$->from_clause = $3;
           $$->where_condition = $4;
@@ -209,7 +242,16 @@ VALUES:
 GROUP_BY_CLAUSE:
         GROUP BY VALUES
         {
-          $$ = $3;
+          $$ = malloc(sizeof(groupby_clause));
+          $$->elems = $3;
+          $$->fill_function = NULL;
+        }
+        |
+        GROUP BY VALUES FUNCTION_CALL
+        {
+          $$ = malloc(sizeof(groupby_clause));
+          $$->elems = $3;
+          $$->fill_function = $4;
         }
         |
         {
@@ -469,7 +511,7 @@ void yy_delete_buffer(void *, void *);
 query
 parse_query(char *const query_s)
 {
-  query q = {NULL, NULL, NULL, NULL, NULL};
+  query q = {NULL, NULL, FALSE, NULL};
   void *scanner;
   yylex_init(&scanner);
 #ifdef DEBUG

@@ -5,7 +5,6 @@ import (
 	"configuration"
 	"datastore"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	. "launchpad.net/gocheck"
@@ -19,8 +18,6 @@ import (
 	"testing"
 	"time"
 )
-
-var noSkipReplicationTests = flag.Bool("no-skip-replication", false, "Do not skip replication tests")
 
 // Hook up gocheck into the gotest runner.
 func Test(t *testing.T) {
@@ -83,22 +80,19 @@ func startAndVerifyCluster(count int, c *C) []*RaftServer {
 	for i := 0; i < count; i++ {
 		l, err := net.Listen("tcp4", ":0")
 		c.Assert(err, IsNil)
-		server := newConfigAndServer(c)
-		servers[i] = server
+		servers[i] = newConfigAndServer(c)
 
-		if i == 0 {
+		if firstPort == 0 {
 			firstPort = l.Addr().(*net.TCPAddr).Port
-			go func() {
-				server.Serve(l, []string{}, false)
-			}()
 		} else {
-			go func() {
-				server.ListenAndServe([]string{fmt.Sprintf("http://localhost:%d", firstPort)}, true)
-			}()
+			servers[i].config.SeedServers = []string{fmt.Sprintf("http://localhost:%d", firstPort)}
 		}
+
+		servers[i].Serve(l)
+
 		time.Sleep(SERVER_STARTUP_TIME)
 		// verify that the server is up
-		getConfig(server.port, c)
+		getConfig(servers[i].port, c)
 	}
 	return servers
 }
@@ -114,7 +108,7 @@ func clean(servers ...*RaftServer) {
 func newConfigAndServer(c *C) *RaftServer {
 	path, err := ioutil.TempDir(os.TempDir(), "influxdb")
 	c.Assert(err, IsNil)
-	config := NewClusterConfiguration()
+	config := NewClusterConfiguration(&configuration.Configuration{})
 	setupConfig := &configuration.Configuration{Hostname: "localhost", RaftDir: path, RaftServerPort: 0}
 	server := NewRaftServer(setupConfig, config)
 	return server
@@ -140,18 +134,6 @@ func (self *CoordinatorSuite) TestCanCreateCoordinatorWithNoSeed(c *C) {
 	defer clean(server)
 }
 
-func (self *CoordinatorSuite) TestCanCreateCoordinatorWithSeedThatIsNotRunning(c *C) {
-	server := newConfigAndServer(c)
-	defer clean(server)
-	l, err := net.Listen("tcp4", ":0")
-	c.Assert(err, IsNil)
-	go func() {
-		server.Serve(l, []string{"localhost:8079"}, false)
-	}()
-	time.Sleep(SERVER_STARTUP_TIME)
-	getConfig(server.port, c)
-}
-
 func (self *CoordinatorSuite) TestCanRecover(c *C) {
 	server := startAndVerifyCluster(1, c)[0]
 	defer clean(server)
@@ -163,23 +145,17 @@ func (self *CoordinatorSuite) TestCanRecover(c *C) {
 	server.Close()
 	time.Sleep(SERVER_STARTUP_TIME)
 	server = newConfigAndServer(c)
-	// reset the path and port to the previous server
+	// reset the path and port to the previous server and remove the
+	// path that was created by newConfigAndServer
 	os.RemoveAll(server.path)
 	server.path = path
 	server.port = port
 	defer clean(server)
-	go func() {
-		server.ListenAndServe([]string{}, false)
-	}()
-	time.Sleep(SERVER_STARTUP_TIME)
+	server.ListenAndServe()
 	assertConfigContains(server.port, "db1", true, c)
 }
 
 func (self *CoordinatorSuite) TestCanCreateCoordinatorsAndReplicate(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(2, c)
 	defer clean(servers...)
 
@@ -191,10 +167,6 @@ func (self *CoordinatorSuite) TestCanCreateCoordinatorsAndReplicate(c *C) {
 }
 
 func (self *CoordinatorSuite) TestDoWriteOperationsFromNonLeaderServer(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(2, c)
 
 	err := servers[1].CreateDatabase("db3", uint8(1))
@@ -214,18 +186,13 @@ func (self *CoordinatorSuite) TestNewServerJoiningClusterWillPickUpData(c *C) {
 	defer clean(server2)
 	l, err := net.Listen("tcp4", ":0")
 	c.Assert(err, IsNil)
-	go func() {
-		server2.Serve(l, []string{fmt.Sprintf("http://localhost:%d", server.port)}, true)
-	}()
+	server2.config.SeedServers = []string{fmt.Sprintf("http://localhost:%d", server.port)}
+	server2.Serve(l)
 	time.Sleep(SERVER_STARTUP_TIME)
 	assertConfigContains(server2.port, "db4", true, c)
 }
 
 func (self *CoordinatorSuite) TestCanElectNewLeaderAndRecover(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
@@ -262,7 +229,7 @@ func (self *UserSuite) BenchmarkHashing(c *C) {
 }
 
 func (self *CoordinatorSuite) TestAutomaticDbCreations(c *C) {
-	servers := startAndVerifyCluster(1, c)
+	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
 	coordinator := NewCoordinatorImpl(&DatastoreMock{}, servers[0], servers[0].clusterConfig)
@@ -282,19 +249,21 @@ func (self *CoordinatorSuite) TestAutomaticDbCreations(c *C) {
 	c.Assert(coordinator.ChangeDbUserPassword(root, "db1", "db_user", "pass"), Equals, nil)
 
 	// the db should be in the index now
-	dbs, err := coordinator.ListDatabases(root)
-	c.Assert(err, IsNil)
-	c.Assert(dbs, DeepEquals, []*Database{&Database{"db1", 1}})
+	for _, server := range servers {
+		coordinator := NewCoordinatorImpl(&DatastoreMock{}, server, server.clusterConfig)
+		dbs, err := coordinator.ListDatabases(root)
+		c.Assert(err, IsNil)
+		c.Assert(dbs, DeepEquals, []*Database{&Database{"db1", 1}})
+	}
 
 	// if the db is dropped it should remove the users as well
-	c.Assert(coordinator.DropDatabase(root, "db1"), IsNil)
-	c.Assert(coordinator.datastore.(*DatastoreMock).DroppedDatabase, Equals, "db1")
+	c.Assert(servers[0].DropDatabase("db1"), IsNil)
 	_, err = coordinator.AuthenticateDbUser("db1", "db_user", "pass")
 	c.Assert(err, ErrorMatches, ".*Invalid.*")
 }
 
 func (self *CoordinatorSuite) TestAdminOperations(c *C) {
-	servers := startAndVerifyCluster(1, c)
+	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
 	coordinator := NewCoordinatorImpl(nil, servers[0], servers[0].clusterConfig)
@@ -308,6 +277,8 @@ func (self *CoordinatorSuite) TestAdminOperations(c *C) {
 	root, err = coordinator.AuthenticateClusterAdmin("root", "root")
 	c.Assert(err, IsNil)
 	c.Assert(root.IsClusterAdmin(), Equals, true)
+	c.Assert(root.HasWriteAccess("foobar"), Equals, true)
+	c.Assert(root.HasReadAccess("foobar"), Equals, true)
 
 	// Can change it's own password
 	c.Assert(coordinator.ChangeClusterAdminPassword(root, "root", "password"), Equals, nil)
@@ -354,7 +325,7 @@ func (self *CoordinatorSuite) TestAdminOperations(c *C) {
 }
 
 func (self *CoordinatorSuite) TestDbAdminOperations(c *C) {
-	servers := startAndVerifyCluster(1, c)
+	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
 	coordinator := NewCoordinatorImpl(nil, servers[0], servers[0].clusterConfig)
@@ -410,7 +381,7 @@ func (self *CoordinatorSuite) TestDbAdminOperations(c *C) {
 }
 
 func (self *CoordinatorSuite) TestDbUserOperations(c *C) {
-	servers := startAndVerifyCluster(1, c)
+	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
 	coordinator := NewCoordinatorImpl(nil, servers[0], servers[0].clusterConfig)
@@ -447,10 +418,6 @@ func (self *CoordinatorSuite) TestDbUserOperations(c *C) {
 }
 
 func (self *CoordinatorSuite) TestUserDataReplication(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
@@ -488,10 +455,6 @@ func (self *CoordinatorSuite) createDatabases(servers []*RaftServer, c *C) {
 }
 
 func (self *CoordinatorSuite) TestCanCreateDatabaseWithNameAndReplicationFactor(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
@@ -511,10 +474,6 @@ func (self *CoordinatorSuite) TestCanCreateDatabaseWithNameAndReplicationFactor(
 }
 
 func (self *CoordinatorSuite) TestCanDropDatabaseWithName(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
@@ -568,10 +527,6 @@ func (self *CoordinatorSuite) TestCheckReadAccess(c *C) {
 }
 
 func (self *CoordinatorSuite) TestServersGetUniqueIdsAndCanActivateCluster(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(3, c)
 	defer clean(servers...)
 
@@ -593,25 +548,21 @@ func (self *CoordinatorSuite) TestServersGetUniqueIdsAndCanActivateCluster(c *C)
 }
 
 func (self *CoordinatorSuite) TestCanJoinAClusterWhenNotInitiallyPointedAtLeader(c *C) {
-	if !*noSkipReplicationTests {
-		c.Skip("Not running replication tests. goraft has some rough edges")
-	}
-
 	servers := startAndVerifyCluster(2, c)
+	defer clean(servers...)
 	newServer := newConfigAndServer(c)
 	defer clean(newServer)
 	l, err := net.Listen("tcp4", ":0")
 	c.Assert(err, IsNil)
-	go func() {
-		leaderAddr, ok := servers[1].leaderConnectString()
-		c.Assert(ok, Equals, true)
-		leaderPort, _ := strconv.Atoi(strings.Split(leaderAddr, ":")[2])
-		followerPort := servers[1].port
-		if leaderPort == servers[1].port {
-			followerPort = servers[0].port
-		}
-		newServer.Serve(l, []string{fmt.Sprintf("http://localhost:%d", followerPort)}, true)
-	}()
+	leaderAddr, ok := servers[1].leaderConnectString()
+	c.Assert(ok, Equals, true)
+	leaderPort, _ := strconv.Atoi(strings.Split(leaderAddr, ":")[2])
+	followerPort := servers[1].port
+	if leaderPort == servers[1].port {
+		followerPort = servers[0].port
+	}
+	newServer.config.SeedServers = []string{fmt.Sprintf("http://localhost:%d", followerPort)}
+	newServer.Serve(l)
 	time.Sleep(SERVER_STARTUP_TIME)
 
 	err = servers[0].CreateDatabase("db8", uint8(1))

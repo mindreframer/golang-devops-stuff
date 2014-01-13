@@ -37,7 +37,7 @@ type MockEngine struct {
 	returnedError error
 }
 
-func (self *MockEngine) RunQuery(_ common.User, _ string, query string, yield func(*protocol.Series) error) error {
+func (self *MockEngine) RunQuery(_ common.User, _ string, query string, localOnly bool, yield func(*protocol.Series) error) error {
 	if self.returnedError != nil {
 		return self.returnedError
 	}
@@ -96,17 +96,20 @@ func (self *MockEngine) RunQuery(_ common.User, _ string, query string, yield fu
 }
 
 type MockCoordinator struct {
-	series    []*protocol.Series
-	db        string
-	droppedDb string
-}
-
-func (self *MockCoordinator) DistributeQuery(_ common.User, db string, query *parser.Query, yield func(*protocol.Series) error) error {
-	return nil
+	coordinator.Coordinator
+	series        []*protocol.Series
+	deleteQueries []*parser.DeleteQuery
+	db            string
+	droppedDb     string
 }
 
 func (self *MockCoordinator) WriteSeriesData(_ common.User, db string, series *protocol.Series) error {
 	self.series = append(self.series, series)
+	return nil
+}
+
+func (self *MockCoordinator) DeleteSeriesData(_ common.User, db string, query *parser.DeleteQuery, localOnly bool) error {
+	self.deleteQueries = append(self.deleteQueries, query)
 	return nil
 }
 
@@ -122,14 +125,6 @@ func (self *MockCoordinator) ListDatabases(_ common.User) ([]*coordinator.Databa
 func (self *MockCoordinator) DropDatabase(_ common.User, db string) error {
 	self.droppedDb = db
 	return nil
-}
-
-func (self *MockCoordinator) ReplicateWrite(request *protocol.Request) error {
-	return nil
-}
-
-func (self *MockCoordinator) ReplayReplication(request *protocol.Request, replicationFactor *uint8, owningServerId *uint32, lastSeenSequenceNumber *uint64) {
-	return
 }
 
 func (self *ApiSuite) formatUrl(path string, args ...interface{}) string {
@@ -164,6 +159,14 @@ func (self *ApiSuite) SetUpTest(c *C) {
 	self.coordinator.series = nil
 	self.engine.returnedError = nil
 	self.manager.ops = nil
+}
+
+func (self *ApiSuite) TestHealthCheck(c *C) {
+	url := self.formatUrl("/ping")
+	resp, err := libhttp.Get(url)
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
+	resp.Body.Close()
 }
 
 func (self *ApiSuite) TestClusterAdminAuthentication(c *C) {
@@ -206,6 +209,16 @@ func (self *ApiSuite) TestDbUserBasicAuthentication(c *C) {
 	c.Assert(err, IsNil)
 	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
 	resp.Body.Close()
+}
+
+func (self *ApiSuite) TestQueryAsClusterAdmin(c *C) {
+	query := "select * from foo;"
+	query = url.QueryEscape(query)
+	addr := self.formatUrl("/db/foo/series?q=%s&u=root&p=root", query)
+	resp, err := libhttp.Get(addr)
+	c.Assert(err, IsNil)
+	defer resp.Body.Close()
+	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
 }
 
 func (self *ApiSuite) TestQueryWithNullColumns(c *C) {
@@ -262,7 +275,7 @@ func (self *ApiSuite) TestQueryWithSecondsPrecision(c *C) {
 	c.Assert(int(series[0].Points[0][0].(float64)), Equals, 1381346631)
 }
 
-func (self *ApiSuite) TestWriritingToSeriesWithUnderscore(c *C) {
+func (self *ApiSuite) TestWritingToSeriesWithUnderscore(c *C) {
 	for _, name := range []string{"1foo", "_foo"} {
 
 		data := fmt.Sprintf(`
@@ -497,6 +510,25 @@ func (self *ApiSuite) TestWriteData(c *C) {
 	c.Assert(*series.Points[0].Values[3].BoolValue, Equals, true)
 }
 
+func (self *ApiSuite) TestWriteDataAsClusterAdmin(c *C) {
+	data := `
+[
+  {
+    "points": [
+				["1", true]
+    ],
+    "name": "foo",
+    "columns": ["column_one", "column_two"]
+  }
+]
+`
+
+	addr := self.formatUrl("/db/foo/series?u=root&p=root")
+	resp, err := libhttp.Post(addr, "application/json", bytes.NewBufferString(data))
+	c.Assert(err, IsNil)
+	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
+}
+
 func (self *ApiSuite) TestCreateDatabase(c *C) {
 	data := `{"name": "foo", "apiKey": "bar"}`
 	addr := self.formatUrl("/db?api_key=asdf&u=root&p=root")
@@ -630,32 +662,8 @@ func (self *ApiSuite) TestDbUserOperations(c *C) {
 	c.Assert(self.manager.ops[0].isAdmin, Equals, false)
 	self.manager.ops = nil
 
-	// TODO: remove this parapgraph one the old endpoints are removed
-	// set and unset the db admin flag
-	url = self.formatUrl("/db/db1/admins/dbuser?u=root&p=root")
-	resp, err = libhttp.Post(url, "", nil)
-	c.Assert(err, IsNil)
-	defer resp.Body.Close()
-	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
-	c.Assert(self.manager.ops, HasLen, 1)
-	c.Assert(self.manager.ops[0].operation, Equals, "db_user_admin")
-	c.Assert(self.manager.ops[0].username, Equals, "dbuser")
-	c.Assert(self.manager.ops[0].isAdmin, Equals, true)
-	self.manager.ops = nil
-	url = self.formatUrl("/db/db1/admins/dbuser?u=root&p=root")
-	req, _ := libhttp.NewRequest("DELETE", url, nil)
-	resp, err = libhttp.DefaultClient.Do(req)
-	c.Assert(err, IsNil)
-	defer resp.Body.Close()
-	c.Assert(resp.StatusCode, Equals, libhttp.StatusOK)
-	c.Assert(self.manager.ops, HasLen, 1)
-	c.Assert(self.manager.ops[0].operation, Equals, "db_user_admin")
-	c.Assert(self.manager.ops[0].username, Equals, "dbuser")
-	c.Assert(self.manager.ops[0].isAdmin, Equals, false)
-	self.manager.ops = nil
-
 	url = self.formatUrl("/db/db1/users/dbuser?u=root&p=root")
-	req, _ = libhttp.NewRequest("DELETE", url, nil)
+	req, _ := libhttp.NewRequest("DELETE", url, nil)
 	resp, err = libhttp.DefaultClient.Do(req)
 	c.Assert(err, IsNil)
 	defer resp.Body.Close()

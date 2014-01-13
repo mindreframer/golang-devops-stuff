@@ -151,6 +151,16 @@
 - [Issue #78](https://github.com/influxdb/influxdb/issues/78). Sequence numbers persist across restarts so they're not reused
 - [Issue #102](https://github.com/influxdb/influxdb/issues/102). Support expressions in where condition
 - [Issue #101](https://github.com/influxdb/influxdb/issues/101). Support expressions in aggregates
+- [Issue #62](https://github.com/influxdb/influxdb/issues/62). Support updating and deleting column values
+- [Issue #96](https://github.com/influxdb/influxdb/issues/96). Replicate deletes in a cluster
+- [Issue #94](https://github.com/influxdb/influxdb/issues/94). delete queries
+- [Issue #116](https://github.com/influxdb/influxdb/issues/116). Use proper logging
+- [Issue #40](https://github.com/influxdb/influxdb/issues/40). Use TOML instead of JSON in the config file
+- [Issue #99](https://github.com/influxdb/influxdb/issues/99). Support list series in the query language
+- [Issue #149](https://github.com/influxdb/influxdb/issues/149). Cluster admins should be able to perform reads and writes.
+- [Issue #108](https://github.com/influxdb/influxdb/issues/108). Querying one point using `time =`
+- [Issue #114](https://github.com/influxdb/influxdb/issues/114). Servers should periodically check that they're consistent.
+- [Issue #93](https://github.com/influxdb/influxdb/issues/93). Should be able to drop a time series
 
 ## Bugfixes
 
@@ -158,12 +168,22 @@
 - [Issue #89](https://github.com/influxdb/influxdb/issues/89). 'Group by' combined with 'where' not working
 - [Issue #106](https://github.com/influxdb/influxdb/issues/106). Don't panic if we only see one point and can't calculate derivative
 - [Issue #105](https://github.com/influxdb/influxdb/issues/105). Panic when using a where clause that reference columns with null values
+- [Issue #61](https://github.com/influxdb/influxdb/issues/61). Remove default limits from queries
+- [Issue #118](https://github.com/influxdb/influxdb/issues/118). Make column names starting with '_' legal
+- [Issue #121](https://github.com/influxdb/influxdb/issues/121). Don't fall back to the cluster admin auth if the db user auth fails
+- [Issue #127](https://github.com/influxdb/influxdb/issues/127). Return error on delete queries with where condition that don't have time
+- [Issue #117](https://github.com/influxdb/influxdb/issues/117). Fill empty groups with default values
+- [Issue #150](https://github.com/influxdb/influxdb/pull/150). Fix parser for when multiple divisions look like a regex.
+- [Issue #158](https://github.com/influxdb/influxdb/issues/158). Logged deletes should be stored with the time range if missing.
+- [Issue #136](https://github.com/influxdb/influxdb/issues/136). Make sure writes are replicated in order to avoid triggering replays
+- [Issue #145](https://github.com/influxdb/influxdb/issues/145). Server fails to join cluster if all starting at same time.
+- [Issue #176](https://github.com/influxdb/influxdb/issues/176). Drop database should take effect on all nodes
 
 ### Deprecated
 
 - deprecate '==' and '!=' in favor of '=' and '<>', respectively
 - deprecate `/dbs` (for listing databases) in favor of a more consistent `/db` endpoint
-- deprecate `username` field for a more consistent `name` field in the `/db/:db/users`
+- deprecate `username` field for a more consistent `name` field in `/db/:db/users` and `/cluster_admins`
 - deprecate endpoints `/db/:db/admins/:user` in favor of using `/db/:db/users/:user` which should
   be used to update user flags, password, etc.
 - Querying for column names that don't exist no longer throws an error.

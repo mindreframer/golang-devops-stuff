@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"common"
 	"fmt"
 	"regexp"
 	"sort"
@@ -30,7 +31,7 @@ func uniq(slice []string) []string {
 	return slice
 }
 
-func (self *Query) WillReturnSingleSeries() bool {
+func (self *SelectDeleteCommonQuery) WillReturnSingleSeries() bool {
 	fromClause := self.GetFromClause()
 	if fromClause.Type != FromClauseArray {
 		return false
@@ -47,7 +48,7 @@ func (self *Query) WillReturnSingleSeries() bool {
 	return true
 }
 
-func (self *Query) GetTableAliases(name string) []string {
+func (self *SelectDeleteCommonQuery) GetTableAliases(name string) []string {
 	names := self.GetFromClause().Names
 	if len(names) == 1 && names[0].Name.Type == ValueRegex {
 		return []string{name}
@@ -70,7 +71,7 @@ func (self *Query) GetTableAliases(name string) []string {
 	return aliases
 }
 
-func (self *Query) revertAlias(mapping map[string][]string) {
+func (self *SelectQuery) revertAlias(mapping map[string][]string) {
 	fromClause := self.GetFromClause()
 	if fromClause.Type != FromClauseInnerJoin {
 		return
@@ -107,7 +108,7 @@ func (self *Query) revertAlias(mapping map[string][]string) {
 
 // Returns a mapping from the time series names (or regex) to the
 // column names that are references
-func (self *Query) GetReferencedColumns() map[*Value][]string {
+func (self *SelectQuery) GetReferencedColumns() map[*Value][]string {
 	mapping := make(map[string][]string)
 
 	notPrefixedColumns := []string{}
@@ -115,12 +116,14 @@ func (self *Query) GetReferencedColumns() map[*Value][]string {
 		notPrefixedColumns = append(notPrefixedColumns, getReferencedColumnsFromValue(value, mapping)...)
 	}
 
-	if condition := self.GetWhereCondition(); condition != nil {
-		notPrefixedColumns = append(notPrefixedColumns, getReferencedColumnsFromCondition(condition, mapping)...)
-	}
+	if !self.IsSinglePointQuery() {
+		if condition := self.GetWhereCondition(); condition != nil {
+			notPrefixedColumns = append(notPrefixedColumns, getReferencedColumnsFromCondition(condition, mapping)...)
+		}
 
-	for _, groupBy := range self.GetGroupByClause() {
-		notPrefixedColumns = append(notPrefixedColumns, getReferencedColumnsFromValue(groupBy, mapping)...)
+		for _, groupBy := range self.groupByClause.Elems {
+			notPrefixedColumns = append(notPrefixedColumns, getReferencedColumnsFromValue(groupBy, mapping)...)
+		}
 	}
 
 	notPrefixedColumns = uniq(notPrefixedColumns)
@@ -157,13 +160,13 @@ func (self *Query) GetReferencedColumns() map[*Value][]string {
 
 // Returns the start time of the query. Queries can only have
 // one condition of the form time > start_time
-func (self *Query) GetStartTime() time.Time {
+func (self *BasicQuery) GetStartTime() time.Time {
 	return self.startTime
 }
 
 // Returns the start time of the query. Queries can only have
 // one condition of the form time > start_time
-func (self *Query) GetEndTime() time.Time {
+func (self *BasicQuery) GetEndTime() time.Time {
 	return self.endTime
 }
 
@@ -316,6 +319,24 @@ func isNumericValue(value *Value) bool {
 	}
 }
 
+func (self *SelectDeleteCommonQuery) GetQueryStringWithTimeCondition() string {
+	queryString := self.GetQueryString()
+
+	if self.endTimeSet {
+		return queryString
+	}
+
+	t := common.TimeToMicroseconds(self.GetEndTime())
+	timeStr := strconv.FormatInt(t, 10)
+
+	condition := self.GetWhereCondition()
+	if condition == nil {
+		return queryString + " where time < " + timeStr + "u"
+	}
+
+	return queryString + " and time < " + timeStr + "u"
+}
+
 // parse the start time or end time from the where conditions and return the new condition
 // without the time clauses, or nil if there are no where conditions left
 func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereCondition, time.Time, error) {
@@ -325,35 +346,35 @@ func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereConditio
 
 	if expr, ok := condition.GetBoolExpression(); ok {
 		leftValue := expr.Elems[0]
-		isLeftValue := leftValue.Type != ValueExpression
+		isTimeOnLeft := leftValue.Type != ValueExpression && leftValue.Type != ValueFunctionCall
 		rightValue := expr.Elems[1]
-		isRightValue := rightValue.Type != ValueExpression
+		isTimeOnRight := rightValue.Type != ValueExpression && rightValue.Type != ValueFunctionCall
 
 		// this can only be the case if the where condition
 		// is of the form `"time" > 123456789`, so let's see
 		// which side is a float value
-		if isLeftValue && isRightValue {
+		if isTimeOnLeft && isTimeOnRight {
 			if isNumericValue(rightValue) {
-				isRightValue = false
+				isTimeOnRight = false
 			} else {
-				isLeftValue = false
+				isTimeOnLeft = false
 			}
 		}
 
 		// if this expression isn't "time > xxx" or "xxx < time" then return
 		// TODO: we should do a check to make sure "time" doesn't show up in
 		// either expressions
-		if !isLeftValue && !isRightValue {
+		if !isTimeOnLeft && !isTimeOnRight {
 			return condition, ZERO_TIME, nil
 		}
 
 		var timeExpression *Value
-		if !isRightValue {
+		if !isTimeOnRight {
 			if leftValue.Name != "time" {
 				return condition, ZERO_TIME, nil
 			}
 			timeExpression = rightValue
-		} else if !isLeftValue {
+		} else if !isTimeOnLeft {
 			if rightValue.Name != "time" {
 				return condition, ZERO_TIME, nil
 			}
@@ -364,13 +385,20 @@ func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereConditio
 
 		switch expr.Name {
 		case ">":
-			if isParsingStartTime && !isLeftValue || !isParsingStartTime && !isRightValue {
+			if isParsingStartTime && !isTimeOnLeft || !isParsingStartTime && !isTimeOnRight {
 				return condition, ZERO_TIME, nil
 			}
 		case "<":
-			if !isParsingStartTime && !isLeftValue || isParsingStartTime && !isRightValue {
+			if !isParsingStartTime && !isTimeOnLeft || isParsingStartTime && !isTimeOnRight {
 				return condition, ZERO_TIME, nil
 			}
+		case "=":
+			microseconds, err := parseTime(timeExpression)
+			nanoseconds := microseconds * 1000
+			if err != nil {
+				return nil, ZERO_TIME, err
+			}
+			return condition, time.Unix(nanoseconds/int64(time.Second), nanoseconds%int64(time.Second)).UTC(), nil
 		default:
 			return nil, ZERO_TIME, fmt.Errorf("Cannot use time with '%s'", expr.Name)
 		}

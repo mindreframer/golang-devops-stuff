@@ -15,43 +15,66 @@ import (
 	"time"
 )
 
-const ALL_GROUP_IDENTIFIER = 1
-
 type QueryEngine struct {
 	coordinator coordinator.Coordinator
 }
 
-func (self *QueryEngine) RunQuery(user common.User, database string, query string, yield func(*protocol.Series) error) (err error) {
+func (self *QueryEngine) RunQuery(user common.User, database string, queryString string, localOnly bool, yield func(*protocol.Series) error) (err error) {
 	// don't let a panic pass beyond RunQuery
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Fprintf(os.Stderr, "********************************BUG********************************\n")
-			buf := make([]byte, 1024)
-			n := runtime.Stack(buf, false)
-			fmt.Fprintf(os.Stderr, "Database: %s\n", database)
-			fmt.Fprintf(os.Stderr, "Query: [%s]\n", query)
-			fmt.Fprintf(os.Stderr, "Error: %s. Stacktrace: %s\n", err, string(buf[:n]))
-			err = common.NewQueryError(common.InternalError, "Internal Error")
-		}
-	}()
+	defer recoverFunc(database, queryString)
 
-	q, err := parser.ParseQuery(query)
+	q, err := parser.ParseQuery(queryString)
 	if err != nil {
 		return err
 	}
 
-	if isAggregateQuery(q) {
-		return self.executeCountQueryWithGroupBy(user, database, q, yield)
-	} else if containsArithmeticOperators(q) {
-		return self.executeArithmeticQuery(user, database, q, yield)
-	} else {
-		return self.distributeQuery(user, database, q, yield)
+	for _, query := range q {
+		if query.DeleteQuery != nil {
+			if err := self.coordinator.DeleteSeriesData(user, database, query.DeleteQuery, localOnly); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if query.IsListQuery() {
+			series, err := self.coordinator.ListSeries(user, database)
+			if err != nil {
+				return err
+			}
+			for _, s := range series {
+				if err := yield(s); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+
+		selectQuery := query.SelectQuery
+		if isAggregateQuery(selectQuery) {
+			return self.executeCountQueryWithGroupBy(user, database, selectQuery, localOnly, yield)
+		} else if containsArithmeticOperators(selectQuery) {
+			return self.executeArithmeticQuery(user, database, selectQuery, localOnly, yield)
+		} else {
+			return self.distributeQuery(user, database, selectQuery, localOnly, yield)
+		}
 	}
 	return nil
 }
 
+func recoverFunc(database, query string) {
+	if err := recover(); err != nil {
+		fmt.Fprintf(os.Stderr, "********************************BUG********************************\n")
+		buf := make([]byte, 1024)
+		n := runtime.Stack(buf, false)
+		fmt.Fprintf(os.Stderr, "Database: %s\n", database)
+		fmt.Fprintf(os.Stderr, "Query: [%s]\n", query)
+		fmt.Fprintf(os.Stderr, "Error: %s. Stacktrace: %s\n", err, string(buf[:n]))
+		err = common.NewQueryError(common.InternalError, "Internal Error")
+	}
+}
+
 // distribute query and possibly do the merge/join before yielding the points
-func (self *QueryEngine) distributeQuery(user common.User, database string, query *parser.Query, yield func(*protocol.Series) error) (err error) {
+func (self *QueryEngine) distributeQuery(user common.User, database string, query *parser.SelectQuery, localOnly bool, yield func(*protocol.Series) error) (err error) {
 	// see if this is a merge query
 	fromClause := query.GetFromClause()
 	if fromClause.Type == parser.FromClauseMerge {
@@ -62,14 +85,14 @@ func (self *QueryEngine) distributeQuery(user common.User, database string, quer
 		yield = getJoinYield(query, yield)
 	}
 
-	return self.coordinator.DistributeQuery(user, database, query, yield)
+	return self.coordinator.DistributeQuery(user, database, query, localOnly, yield)
 }
 
 func NewQueryEngine(c coordinator.Coordinator) (EngineI, error) {
 	return &QueryEngine{c}, nil
 }
 
-func containsArithmeticOperators(query *parser.Query) bool {
+func containsArithmeticOperators(query *parser.SelectQuery) bool {
 	for _, column := range query.GetColumnNames() {
 		if column.Type == parser.ValueExpression {
 			return true
@@ -78,7 +101,7 @@ func containsArithmeticOperators(query *parser.Query) bool {
 	return false
 }
 
-func isAggregateQuery(query *parser.Query) bool {
+func isAggregateQuery(query *parser.SelectQuery) bool {
 	for _, column := range query.GetColumnNames() {
 		if column.IsFunctionCall() {
 			return true
@@ -92,8 +115,24 @@ func getTimestampFromPoint(window time.Duration, point *protocol.Point) int64 {
 	return *point.GetTimestampInMicroseconds() / int64(multiplier) * int64(multiplier)
 }
 
-type Mapper func(*protocol.Point) interface{}
-type InverseMapper func(interface{}, int) interface{}
+// Mapper given a point returns a group identifier as the first return
+// result and a non-time dependent group (the first group without time)
+// as the second result
+type Mapper func(*protocol.Point) Group
+
+type PointRange struct {
+	startTime int64
+	endTime   int64
+}
+
+func (self *PointRange) UpdateRange(point *protocol.Point) {
+	if *point.Timestamp < self.startTime {
+		self.startTime = *point.Timestamp
+	}
+	if *point.Timestamp > self.endTime {
+		self.endTime = *point.Timestamp
+	}
+}
 
 // Returns a mapper and inverse mapper. A mapper is a function to map
 // a point to a group and return an identifier of the group that can
@@ -101,11 +140,11 @@ type InverseMapper func(interface{}, int) interface{}
 // An inverse mapper, takes a result of the mapper identifier and
 // return the column values and/or timestamp bucket that defines the
 // given group.
-func createValuesToInterface(groupBy parser.GroupByClause, fields []string) (Mapper, InverseMapper, error) {
+func createValuesToInterface(groupBy *parser.GroupByClause, fields []string) (Mapper, error) {
 	// we shouldn't get an error, this is checked earlier in the executeCountQueryWithGroupBy
 	window, _ := groupBy.GetGroupByTime()
 	names := []string{}
-	for _, value := range groupBy {
+	for _, value := range groupBy.Elems {
 		if value.IsFunctionCall() {
 			continue
 		}
@@ -116,19 +155,15 @@ func createValuesToInterface(groupBy parser.GroupByClause, fields []string) (Map
 	case 0:
 		if window != nil {
 			// this must be group by time
-			return func(p *protocol.Point) interface{} {
-					return getTimestampFromPoint(*window, p)
-				}, func(i interface{}, idx int) interface{} {
-					return i
-				}, nil
+			return func(p *protocol.Point) Group {
+				return createGroup1(true, getTimestampFromPoint(*window, p))
+			}, nil
 		}
 
 		// this must be group by time
-		return func(p *protocol.Point) interface{} {
-				return ALL_GROUP_IDENTIFIER
-			}, func(i interface{}, idx int) interface{} {
-				panic("This should never be called")
-			}, nil
+		return func(p *protocol.Point) Group {
+			return ALL_GROUP_IDENTIFIER
+		}, nil
 
 	case 1:
 		// otherwise, find the type of the column and create a mapper
@@ -141,24 +176,17 @@ func createValuesToInterface(groupBy parser.GroupByClause, fields []string) (Map
 		}
 
 		if idx == -1 {
-			return nil, nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", groupBy[0].Name))
+			return nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", groupBy.Elems[0].Name))
 		}
 
 		if window != nil {
-			return func(p *protocol.Point) interface{} {
-					return [2]interface{}{
-						getTimestampFromPoint(*window, p),
-						p.GetFieldValue(idx),
-					}
-				}, func(i interface{}, idx int) interface{} {
-					return i.([2]interface{})[idx]
-				}, nil
-		}
-		return func(p *protocol.Point) interface{} {
-				return p.GetFieldValue(idx)
-			}, func(i interface{}, idx int) interface{} {
-				return i
+			return func(p *protocol.Point) Group {
+				return createGroup2(true, getTimestampFromPoint(*window, p), p.GetFieldValue(idx))
 			}, nil
+		}
+		return func(p *protocol.Point) Group {
+			return createGroup1(false, p.GetFieldValue(idx))
+		}, nil
 
 	case 2:
 		idx1, idx2 := -1, -1
@@ -174,37 +202,26 @@ func createValuesToInterface(groupBy parser.GroupByClause, fields []string) (Map
 		}
 
 		if idx1 == -1 {
-			return nil, nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", names[0]))
+			return nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", names[0]))
 		}
 
 		if idx2 == -1 {
-			return nil, nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", names[1]))
+			return nil, common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Invalid column name %s", names[1]))
 		}
 
 		if window != nil {
-			return func(p *protocol.Point) interface{} {
-					return [3]interface{}{
-						getTimestampFromPoint(*window, p),
-						p.GetFieldValue(idx1),
-						p.GetFieldValue(idx2),
-					}
-				}, func(i interface{}, idx int) interface{} {
-					return i.([3]interface{})[idx]
-				}, nil
+			return func(p *protocol.Point) Group {
+				return createGroup3(true, getTimestampFromPoint(*window, p), p.GetFieldValue(idx1), p.GetFieldValue(idx2))
+			}, nil
 		}
 
-		return func(p *protocol.Point) interface{} {
-				return [2]interface{}{
-					p.GetFieldValue(idx1),
-					p.GetFieldValue(idx2),
-				}
-			}, func(i interface{}, idx int) interface{} {
-				return i.([2]interface{})[idx]
-			}, nil
+		return func(p *protocol.Point) Group {
+			return createGroup2(false, p.GetFieldValue(idx1), p.GetFieldValue(idx2))
+		}, nil
 
 	default:
 		// TODO: return an error instead of killing the entire process
-		return nil, nil, common.NewQueryError(common.InvalidArgument, "Group by currently support up to two columns and an optional group by time")
+		return nil, common.NewQueryError(common.InvalidArgument, "Group by currently support up to two columns and an optional group by time")
 	}
 }
 
@@ -223,31 +240,7 @@ func crossProduct(values [][][]*protocol.FieldValue) [][]*protocol.FieldValue {
 	return returnValues
 }
 
-type SortableGroups struct {
-	data       []interface{}
-	table      string
-	aggregator Aggregator
-	ascending  bool
-}
-
-func (self SortableGroups) Len() int {
-	return len(self.data)
-}
-
-func (self SortableGroups) Less(i, j int) bool {
-	iTimestamp := self.aggregator.GetValues(self.table, self.data[i])[0][0].Int64Value
-	jTimestamp := self.aggregator.GetValues(self.table, self.data[j])[0][0].Int64Value
-	if self.ascending {
-		return *iTimestamp < *jTimestamp
-	}
-	return *iTimestamp > *jTimestamp
-}
-
-func (self SortableGroups) Swap(i, j int) {
-	self.data[i], self.data[j] = self.data[j], self.data[i]
-}
-
-func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database string, query *parser.Query,
+func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database string, query *parser.SelectQuery, localOnly bool,
 	yield func(*protocol.Series) error) error {
 	duration, err := query.GetGroupByClause().GetGroupByTime()
 	if err != nil {
@@ -262,7 +255,7 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 			if initializer == nil {
 				return common.NewQueryError(common.InvalidArgument, fmt.Sprintf("Unknown function %s", value.Name))
 			}
-			aggregator, err := initializer(query, value)
+			aggregator, err := initializer(query, value, query.GetGroupByClause().FillValue)
 			if err != nil {
 				return err
 			}
@@ -274,18 +267,17 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 		return err
 	}
 
-	groups := make(map[string]map[interface{}]bool)
+	groups := make(map[string]map[Group]bool)
+	pointsRange := make(map[string]*PointRange)
 	groupBy := query.GetGroupByClause()
 
-	var inverse InverseMapper
-
-	err = self.distributeQuery(user, database, query, func(series *protocol.Series) error {
+	err = self.distributeQuery(user, database, query, localOnly, func(series *protocol.Series) error {
 		if len(series.Points) == 0 {
 			return nil
 		}
 
 		var mapper Mapper
-		mapper, inverse, err = createValuesToInterface(groupBy, series.Fields)
+		mapper, err = createValuesToInterface(groupBy, series.Fields)
 		if err != nil {
 			return err
 		}
@@ -296,6 +288,7 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 			}
 		}
 
+		currentRange := pointsRange[*series.Name]
 		for _, point := range series.Points {
 			value := mapper(point)
 			for _, aggregator := range aggregators {
@@ -308,10 +301,17 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 			timestampAggregator.AggregatePoint(*series.Name, value, point)
 			seriesGroups := groups[*series.Name]
 			if seriesGroups == nil {
-				seriesGroups = make(map[interface{}]bool)
+				seriesGroups = make(map[Group]bool)
 				groups[*series.Name] = seriesGroups
 			}
 			seriesGroups[value] = true
+
+			if currentRange == nil {
+				currentRange = &PointRange{*point.Timestamp, *point.Timestamp}
+				pointsRange[*series.Name] = currentRange
+			} else {
+				currentRange.UpdateRange(point)
+			}
 		}
 
 		return nil
@@ -328,7 +328,7 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 		fields = append(fields, columnNames...)
 	}
 
-	for _, value := range groupBy {
+	for _, value := range groupBy.Elems {
 		if value.IsFunctionCall() {
 			continue
 		}
@@ -341,17 +341,62 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 		tempTable := table
 		points := []*protocol.Point{}
 
-		// sort the table groups by timestamp
-		groups := make([]interface{}, 0, len(tableGroups))
-		for groupId, _ := range tableGroups {
-			groups = append(groups, groupId)
+		var _groups []Group
+
+		if !query.GetGroupByClause().FillWithZero || duration == nil {
+			// sort the table groups by timestamp
+			_groups = make([]Group, 0, len(tableGroups))
+			for groupId, _ := range tableGroups {
+				_groups = append(_groups, groupId)
+			}
+
+		} else {
+			groupsWithTime := map[Group]bool{}
+			timeRange, ok := pointsRange[table]
+			if ok {
+				first := timeRange.startTime * 1000 / int64(*duration) * int64(*duration)
+				end := timeRange.endTime * 1000 / int64(*duration) * int64(*duration)
+				for i := 0; ; i++ {
+					timestamp := first + int64(i)*int64(*duration)
+					if end < timestamp {
+						break
+					}
+					for group, _ := range tableGroups {
+						groupWithTime := group.WithoutTimestamp().WithTimestamp(timestamp / 1000)
+						groupsWithTime[groupWithTime] = true
+					}
+				}
+
+				for groupId, _ := range groupsWithTime {
+					_groups = append(_groups, groupId)
+				}
+			}
 		}
 
-		sortedGroups := SortableGroups{groups, table, timestampAggregator, query.Ascending}
+		fillWithZero := duration != nil && query.GetGroupByClause().FillWithZero
+		var sortedGroups SortableGroups
+		if fillWithZero {
+			if query.Ascending {
+				sortedGroups = &AscendingGroupTimestampSortableGroups{CommonSortableGroups{_groups, table}}
+			} else {
+				sortedGroups = &DescendingGroupTimestampSortableGroups{CommonSortableGroups{_groups, table}}
+			}
+		} else {
+			if query.Ascending {
+				sortedGroups = &AscendingAggregatorSortableGroups{CommonSortableGroups{_groups, table}, timestampAggregator}
+			} else {
+				sortedGroups = &DescendingAggregatorSortableGroups{CommonSortableGroups{_groups, table}, timestampAggregator}
+			}
+		}
 		sort.Sort(sortedGroups)
 
-		for _, groupId := range sortedGroups.data {
-			timestamp := *timestampAggregator.GetValues(table, groupId)[0][0].Int64Value
+		for _, groupId := range sortedGroups.GetSortedGroups() {
+			var timestamp int64
+			if groupId.HasTimestamp() {
+				timestamp = groupId.GetTimestamp()
+			} else {
+				timestamp = *timestampAggregator.GetValues(table, groupId)[0][0].Int64Value
+			}
 			values := [][][]*protocol.FieldValue{}
 
 			for _, aggregator := range aggregators {
@@ -370,12 +415,12 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 
 				// FIXME: this should be looking at the fields slice not the group by clause
 				// FIXME: we should check whether the selected columns are in the group by clause
-				for idx, _ := range groupBy {
+				for idx, _ := range groupBy.Elems {
 					if duration != nil && idx == 0 {
 						continue
 					}
 
-					value := inverse(groupId, idx)
+					value := groupId.GetValue(idx)
 
 					switch x := value.(type) {
 					case string:
@@ -405,7 +450,7 @@ func (self *QueryEngine) executeCountQueryWithGroupBy(user common.User, database
 	return nil
 }
 
-func (self *QueryEngine) executeArithmeticQuery(user common.User, database string, query *parser.Query,
+func (self *QueryEngine) executeArithmeticQuery(user common.User, database string, query *parser.SelectQuery, localOnly bool,
 	yield func(*protocol.Series) error) error {
 
 	names := map[string]*parser.Value{}
@@ -420,7 +465,7 @@ func (self *QueryEngine) executeArithmeticQuery(user common.User, database strin
 		}
 	}
 
-	return self.distributeQuery(user, database, query, func(series *protocol.Series) error {
+	return self.distributeQuery(user, database, query, localOnly, func(series *protocol.Series) error {
 		if len(series.Points) == 0 {
 			yield(series)
 			return nil

@@ -16,29 +16,47 @@ var _ = math.Inf
 type Request_Type int32
 
 const (
-	Request_QUERY              Request_Type = 1
-	Request_REPLICATION_WRITE  Request_Type = 2
-	Request_PROXY_WRITE        Request_Type = 3
-	Request_REPLICATION_DELETE Request_Type = 4
-	Request_PROXY_DELETE       Request_Type = 5
-	Request_REPLICATION_REPLAY Request_Type = 6
+	Request_QUERY                     Request_Type = 1
+	Request_REPLICATION_WRITE         Request_Type = 2
+	Request_PROXY_WRITE               Request_Type = 3
+	Request_REPLICATION_DELETE        Request_Type = 4
+	Request_PROXY_DELETE              Request_Type = 5
+	Request_REPLICATION_REPLAY        Request_Type = 6
+	Request_LIST_SERIES               Request_Type = 7
+	Request_SEQUENCE_NUMBER           Request_Type = 8
+	Request_PROXY_DROP_DATABASE       Request_Type = 9
+	Request_REPLICATION_DROP_DATABASE Request_Type = 10
+	Request_PROXY_DROP_SERIES         Request_Type = 11
+	Request_REPLICATION_DROP_SERIES   Request_Type = 12
 )
 
 var Request_Type_name = map[int32]string{
-	1: "QUERY",
-	2: "REPLICATION_WRITE",
-	3: "PROXY_WRITE",
-	4: "REPLICATION_DELETE",
-	5: "PROXY_DELETE",
-	6: "REPLICATION_REPLAY",
+	1:  "QUERY",
+	2:  "REPLICATION_WRITE",
+	3:  "PROXY_WRITE",
+	4:  "REPLICATION_DELETE",
+	5:  "PROXY_DELETE",
+	6:  "REPLICATION_REPLAY",
+	7:  "LIST_SERIES",
+	8:  "SEQUENCE_NUMBER",
+	9:  "PROXY_DROP_DATABASE",
+	10: "REPLICATION_DROP_DATABASE",
+	11: "PROXY_DROP_SERIES",
+	12: "REPLICATION_DROP_SERIES",
 }
 var Request_Type_value = map[string]int32{
-	"QUERY":              1,
-	"REPLICATION_WRITE":  2,
-	"PROXY_WRITE":        3,
-	"REPLICATION_DELETE": 4,
-	"PROXY_DELETE":       5,
-	"REPLICATION_REPLAY": 6,
+	"QUERY":                     1,
+	"REPLICATION_WRITE":         2,
+	"PROXY_WRITE":               3,
+	"REPLICATION_DELETE":        4,
+	"PROXY_DELETE":              5,
+	"REPLICATION_REPLAY":        6,
+	"LIST_SERIES":               7,
+	"SEQUENCE_NUMBER":           8,
+	"PROXY_DROP_DATABASE":       9,
+	"REPLICATION_DROP_DATABASE": 10,
+	"PROXY_DROP_SERIES":         11,
+	"REPLICATION_DROP_SERIES":   12,
 }
 
 func (x Request_Type) Enum() *Request_Type {
@@ -66,6 +84,8 @@ const (
 	Response_END_STREAM             Response_Type = 3
 	Response_REPLICATION_REPLAY     Response_Type = 4
 	Response_REPLICATION_REPLAY_END Response_Type = 5
+	Response_LIST_SERIES            Response_Type = 6
+	Response_SEQUENCE_NUMBER        Response_Type = 7
 )
 
 var Response_Type_name = map[int32]string{
@@ -74,6 +94,8 @@ var Response_Type_name = map[int32]string{
 	3: "END_STREAM",
 	4: "REPLICATION_REPLAY",
 	5: "REPLICATION_REPLAY_END",
+	6: "LIST_SERIES",
+	7: "SEQUENCE_NUMBER",
 }
 var Response_Type_value = map[string]int32{
 	"QUERY":                  1,
@@ -81,6 +103,8 @@ var Response_Type_value = map[string]int32{
 	"END_STREAM":             3,
 	"REPLICATION_REPLAY":     4,
 	"REPLICATION_REPLAY_END": 5,
+	"LIST_SERIES":            6,
+	"SEQUENCE_NUMBER":        7,
 }
 
 func (x Response_Type) Enum() *Response_Type {
@@ -104,13 +128,16 @@ type Response_ErrorCode int32
 
 const (
 	Response_REQUEST_TOO_LARGE Response_ErrorCode = 1
+	Response_INTERNAL_ERROR    Response_ErrorCode = 2
 )
 
 var Response_ErrorCode_name = map[int32]string{
 	1: "REQUEST_TOO_LARGE",
+	2: "INTERNAL_ERROR",
 }
 var Response_ErrorCode_value = map[string]int32{
 	"REQUEST_TOO_LARGE": 1,
+	"INTERNAL_ERROR":    2,
 }
 
 func (x Response_ErrorCode) Enum() *Response_ErrorCode {
@@ -234,21 +261,57 @@ func (m *Series) GetFields() []string {
 	return nil
 }
 
+type QueryResponseChunk struct {
+	Series           *Series `protobuf:"bytes,1,opt,name=series" json:"series,omitempty"`
+	Done             *bool   `protobuf:"varint,2,opt,name=done" json:"done,omitempty"`
+	XXX_unrecognized []byte  `json:"-"`
+}
+
+func (m *QueryResponseChunk) Reset()         { *m = QueryResponseChunk{} }
+func (m *QueryResponseChunk) String() string { return proto.CompactTextString(m) }
+func (*QueryResponseChunk) ProtoMessage()    {}
+
+func (m *QueryResponseChunk) GetSeries() *Series {
+	if m != nil {
+		return m.Series
+	}
+	return nil
+}
+
+func (m *QueryResponseChunk) GetDone() bool {
+	if m != nil && m.Done != nil {
+		return *m.Done
+	}
+	return false
+}
+
 type Request struct {
-	Id                      *uint32       `protobuf:"varint,1,req,name=id" json:"id,omitempty"`
-	Type                    *Request_Type `protobuf:"varint,2,req,name=type,enum=protocol.Request_Type" json:"type,omitempty"`
-	Database                *string       `protobuf:"bytes,3,req,name=database" json:"database,omitempty"`
-	Series                  *Series       `protobuf:"bytes,4,opt,name=series" json:"series,omitempty"`
-	SequenceNumber          *uint64       `protobuf:"varint,5,opt,name=sequence_number" json:"sequence_number,omitempty"`
-	OriginatingServerId     *uint32       `protobuf:"varint,6,opt,name=originating_server_id" json:"originating_server_id,omitempty"`
-	ClusterVersion          *uint32       `protobuf:"varint,10,opt,name=cluster_version" json:"cluster_version,omitempty"`
-	Query                   *string       `protobuf:"bytes,7,opt,name=query" json:"query,omitempty"`
-	UserName                *string       `protobuf:"bytes,8,opt,name=user_name" json:"user_name,omitempty"`
-	RingLocationsToQuery    *uint32       `protobuf:"varint,9,opt,name=ring_locations_to_query" json:"ring_locations_to_query,omitempty"`
-	ReplicationFactor       *uint32       `protobuf:"varint,16,opt,name=replication_factor" json:"replication_factor,omitempty"`
-	OwnerServerId           *uint32       `protobuf:"varint,17,opt,name=owner_server_id" json:"owner_server_id,omitempty"`
-	LastKnownSequenceNumber *uint64       `protobuf:"varint,18,opt,name=last_known_sequence_number" json:"last_known_sequence_number,omitempty"`
-	XXX_unrecognized        []byte        `json:"-"`
+	Id       *uint32       `protobuf:"varint,1,req,name=id" json:"id,omitempty"`
+	Type     *Request_Type `protobuf:"varint,2,req,name=type,enum=protocol.Request_Type" json:"type,omitempty"`
+	Database *string       `protobuf:"bytes,3,req,name=database" json:"database,omitempty"`
+	Series   *Series       `protobuf:"bytes,4,opt,name=series" json:"series,omitempty"`
+	// only write and delete requests get sequenceNumbers assigned. These are used to
+	// ensure that the receiving server is up to date
+	SequenceNumber *uint64 `protobuf:"varint,5,opt,name=sequence_number" json:"sequence_number,omitempty"`
+	// the originzatingServerId is only used for writes and deletes. It is the id of the
+	// server that first committed the write to its local datastore. It is used for
+	// the other servers in the hash ring to ensure they remain consistent.
+	OriginatingServerId *uint32 `protobuf:"varint,6,opt,name=originating_server_id" json:"originating_server_id,omitempty"`
+	ClusterVersion      *uint32 `protobuf:"varint,10,opt,name=cluster_version" json:"cluster_version,omitempty"`
+	Query               *string `protobuf:"bytes,7,opt,name=query" json:"query,omitempty"`
+	UserName            *string `protobuf:"bytes,8,opt,name=user_name" json:"user_name,omitempty"`
+	// ringLocationsToQuery tells the server what data it should be returning.
+	// for example, if the number is 1, it will only return data that is owned by
+	// this server on the hash ring. If 2, it will return this server and data replicated
+	// from the server directly before it on the ring. 3, etc.
+	// If this field is left out, we assume that we'll be returning all data the server has
+	// for the query.
+	RingLocationsToQuery *uint32 `protobuf:"varint,9,opt,name=ring_locations_to_query" json:"ring_locations_to_query,omitempty"`
+	// optional fields for replication replay requests. should include originating serer id
+	ReplicationFactor       *uint32 `protobuf:"varint,16,opt,name=replication_factor" json:"replication_factor,omitempty"`
+	OwnerServerId           *uint32 `protobuf:"varint,17,opt,name=owner_server_id" json:"owner_server_id,omitempty"`
+	LastKnownSequenceNumber *uint64 `protobuf:"varint,18,opt,name=last_known_sequence_number" json:"last_known_sequence_number,omitempty"`
+	XXX_unrecognized        []byte  `json:"-"`
 }
 
 func (m *Request) Reset()         { *m = Request{} }

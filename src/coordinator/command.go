@@ -1,8 +1,26 @@
 package coordinator
 
 import (
+	log "code.google.com/p/log4go"
 	"github.com/goraft/raft"
 )
+
+var internalRaftCommands map[string]raft.Command
+
+func init() {
+	internalRaftCommands = map[string]raft.Command{}
+	for _, command := range []raft.Command{
+		&AddPotentialServerCommand{},
+		&UpdateServerStateCommand{},
+		&CreateDatabaseCommand{},
+		&DropDatabaseCommand{},
+		&SaveDbUserCommand{},
+		&SaveClusterAdminCommand{},
+		&ChangeDbUserPassword{},
+	} {
+		internalRaftCommands[command.CommandName()] = command
+	}
+}
 
 type DropDatabaseCommand struct {
 	Name string `json:"name"`
@@ -58,7 +76,32 @@ func (c *SaveDbUserCommand) CommandName() string {
 func (c *SaveDbUserCommand) Apply(server raft.Server) (interface{}, error) {
 	config := server.Context().(*ClusterConfiguration)
 	config.SaveDbUser(c.User)
+	log.Debug("(raft:%s) Created user %s:%s", server.Name(), c.User.Db, c.User.Name)
 	return nil, nil
+}
+
+type ChangeDbUserPassword struct {
+	Database string
+	Username string
+	Hash     string
+}
+
+func NewChangeDbUserPasswordCommand(db, username, hash string) *ChangeDbUserPassword {
+	return &ChangeDbUserPassword{
+		Database: db,
+		Username: username,
+		Hash:     hash,
+	}
+}
+
+func (c *ChangeDbUserPassword) CommandName() string {
+	return "change_db_user_password"
+}
+
+func (c *ChangeDbUserPassword) Apply(server raft.Server) (interface{}, error) {
+	log.Debug("(raft:%s) changing db user password for %s:%s", server.Name(), c.Database, c.Username)
+	config := server.Context().(*ClusterConfiguration)
+	return nil, config.ChangeDbUserPassword(c.Database, c.Username, c.Hash)
 }
 
 type SaveClusterAdminCommand struct {

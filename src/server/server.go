@@ -3,12 +3,11 @@ package server
 import (
 	"admin"
 	"api/http"
+	log "code.google.com/p/log4go"
 	"configuration"
 	"coordinator"
 	"datastore"
 	"engine"
-	"log"
-	"time"
 )
 
 type Server struct {
@@ -25,13 +24,13 @@ type Server struct {
 }
 
 func NewServer(config *configuration.Configuration) (*Server, error) {
-	log.Println("Opening database at ", config.DataDir)
+	log.Info("Opening database at %s", config.DataDir)
 	db, err := datastore.NewLevelDbDatastore(config.DataDir)
 	if err != nil {
 		return nil, err
 	}
 
-	clusterConfig := coordinator.NewClusterConfiguration()
+	clusterConfig := coordinator.NewClusterConfiguration(config)
 	raftServer := coordinator.NewRaftServer(config, clusterConfig)
 	coord := coordinator.NewCoordinatorImpl(db, raftServer, clusterConfig)
 	requestHandler := coordinator.NewProtobufRequestHandler(db, coord, clusterConfig)
@@ -60,19 +59,18 @@ func NewServer(config *configuration.Configuration) (*Server, error) {
 func (self *Server) ListenAndServe() error {
 	go self.ProtobufServer.ListenAndServe()
 
-	retryUntilJoinedCluster := false
-	if len(self.Config.SeedServers) > 0 {
-		retryUntilJoinedCluster = true
-	}
-	go self.RaftServer.ListenAndServe(self.Config.SeedServers, retryUntilJoinedCluster)
-	time.Sleep(time.Second * 3)
-	err := self.Coordinator.(*coordinator.CoordinatorImpl).ConnectToProtobufServers(self.Config.ProtobufConnectionString())
+	err := self.RaftServer.ListenAndServe()
 	if err != nil {
 		return err
 	}
-	log.Println("Starting admin interface on port", self.Config.AdminHttpPort)
+
+	err = self.Coordinator.(*coordinator.CoordinatorImpl).ConnectToProtobufServers(self.Config.ProtobufConnectionString())
+	if err != nil {
+		return err
+	}
+	log.Info("Starting admin interface on port %d", self.Config.AdminHttpPort)
 	go self.AdminServer.ListenAndServe()
-	log.Println("Starting Http Api server on port", self.Config.ApiHttpPort)
+	log.Info("Starting Http Api server on port %d", self.Config.ApiHttpPort)
 	self.HttpApi.ListenAndServe()
 	return nil
 }
@@ -86,5 +84,7 @@ func (self *Server) Stop() {
 	self.Db.Close()
 	self.HttpApi.Close()
 	self.ProtobufServer.Close()
+	self.AdminServer.Close()
 	// TODO: close admin server and protobuf client connections
+	log.Info("Stopping server")
 }

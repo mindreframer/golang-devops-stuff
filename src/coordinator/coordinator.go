@@ -9,18 +9,20 @@ import (
 	"math"
 	"parser"
 	"protocol"
+	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type CoordinatorImpl struct {
 	clusterConfiguration *ClusterConfiguration
 	raftServer           ClusterConsensus
 	datastore            datastore.Datastore
-	localHostId          uint32
 	requestId            uint32
 	runningReplays       map[string][]*protocol.Request
 	runningReplaysLock   sync.Mutex
+	writeLock            sync.Mutex
 }
 
 // this is the key used for the persistent atomic ints for sequence numbers
@@ -37,36 +39,48 @@ var (
 
 // shorter constants for readability
 var (
-	proxyWrite        = protocol.Request_PROXY_WRITE
-	queryRequest      = protocol.Request_QUERY
-	endStreamResponse = protocol.Response_END_STREAM
-	queryResponse     = protocol.Response_QUERY
-	replayReplication = protocol.Request_REPLICATION_REPLAY
+	proxyWrite            = protocol.Request_PROXY_WRITE
+	proxyDelete           = protocol.Request_PROXY_DELETE
+	proxyDropDatabase     = protocol.Request_PROXY_DROP_DATABASE
+	replicateDropDatabase = protocol.Request_REPLICATION_DROP_DATABASE
+	proxyDropSeries       = protocol.Request_PROXY_DROP_SERIES
+	replicateDropSeries   = protocol.Request_REPLICATION_DROP_SERIES
+	queryRequest          = protocol.Request_QUERY
+	listSeriesRequest     = protocol.Request_LIST_SERIES
+	listSeriesResponse    = protocol.Response_LIST_SERIES
+	endStreamResponse     = protocol.Response_END_STREAM
+	queryResponse         = protocol.Response_QUERY
+	replayReplication     = protocol.Request_REPLICATION_REPLAY
+	sequenceNumber        = protocol.Request_SEQUENCE_NUMBER
 )
 
 func NewCoordinatorImpl(datastore datastore.Datastore, raftServer ClusterConsensus, clusterConfiguration *ClusterConfiguration) *CoordinatorImpl {
-	return &CoordinatorImpl{
+	coordinator := &CoordinatorImpl{
 		clusterConfiguration: clusterConfiguration,
 		raftServer:           raftServer,
 		datastore:            datastore,
 		runningReplays:       make(map[string][]*protocol.Request),
 	}
+
+	go coordinator.SyncLogs()
+
+	return coordinator
 }
 
 // Distributes the query across the cluster and combines the results. Yields as they come in ensuring proper order.
 // TODO: make this work even if there is a downed server in the cluster
-func (self *CoordinatorImpl) DistributeQuery(user common.User, db string, query *parser.Query, yield func(*protocol.Series) error) error {
-	if self.clusterConfiguration.IsSingleServer() {
+func (self *CoordinatorImpl) DistributeQuery(user common.User, db string, query *parser.SelectQuery, localOnly bool, yield func(*protocol.Series) error) error {
+	if self.clusterConfiguration.IsSingleServer() || localOnly {
 		return self.datastore.ExecuteQuery(user, db, query, yield, nil)
 	}
-	servers, replicationFactor := self.clusterConfiguration.GetServersToMakeQueryTo(self.localHostId, &db)
+	servers, replicationFactor := self.clusterConfiguration.GetServersToMakeQueryTo(&db)
 	queryString := query.GetQueryString()
 	id := atomic.AddUint32(&self.requestId, uint32(1))
 	userName := user.GetName()
 	responseChannels := make([]chan *protocol.Response, 0, len(servers)+1)
 	var localServerToQuery *serverToQuery
 	for _, server := range servers {
-		if server.server.Id == self.localHostId {
+		if server.server.Id == self.clusterConfiguration.localServerId {
 			localServerToQuery = server
 		} else {
 			request := &protocol.Request{Type: &queryRequest, Query: &queryString, Id: &id, Database: &db, UserName: &userName}
@@ -75,42 +89,18 @@ func (self *CoordinatorImpl) DistributeQuery(user common.User, db string, query 
 				request.RingLocationsToQuery = &r
 			}
 			responseChan := make(chan *protocol.Response, 3)
-			server.server.protobufClient.MakeRequest(request, responseChan)
+			server.server.MakeRequest(request, responseChan)
 			responseChannels = append(responseChannels, responseChan)
 		}
 	}
 
 	local := make(chan *protocol.Response)
-	var nextPoint *protocol.Point
-	chanClosed := false
+	nextPointMap := make(map[string]*protocol.Point)
+
+	// TODO: this style of wrapping the series in response objects with the
+	//       last point time is duplicated in the request handler. Refactor...
 	sendFromLocal := func(series *protocol.Series) error {
-		pointCount := len(series.Points)
-		if pointCount == 0 {
-			if nextPoint != nil {
-				series.Points = append(series.Points, nextPoint)
-			}
-
-			if !chanClosed {
-				local <- &protocol.Response{Type: &endStreamResponse, Series: series}
-				chanClosed = true
-				close(local)
-			}
-			return nil
-		}
-		oldNextPoint := nextPoint
-		nextPoint = series.Points[pointCount-1]
-		series.Points[pointCount-1] = nil
-		if oldNextPoint != nil {
-			copy(series.Points[1:], series.Points[0:])
-			series.Points[0] = oldNextPoint
-		} else {
-			series.Points = series.Points[:len(series.Points)-1]
-		}
-
-		response := &protocol.Response{Series: series, Type: &queryResponse}
-		if nextPoint != nil {
-			response.NextPointTime = nextPoint.Timestamp
-		}
+		response := createResponse(nextPointMap, series, nil)
 		local <- response
 		return nil
 	}
@@ -125,6 +115,8 @@ func (self *CoordinatorImpl) DistributeQuery(user common.User, db string, query 
 			ringFilter = self.clusterConfiguration.GetRingFilterFunction(db, localServerToQuery.ringLocationsToQuery)
 		}
 		self.datastore.ExecuteQuery(user, db, query, sendFromLocal, ringFilter)
+		local <- &protocol.Response{Type: &endStreamResponse}
+		close(local)
 	}()
 	self.streamResultsFromChannels(isSingleSeriesQuery, query.Ascending, responseChannels, yield)
 	return nil
@@ -141,16 +133,25 @@ func (self *CoordinatorImpl) streamResultsFromChannels(isSingleSeriesQuery, isAs
 	for closedChannels < channelCount {
 		for _, ch := range channels {
 			response := <-ch
-			if response != nil {
-				if *response.Type == protocol.Response_END_STREAM {
-					closedChannels++
-				}
-				seriesNames[*response.Series.Name] = true
-				if response.Series.Points != nil {
-					responses = append(responses, response)
-				}
+			if response == nil {
+				continue
+			}
+
+			if *response.Type == protocol.Response_END_STREAM {
+				closedChannels++
+				continue
+			}
+
+			seriesNames[*response.Series.Name] = true
+			if response.Series.Points != nil {
+				responses = append(responses, response)
 			}
 		}
+
+		if len(responses) == 0 {
+			continue
+		}
+
 		leftovers = self.yieldResults(isSingleSeriesQuery, isAscending, leftovers, responses, yield)
 		responses = make([]*protocol.Response, 0)
 	}
@@ -211,11 +212,30 @@ func (self *CoordinatorImpl) yieldResults(isSingleSeriesQuery, isAscending bool,
 	return leftoverResults
 }
 
+// TODO: refactor this for clarity. This got super ugly...
 // Function yields all results that are safe to do so ensuring order. Returns all results that must wait for more from the servers.
 func (self *CoordinatorImpl) yieldResultsForSeries(isAscending bool, leftover *protocol.Series, responses []*protocol.Response, yield func(*protocol.Series) error) *protocol.Series {
-	result := &protocol.Series{Name: responses[0].Series.Name, Points: make([]*protocol.Point, 0)}
+	// results can come from different servers. Some of which won't know about fields that other servers may know about.
+	// We need to normalize all this so that all fields are represented and the other field values are null.
+	// Give each unique field name an index. We'll use this map later to construct the results and make sure that
+	// the response objects have their fields in the result.
+	fieldIndexes := make(map[string]int)
+	for _, response := range responses {
+		for _, name := range response.Series.Fields {
+			if _, hasField := fieldIndexes[name]; !hasField {
+				fieldIndexes[name] = len(fieldIndexes)
+			}
+		}
+	}
+	fields := make([]string, len(fieldIndexes), len(fieldIndexes))
+	for name, index := range fieldIndexes {
+		fields[index] = name
+	}
+	fieldCount := len(fields)
+
+	result := &protocol.Series{Name: responses[0].Series.Name, Fields: fields, Points: make([]*protocol.Point, 0)}
 	if leftover == nil {
-		leftover = &protocol.Series{Name: responses[0].Series.Name, Points: make([]*protocol.Point, 0)}
+		leftover = &protocol.Series{Name: responses[0].Series.Name, Fields: fields, Points: make([]*protocol.Point, 0)}
 	}
 
 	barrierTime := BARRIER_TIME_MIN
@@ -262,26 +282,64 @@ func (self *CoordinatorImpl) yieldResultsForSeries(isAscending bool, leftover *p
 	if barrierTime == BARRIER_TIME_MIN || barrierTime == BARRIER_TIME_MAX {
 		// all the nextPointTimes were nil so we're safe to send everything
 		for _, response := range responses {
-			result.Points = append(result.Points, response.Series.Points...)
+			// if this is the case we know that all responses contained the same
+			// fields. So just append the points
+			if len(response.Series.Fields) == fieldCount {
+				result.Points = append(result.Points, response.Series.Points...)
+			} else {
+				log.Debug("Responses from servers had different numbers of fields.")
+				for _, p := range response.Series.Points {
+					self.normalizePointAndAppend(fieldIndexes, result, response.Series.Fields, p)
+				}
+			}
+		}
+		if len(leftover.Fields) == fieldCount {
 			result.Points = append(result.Points, leftover.Points...)
 			leftover.Points = []*protocol.Point{}
+		} else {
+			log.Debug("Responses from servers had different numbers of fields.")
+			for _, p := range leftover.Points {
+				self.normalizePointAndAppend(fieldIndexes, result, leftover.Fields, p)
+			}
 		}
 	} else {
 		for _, response := range responses {
 			if shouldYieldComparator(response.NextPointTime) {
 				// all points safe to yield
-				result.Points = append(result.Points, response.Series.Points...)
+				if fieldCount == len(response.Series.Fields) {
+					result.Points = append(result.Points, response.Series.Points...)
+				} else {
+					log.Debug("Responses from servers had different numbers of fields.")
+					for _, p := range response.Series.Points {
+						self.normalizePointAndAppend(fieldIndexes, result, response.Series.Fields, p)
+					}
+				}
 				continue
 			}
 
-			for i, point := range response.Series.Points {
-				if shouldYieldComparator(point.Timestamp) {
-					result.Points = append(result.Points, point)
-				} else {
-					// since they're returned in order, we can just append these to
-					// the leftover and break out.
-					leftover.Points = append(leftover.Points, response.Series.Points[i:]...)
-					break
+			if fieldCount == len(response.Series.Fields) {
+				for i, point := range response.Series.Points {
+					if shouldYieldComparator(point.Timestamp) {
+						result.Points = append(result.Points, point)
+					} else {
+						// since they're returned in order, we can just append these to
+						// the leftover and break out.
+						leftover.Points = append(leftover.Points, response.Series.Points[i:]...)
+						break
+					}
+				}
+			} else {
+				for i, point := range response.Series.Points {
+					if shouldYieldComparator(point.Timestamp) {
+						self.normalizePointAndAppend(fieldIndexes, result, response.Series.Fields, point)
+					} else {
+						// since they're returned in order, we can just append these to
+						// the leftover and break out.
+						for _, point := range response.Series.Points[i:] {
+							self.normalizePointAndAppend(fieldIndexes, leftover, response.Series.Fields, point)
+						}
+						break
+					}
 				}
 			}
 		}
@@ -306,16 +364,165 @@ func (self *CoordinatorImpl) yieldResultsForSeries(isAscending bool, leftover *p
 	return nil
 }
 
+func (self *CoordinatorImpl) normalizePointAndAppend(fieldNames map[string]int, result *protocol.Series, fields []string, point *protocol.Point) {
+	oldValues := point.Values
+	point.Values = make([]*protocol.FieldValue, len(fieldNames), len(fieldNames))
+	for index, field := range fields {
+		indexForField, ok := fieldNames[field]
+
+		// drop this point on the floor if the unexpected happens
+		if !ok {
+			log.Error("Couldn't lookup field: ", field, fields, fieldNames)
+			return
+		}
+		point.Values[indexForField] = oldValues[index]
+	}
+	result.Points = append(result.Points, point)
+}
+
+func (self *CoordinatorImpl) SyncLogs() {
+	for {
+		self.SyncLogIteration()
+		time.Sleep(time.Second)
+	}
+}
+
+func (self *CoordinatorImpl) SyncLogIteration() {
+	defer func() {
+		if err := recover(); err != nil {
+			buf := make([]byte, 1024)
+			n := runtime.Stack(buf, false)
+			log.Error("recovering from panic in SyncLogIteration: %s. Stacktrace: %s", err, string(buf[:n]))
+		}
+	}()
+
+	servers := self.clusterConfiguration.Servers()
+
+	replicationFactors := map[uint8]bool{}
+	for _, replicationFactor := range self.clusterConfiguration.databaseReplicationFactors {
+		replicationFactors[replicationFactor] = true
+	}
+
+	localId := self.clusterConfiguration.localServerId
+
+	for replicationFactor, _ := range replicationFactors {
+		for _, owningServer := range servers {
+		outer:
+			for _, originatingServer := range servers {
+				if originatingServer.Id == localId {
+					continue
+				}
+
+				var lastKnownSequenceNumber, currentSequenceNumber uint64
+				var err error
+
+				for i := 0; i < 2; i++ {
+					if i == 0 {
+						lastKnownSequenceNumber, currentSequenceNumber, err = self.getLastAndCurrentSequenceNumbers(replicationFactor, originatingServer, owningServer)
+					} else {
+						lastKnownSequenceNumber, err = self.GetLastSequenceNumber(replicationFactor, originatingServer.Id, owningServer.Id)
+					}
+
+					if err != nil {
+						log.Error("Cannot get sequence numbers: %s", err)
+						continue
+					}
+
+					if lastKnownSequenceNumber >= currentSequenceNumber {
+						log.Debug("[%d] Sequence numbers are in sync for originating server %d and owner server %d and replication factor %d [%d %d]",
+							localId, originatingServer.Id, owningServer.Id, replicationFactor, lastKnownSequenceNumber, currentSequenceNumber)
+						continue outer
+					}
+
+					log.Info("[%d] Sequence numbers are out of sync for originating server %d and owner server %d and replication factor %d [%d %d]",
+						localId, originatingServer.Id, owningServer.Id, replicationFactor, lastKnownSequenceNumber, currentSequenceNumber)
+
+					// if the sequence numbers are out of sync the first time,
+					// wait a second in case there are requests comming in that
+					// will increase the last known sequence number
+					if i == 0 {
+						time.Sleep(time.Second)
+					}
+				}
+
+				log.Info("[%d] Syncing log for originating server %d and owner server %d and replication factor %d starting at %d",
+					localId, originatingServer.Id, owningServer.Id, replicationFactor, lastKnownSequenceNumber)
+
+				request := &protocol.Request{
+					OriginatingServerId: &originatingServer.Id,
+					ClusterVersion:      &self.clusterConfiguration.ClusterVersion,
+				}
+				self.ReplayReplication(request, &replicationFactor, &owningServer.Id, &lastKnownSequenceNumber)
+			}
+		}
+	}
+}
+
+func (self *CoordinatorImpl) getLastAndCurrentSequenceNumbers(replicationFactor uint8, originatingServer, owningServer *ClusterServer) (uint64, uint64, error) {
+	lastKnownSequenceNumber, err := self.GetLastSequenceNumber(replicationFactor, originatingServer.Id, owningServer.Id)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	currentSequenceNumber, err := self.getCurrentSequenceNumber(replicationFactor, originatingServer, owningServer)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	return lastKnownSequenceNumber, currentSequenceNumber, nil
+}
+
+func (self *CoordinatorImpl) GetLastSequenceNumber(replicationFactor uint8, originatingServer, owningServer uint32) (uint64, error) {
+	return self.datastore.CurrentSequenceNumber(&self.clusterConfiguration.ClusterVersion,
+		&replicationFactor, &owningServer, &originatingServer)
+}
+
+func (self *CoordinatorImpl) getCurrentSequenceNumber(replicationFactor uint8, originatingServer, owningServer *ClusterServer) (uint64, error) {
+	id := atomic.AddUint32(&self.requestId, uint32(1))
+	replicationFactor32 := uint32(replicationFactor)
+	database := ""
+	replayRequest := &protocol.Request{
+		Id:                  &id,
+		Type:                &sequenceNumber,
+		Database:            &database,
+		ReplicationFactor:   &replicationFactor32,
+		OriginatingServerId: &originatingServer.Id,
+		OwnerServerId:       &owningServer.Id,
+		ClusterVersion:      &self.clusterConfiguration.ClusterVersion,
+	}
+	responses := make(chan *protocol.Response)
+	err := originatingServer.MakeRequest(replayRequest, responses)
+	if err != nil {
+		return 0, err
+	}
+	response := <-responses
+	if response == nil {
+		return 0, fmt.Errorf("Get a nil response back")
+	}
+	if response.ErrorCode != nil {
+		return 0, fmt.Errorf("Internal server error")
+	}
+	return *response.Request.LastKnownSequenceNumber, nil
+}
+
 func (self *CoordinatorImpl) ReplayReplication(request *protocol.Request, replicationFactor *uint8, owningServerId *uint32, lastSeenSequenceNumber *uint64) {
+	log.Warn("COORDINATOR: ReplayReplication: LS: %d, RF: %d, OS: %d", *lastSeenSequenceNumber, *replicationFactor, *owningServerId)
 	key := fmt.Sprintf("%d_%d_%d_%d", *replicationFactor, *request.ClusterVersion, *request.OriginatingServerId, *owningServerId)
 	self.runningReplaysLock.Lock()
 	requestsWaitingToWrite := self.runningReplays[key]
 	if requestsWaitingToWrite != nil {
+		// request will be nil if this is a forced replay
+		if request.Type == nil {
+			return
+		}
 		self.runningReplays[key] = append(requestsWaitingToWrite, request)
 		self.runningReplaysLock.Unlock()
 		return
 	}
-	self.runningReplays[key] = []*protocol.Request{request}
+	self.runningReplays[key] = []*protocol.Request{}
+	if request.Type != nil {
+		self.runningReplays[key] = append(self.runningReplays[key], request)
+	}
 	self.runningReplaysLock.Unlock()
 
 	id := atomic.AddUint32(&self.requestId, uint32(1))
@@ -332,10 +539,9 @@ func (self *CoordinatorImpl) ReplayReplication(request *protocol.Request, replic
 		LastKnownSequenceNumber: lastSeenSequenceNumber}
 	replayedRequests := make(chan *protocol.Response, 100)
 	server := self.clusterConfiguration.GetServerById(request.OriginatingServerId)
-	log.Error("COORD REPLAY: ", request, server, self.localHostId)
-	err := server.protobufClient.MakeRequest(replayRequest, replayedRequests)
+	err := server.MakeRequest(replayRequest, replayedRequests)
 	if err != nil {
-		log.Error("COORD REPLAY ERROR: ", err)
+		log.Error("REPLAY ERROR: ", err)
 		return
 	}
 	for {
@@ -344,24 +550,29 @@ func (self *CoordinatorImpl) ReplayReplication(request *protocol.Request, replic
 			self.runningReplaysLock.Lock()
 			defer self.runningReplaysLock.Unlock()
 			for _, r := range self.runningReplays[key] {
-				err := self.datastore.LogRequestAndAssignSequenceNumber(r, replicationFactor, owningServerId)
-				if err != nil {
-					log.Error("Error writing waiting requests after replay: ", err)
-				}
-				self.datastore.WriteSeriesData(*r.Database, r.Series)
+				self.handleReplayRequest(r, replicationFactor, owningServerId)
 			}
 			delete(self.runningReplays, key)
 			log.Info("Replay done for originating server %d and owner server %d", *request.OriginatingServerId, *owningServerId)
 			return
 		}
 		request := response.Request
-		// TODO: make request logging and datastore write atomic
-		err := self.datastore.LogRequestAndAssignSequenceNumber(request, replicationFactor, owningServerId)
-		if err != nil {
-			log.Error("ERROR writing replay: ", err)
-		} else {
-			self.datastore.WriteSeriesData(*request.Database, request.Series)
-		}
+		log.Debug("Replaying %v", request)
+		self.handleReplayRequest(request, replicationFactor, owningServerId)
+	}
+}
+
+func (self *CoordinatorImpl) handleReplayRequest(r *protocol.Request, replicationFactor *uint8, owningServerId *uint32) {
+	err := self.datastore.LogRequestAndAssignSequenceNumber(r, replicationFactor, owningServerId)
+	if err != nil {
+		log.Error("Error writing waiting requests after replay: %s", err)
+	}
+	if *r.Type == protocol.Request_PROXY_WRITE || *r.Type == protocol.Request_REPLICATION_WRITE {
+		log.Debug("Replaying write request")
+		self.datastore.WriteSeriesData(*r.Database, r.Series)
+	} else if *r.Type == protocol.Request_PROXY_DELETE || *r.Type == protocol.Request_REPLICATION_DELETE {
+		query, _ := parser.ParseQuery(*r.Query)
+		err = self.datastore.DeleteSeriesData(*r.Database, query[0].DeleteQuery)
 	}
 }
 
@@ -435,23 +646,157 @@ func (self *CoordinatorImpl) WriteSeriesData(user common.User, db string, series
 	return nil
 }
 
+func (self *CoordinatorImpl) DeleteSeriesData(user common.User, db string, query *parser.DeleteQuery, localOnly bool) error {
+	if !user.IsDbAdmin(db) {
+		return common.NewAuthorizationError("Insufficient permission to write to %s", db)
+	}
+
+	if self.clusterConfiguration.IsSingleServer() || localOnly {
+		return self.deleteSeriesDataLocally(user, db, query)
+	}
+
+	servers, _ := self.clusterConfiguration.GetServersToMakeQueryTo(&db)
+	for _, server := range servers {
+		if err := self.handleSeriesDelete(user, server.server, db, query); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (self *CoordinatorImpl) deleteSeriesDataLocally(user common.User, database string, query *parser.DeleteQuery) error {
+	return self.datastore.DeleteSeriesData(database, query)
+}
+
+func (self *CoordinatorImpl) createRequest(requestType protocol.Request_Type, database *string) *protocol.Request {
+	id := atomic.AddUint32(&self.requestId, uint32(1))
+	return &protocol.Request{Type: &requestType, Database: database, Id: &id}
+}
+
+func (self *CoordinatorImpl) handleSeriesDelete(user common.User, server *ClusterServer, database string, query *parser.DeleteQuery) error {
+	owner, servers := self.clusterConfiguration.GetReplicas(server, &database)
+
+	request := self.createRequest(proxyDelete, &database)
+	queryStr := query.GetQueryStringWithTimeCondition()
+	request.Query = &queryStr
+	request.OriginatingServerId = &self.clusterConfiguration.localServerId
+	request.ClusterVersion = &self.clusterConfiguration.ClusterVersion
+	request.OwnerServerId = &owner.Id
+
+	if server.Id == self.clusterConfiguration.localServerId {
+		// this is a local delete
+		replicationFactor := self.clusterConfiguration.GetReplicationFactor(&database)
+		err := self.datastore.LogRequestAndAssignSequenceNumber(request, &replicationFactor, &owner.Id)
+		if err != nil {
+			return self.proxyUntilSuccess(servers, request)
+		}
+		self.deleteSeriesDataLocally(user, database, query)
+		if err != nil {
+			log.Error("Couldn't write data to local store: ", err, request)
+		}
+
+		// ignoring the error because we still want to send to replicas
+		request.Type = &replicateDelete
+		self.sendRequestToReplicas(request, servers)
+		return nil
+	}
+
+	// otherwise, proxy the delete
+	return self.proxyUntilSuccess(servers, request)
+}
+
+func (self *CoordinatorImpl) handleDropDatabase(server *ClusterServer, database string) error {
+	owner, servers := self.clusterConfiguration.GetReplicas(server, &database)
+
+	request := self.createRequest(proxyDropDatabase, &database)
+	request.OriginatingServerId = &self.clusterConfiguration.localServerId
+	request.ClusterVersion = &self.clusterConfiguration.ClusterVersion
+	request.OwnerServerId = &owner.Id
+	replicationFactor := uint32(self.clusterConfiguration.GetDatabaseReplicationFactor(database))
+	request.ReplicationFactor = &replicationFactor
+
+	if server.Id == self.clusterConfiguration.localServerId {
+		// this is a local delete
+		replicationFactor := self.clusterConfiguration.GetReplicationFactor(&database)
+		err := self.datastore.LogRequestAndAssignSequenceNumber(request, &replicationFactor, &owner.Id)
+		if err != nil {
+			return self.proxyUntilSuccess(servers, request)
+		}
+		self.datastore.DropDatabase(database)
+		if err != nil {
+			log.Error("Couldn't write data to local store: ", err, request)
+		}
+
+		// ignoring the error because we still want to send to replicas
+		request.Type = &replicateDropDatabase
+		self.sendRequestToReplicas(request, servers)
+		return nil
+	}
+
+	// otherwise, proxy the request
+	return self.proxyUntilSuccess(servers, request)
+}
+
+func (self *CoordinatorImpl) handleDropSeries(server *ClusterServer, database, series string) error {
+	owner, servers := self.clusterConfiguration.GetReplicas(server, &database)
+
+	request := self.createRequest(proxyDropSeries, &database)
+	request.OriginatingServerId = &self.clusterConfiguration.localServerId
+	request.ClusterVersion = &self.clusterConfiguration.ClusterVersion
+	request.OwnerServerId = &owner.Id
+	request.Series = &protocol.Series{Name: &series}
+	replicationFactor := uint32(self.clusterConfiguration.GetDatabaseReplicationFactor(database))
+	request.ReplicationFactor = &replicationFactor
+
+	if server.Id == self.clusterConfiguration.localServerId {
+		// this is a local delete
+		replicationFactor := self.clusterConfiguration.GetReplicationFactor(&database)
+		err := self.datastore.LogRequestAndAssignSequenceNumber(request, &replicationFactor, &owner.Id)
+		if err != nil {
+			return self.proxyUntilSuccess(servers, request)
+		}
+		self.datastore.DropSeries(database, series)
+		if err != nil {
+			log.Error("Couldn't write data to local store: ", err, request)
+		}
+
+		// ignoring the error because we still want to send to replicas
+		request.Type = &replicateDropSeries
+		self.sendRequestToReplicas(request, servers)
+		return nil
+	}
+
+	// otherwise, proxy the request
+	return self.proxyUntilSuccess(servers, request)
+}
+
 func (self *CoordinatorImpl) writeSeriesToLocalStore(db *string, series *protocol.Series) error {
 	return self.datastore.WriteSeriesData(*db, series)
 }
 
 func (self *CoordinatorImpl) handleClusterWrite(serverIndex *int, db *string, series *protocol.Series) error {
+	// TODO: Figure out how to not need this lock. Shouldn't have to lock to send on a connection. However,
+	// when the server is under load, replication requests can get out of order, which triggers a replay.
+	// Maybe we need a special channel for replication?
+	self.writeLock.Lock()
+	defer self.writeLock.Unlock()
+
 	owner, servers := self.clusterConfiguration.GetServersByIndexAndReplicationFactor(db, serverIndex)
+
+	request := self.createRequest(proxyWrite, db)
+	request.Series = series
+	request.OriginatingServerId = &self.clusterConfiguration.localServerId
+	request.ClusterVersion = &self.clusterConfiguration.ClusterVersion
+	request.OwnerServerId = &owner.Id
+
 	for _, s := range servers {
-		if s.Id == self.localHostId {
+		if s.Id == self.clusterConfiguration.localServerId {
 			// TODO: make storing of the data and logging of the request atomic
-			id := atomic.AddUint32(&self.requestId, uint32(1))
-			request := &protocol.Request{Type: &proxyWrite, Database: db, Series: series, Id: &id}
-			request.OriginatingServerId = &self.localHostId
-			request.ClusterVersion = &self.clusterConfiguration.ClusterVersion
 			replicationFactor := self.clusterConfiguration.GetReplicationFactor(db)
 			err := self.datastore.LogRequestAndAssignSequenceNumber(request, &replicationFactor, &owner.Id)
 			if err != nil {
-				return self.proxyUntilSuccess(servers, db, series)
+				return self.proxyUntilSuccess(servers, request)
 			}
 
 			// ignoring the error for writing to the local store because we still want to send to replicas
@@ -459,6 +804,7 @@ func (self *CoordinatorImpl) handleClusterWrite(serverIndex *int, db *string, se
 			if err != nil {
 				log.Error("Couldn't write data to local store: ", err, request)
 			}
+			request.Type = &replicateWrite
 			self.sendRequestToReplicas(request, servers)
 
 			return nil
@@ -466,15 +812,15 @@ func (self *CoordinatorImpl) handleClusterWrite(serverIndex *int, db *string, se
 	}
 
 	// it didn't live locally so proxy it
-	return self.proxyUntilSuccess(servers, db, series)
+	return self.proxyUntilSuccess(servers, request)
 }
 
 // This method will attemp to proxy the request until the call to proxy returns nil. If no server succeeds,
 // the last err value will be returned.
-func (self *CoordinatorImpl) proxyUntilSuccess(servers []*ClusterServer, db *string, series *protocol.Series) (err error) {
+func (self *CoordinatorImpl) proxyUntilSuccess(servers []*ClusterServer, request *protocol.Request) (err error) {
 	for _, s := range servers {
-		if s.Id != self.localHostId {
-			err = self.proxyWrite(s, db, series)
+		if s.Id != self.clusterConfiguration.localServerId {
+			err = self.proxyWrite(s, request)
 			if err == nil {
 				return nil
 			}
@@ -483,12 +829,17 @@ func (self *CoordinatorImpl) proxyUntilSuccess(servers []*ClusterServer, db *str
 	return
 }
 
-func (self *CoordinatorImpl) proxyWrite(clusterServer *ClusterServer, db *string, series *protocol.Series) error {
-	id := atomic.AddUint32(&self.requestId, uint32(1))
-	request := &protocol.Request{Database: db, Type: &proxyWrite, Series: series, Id: &id}
-	request.ClusterVersion = &self.clusterConfiguration.ClusterVersion
+func (self *CoordinatorImpl) proxyWrite(clusterServer *ClusterServer, request *protocol.Request) error {
+	originatingServerId := request.OriginatingServerId
+	request.OriginatingServerId = nil
+	defer func() { request.OriginatingServerId = originatingServerId }()
+
 	responseChan := make(chan *protocol.Response, 1)
-	clusterServer.protobufClient.MakeRequest(request, responseChan)
+	err := clusterServer.MakeRequest(request, responseChan)
+	if err != nil {
+		log.Warn("PROXY WRITE ERROR: ", err)
+		return err
+	}
 	response := <-responseChan
 	if *response.Type == protocol.Response_WRITE_OK {
 		return nil
@@ -518,25 +869,127 @@ func (self *CoordinatorImpl) ListDatabases(user common.User) ([]*Database, error
 	return dbs, nil
 }
 
+func seriesFromListSeries(names []string) []*protocol.Series {
+	series := []*protocol.Series{}
+
+	for _, _name := range names {
+		name := _name
+		series = append(series, &protocol.Series{
+			Name:   &name,
+			Fields: []string{},
+			Points: []*protocol.Point{},
+		})
+	}
+	return series
+}
+
+func (self *CoordinatorImpl) ListSeries(user common.User, database string) ([]*protocol.Series, error) {
+	if self.clusterConfiguration.IsSingleServer() {
+		dbs := []string{}
+		self.datastore.GetSeriesForDatabase(database, func(db string) error {
+			dbs = append(dbs, db)
+			return nil
+		})
+		return seriesFromListSeries(dbs), nil
+	}
+	servers, replicationFactor := self.clusterConfiguration.GetServersToMakeQueryTo(&database)
+	id := atomic.AddUint32(&self.requestId, uint32(1))
+	userName := user.GetName()
+	responseChannels := make([]chan *protocol.Response, 0, len(servers)+1)
+	for _, server := range servers {
+		if server.server.Id == self.clusterConfiguration.localServerId {
+			continue
+		}
+		request := &protocol.Request{Type: &listSeriesRequest, Id: &id, Database: &database, UserName: &userName}
+		if server.ringLocationsToQuery != replicationFactor {
+			r := server.ringLocationsToQuery
+			request.RingLocationsToQuery = &r
+		}
+		responseChan := make(chan *protocol.Response, 3)
+		server.server.protobufClient.MakeRequest(request, responseChan)
+		responseChannels = append(responseChannels, responseChan)
+	}
+
+	local := make(chan *protocol.Response)
+
+	responseChannels = append(responseChannels, local)
+
+	go func() {
+		dbs := []string{}
+		self.datastore.GetSeriesForDatabase(database, func(db string) error {
+			dbs = append(dbs, db)
+			return nil
+		})
+		seriesArray := seriesFromListSeries(dbs)
+		for _, series := range seriesArray {
+			local <- &protocol.Response{Type: &listSeriesResponse, Series: series}
+		}
+		local <- &protocol.Response{Type: &endStreamResponse}
+		close(local)
+	}()
+	seriesArray := []*protocol.Series{}
+	self.streamResultsFromChannels(true, true, responseChannels, func(series *protocol.Series) error {
+		seriesArray = append(seriesArray, series)
+		return nil
+	})
+	return seriesArray, nil
+}
+
 func (self *CoordinatorImpl) DropDatabase(user common.User, db string) error {
 	if !user.IsClusterAdmin() {
 		return common.NewAuthorizationError("Insufficient permission to drop database")
 	}
 
+	if self.clusterConfiguration.IsSingleServer() {
+		if err := self.datastore.DropDatabase(db); err != nil {
+			return err
+		}
+	} else {
+		servers, _ := self.clusterConfiguration.GetServersToMakeQueryTo(&db)
+		for _, server := range servers {
+			if err := self.handleDropDatabase(server.server, db); err != nil {
+				return err
+			}
+		}
+	}
+
+	// don't delete the metadata, we need the replication factor to be
+	// able to replicate the request properly
 	if err := self.raftServer.DropDatabase(db); err != nil {
 		return err
 	}
 
-	return self.datastore.DropDatabase(db)
+	return nil
+}
+
+func (self *CoordinatorImpl) DropSeries(user common.User, db, series string) error {
+	if !user.IsClusterAdmin() && !user.IsDbAdmin(db) && !user.HasWriteAccess(series) {
+		return common.NewAuthorizationError("Insufficient permission to drop series")
+	}
+
+	if self.clusterConfiguration.IsSingleServer() {
+		return self.datastore.DropSeries(db, series)
+	}
+
+	servers, _ := self.clusterConfiguration.GetServersToMakeQueryTo(&db)
+	for _, server := range servers {
+		if err := self.handleDropSeries(server.server, db, series); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (self *CoordinatorImpl) AuthenticateDbUser(db, username, password string) (common.User, error) {
+	log.Debug("(raft:%s) Authenticating password for %s:%s", self.raftServer.(*RaftServer).raftServer.Name(), db, username)
 	dbUsers := self.clusterConfiguration.dbUsers[db]
 	if dbUsers == nil || dbUsers[username] == nil {
-		return self.AuthenticateClusterAdmin(username, password)
+		return nil, common.NewAuthorizationError("Invalid username/password")
 	}
 	user := dbUsers[username]
 	if user.isValidPwd(password) {
+		log.Debug("(raft:%s) User %s authenticated succesfuly", self.raftServer.(*RaftServer).raftServer.Name(), username)
 		return user, nil
 	}
 	return nil, common.NewAuthorizationError("Invalid username/password")
@@ -601,7 +1054,11 @@ func (self *CoordinatorImpl) ChangeClusterAdminPassword(requester common.User, u
 		return fmt.Errorf("Invalid user name %s", username)
 	}
 
-	user.changePassword(password)
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
+	}
+	user.changePassword(string(hash))
 	return self.raftServer.SaveClusterAdminUser(user)
 }
 
@@ -614,18 +1071,13 @@ func (self *CoordinatorImpl) CreateDbUser(requester common.User, db, username st
 		return fmt.Errorf("Username cannot be empty")
 	}
 
-	self.clusterConfiguration.CreateDatabase(db, uint8(1)) // ignore the error since the db may exist
+	self.CreateDatabase(requester, db, uint8(1)) // ignore the error since the db may exist
 	dbUsers := self.clusterConfiguration.dbUsers[db]
 	if dbUsers != nil && dbUsers[username] != nil {
 		return fmt.Errorf("User %s already exists", username)
 	}
-
-	if dbUsers == nil {
-		dbUsers = map[string]*dbUser{}
-		self.clusterConfiguration.dbUsers[db] = dbUsers
-	}
-
 	matchers := []*Matcher{&Matcher{true, ".*"}}
+	log.Debug("(raft:%s) Creating uesr %s:%s", self.raftServer.(*RaftServer).raftServer.Name(), db, username)
 	return self.raftServer.SaveDbUser(&dbUser{CommonUser{Name: username}, db, matchers, matchers, false})
 }
 
@@ -657,13 +1109,11 @@ func (self *CoordinatorImpl) ChangeDbUserPassword(requester common.User, db, use
 		return common.NewAuthorizationError("Insufficient permissions")
 	}
 
-	dbUsers := self.clusterConfiguration.dbUsers[db]
-	if dbUsers == nil || dbUsers[username] == nil {
-		return fmt.Errorf("Invalid username %s", username)
+	hash, err := hashPassword(password)
+	if err != nil {
+		return err
 	}
-
-	dbUsers[username].changePassword(password)
-	return self.raftServer.SaveDbUser(dbUsers[username])
+	return self.raftServer.ChangeDbUserPassword(db, username, hash)
 }
 
 func (self *CoordinatorImpl) SetDbAdmin(requester common.User, db, username string, isAdmin bool) error {
@@ -683,17 +1133,13 @@ func (self *CoordinatorImpl) SetDbAdmin(requester common.User, db, username stri
 }
 
 func (self *CoordinatorImpl) ConnectToProtobufServers(localConnectionString string) error {
-	// We shouldn't hit this. It's possible during initialization if Raft hasn't
-	// finished spinning up then there won't be any servers in the cluster config.
-	if len(self.clusterConfiguration.Servers()) == 0 {
-		return errors.New("No Protobuf servers to connect to.")
-	}
+	log.Info("Waiting for local server to be added")
+	self.clusterConfiguration.WaitForLocalServerLoaded()
+	log.Info("Local server added. Connecting to other nodes in the cluster")
+
 	for _, server := range self.clusterConfiguration.Servers() {
 		if server.ProtobufConnectionString != localConnectionString {
 			server.Connect()
-		} else {
-			self.localHostId = server.Id
-			self.clusterConfiguration.localServerId = server.Id
 		}
 	}
 	return nil
@@ -704,19 +1150,32 @@ func (self *CoordinatorImpl) ReplicateWrite(request *protocol.Request) error {
 	request.Id = &id
 	location := common.RingLocation(request.Database, request.Series.Name, request.Series.Points[0].Timestamp)
 	replicas := self.clusterConfiguration.GetServersByRingLocation(request.Database, &location)
+	request.Type = &replicateWrite
+	self.sendRequestToReplicas(request, replicas)
+	return nil
+}
+
+func (self *CoordinatorImpl) ReplicateDelete(request *protocol.Request) error {
+	id := atomic.AddUint32(&self.requestId, uint32(1))
+	request.Id = &id
+	server := self.clusterConfiguration.GetServerById(request.OwnerServerId)
+	_, replicas := self.clusterConfiguration.GetReplicas(server, request.Database)
+	request.Type = &replicateDelete
 	self.sendRequestToReplicas(request, replicas)
 	return nil
 }
 
 func (self *CoordinatorImpl) sendRequestToReplicas(request *protocol.Request, replicas []*ClusterServer) {
-	request.Type = &replicateWrite
 	for _, server := range replicas {
-		if server.Id != self.localHostId {
-			server.protobufClient.MakeRequest(request, nil)
+		if server.Id != self.clusterConfiguration.localServerId {
+			err := server.MakeRequest(request, nil)
+			if err != nil {
+				log.Warn("REPLICATION ERROR: ", request.GetSequenceNumber(), err)
+			}
 		}
 	}
 }
 
 func (self *CoordinatorImpl) sequenceNumberWithServerId(n uint64) uint64 {
-	return n*HOST_ID_OFFSET + uint64(self.localHostId)
+	return n*HOST_ID_OFFSET + uint64(self.clusterConfiguration.localServerId)
 }
