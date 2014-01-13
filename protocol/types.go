@@ -71,6 +71,8 @@ func TypeForMessage(msg proto.Message) Message_Type {
 		return Message_LimitDisk
 	case *LimitBandwidthRequest, *LimitBandwidthResponse:
 		return Message_LimitBandwidth
+	case *LimitCpuRequest, *LimitCpuResponse:
+		return Message_LimitCpu
 
 	case *PingRequest, *PingResponse:
 		return Message_Ping
@@ -119,6 +121,8 @@ func RequestMessageForType(t Message_Type) proto.Message {
 		return &LimitDiskRequest{}
 	case Message_LimitBandwidth:
 		return &LimitBandwidthRequest{}
+	case Message_LimitCpu:
+		return &LimitCpuRequest{}
 
 	case Message_Ping:
 		return &PingRequest{}
@@ -126,6 +130,56 @@ func RequestMessageForType(t Message_Type) proto.Message {
 		return &ListRequest{}
 	case Message_Echo:
 		return &EchoRequest{}
+	}
+
+	panic("unknown message type")
+}
+
+func ResponseMessageForType(t Message_Type) proto.Message {
+	switch t {
+	case Message_Create:
+		return &CreateResponse{}
+	case Message_Stop:
+		return &StopResponse{}
+	case Message_Destroy:
+		return &DestroyResponse{}
+	case Message_Info:
+		return &InfoResponse{}
+
+	case Message_Spawn:
+		return &SpawnResponse{}
+	case Message_Link:
+		return &LinkResponse{}
+	case Message_Run:
+		return &RunResponse{}
+	case Message_Stream:
+		return &StreamResponse{}
+
+	case Message_NetIn:
+		return &NetInResponse{}
+	case Message_NetOut:
+		return &NetOutResponse{}
+
+	case Message_CopyIn:
+		return &CopyInResponse{}
+	case Message_CopyOut:
+		return &CopyOutResponse{}
+
+	case Message_LimitMemory:
+		return &LimitMemoryResponse{}
+	case Message_LimitDisk:
+		return &LimitDiskResponse{}
+	case Message_LimitBandwidth:
+		return &LimitBandwidthResponse{}
+	case Message_LimitCpu:
+		return &LimitCpuResponse{}
+
+	case Message_Ping:
+		return &PingResponse{}
+	case Message_List:
+		return &ListResponse{}
+	case Message_Echo:
+		return &EchoResponse{}
 	}
 
 	panic("unknown message type")

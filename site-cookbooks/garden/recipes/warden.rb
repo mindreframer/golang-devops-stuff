@@ -1,7 +1,10 @@
 package "iptables"
 package "quota"
 package "rsync"
+package "ruby1.9.1"
+package "ruby1.9.1-dev"
 package "git"
+package "lsof"
 
 if ["debian", "ubuntu"].include?(node["platform"])
   if node["kernel"]["release"].end_with? "virtual"

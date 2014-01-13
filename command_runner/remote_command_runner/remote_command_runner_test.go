@@ -38,7 +38,7 @@ var _ = Describe("Remote command runner", func() {
 			}
 
 			err := remoteRunner.Run(command)
-			Expect(err).ToNot(HaveOccured())
+			Expect(err).ToNot(HaveOccurred())
 
 			Expect(fakeRunner).To(HaveExecutedSerially(
 				fake_command_runner.CommandSpec{
@@ -62,7 +62,7 @@ var _ = Describe("Remote command runner", func() {
 			}
 
 			err := remoteRunner.Start(command)
-			Expect(err).ToNot(HaveOccured())
+			Expect(err).ToNot(HaveOccurred())
 
 			Expect(fakeRunner).To(HaveStartedExecuting(
 				fake_command_runner.CommandSpec{

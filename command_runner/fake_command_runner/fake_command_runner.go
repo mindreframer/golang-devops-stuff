@@ -1,6 +1,7 @@
 package fake_command_runner
 
 import (
+	"os"
 	"os/exec"
 	"reflect"
 
@@ -10,10 +11,11 @@ import (
 type FakeCommandRunner struct {
 	ServerRootPath string
 
-	executedCommands []*exec.Cmd
-	startedCommands  []*exec.Cmd
-	waitedCommands   []*exec.Cmd
-	killedCommands   []*exec.Cmd
+	executedCommands  []*exec.Cmd
+	startedCommands   []*exec.Cmd
+	waitedCommands    []*exec.Cmd
+	killedCommands    []*exec.Cmd
+	signalledCommands map[*exec.Cmd]os.Signal
 
 	commandCallbacks map[*CommandSpec]func(*exec.Cmd) error
 	waitingCallbacks map[*CommandSpec]func(*exec.Cmd) error
@@ -62,6 +64,8 @@ func (s CommandSpec) Matches(cmd *exec.Cmd) bool {
 
 func New() *FakeCommandRunner {
 	return &FakeCommandRunner{
+		signalledCommands: make(map[*exec.Cmd]os.Signal),
+
 		commandCallbacks: make(map[*CommandSpec]func(*exec.Cmd) error),
 		waitingCallbacks: make(map[*CommandSpec]func(*exec.Cmd) error),
 	}
@@ -130,6 +134,15 @@ func (r *FakeCommandRunner) Kill(cmd *exec.Cmd) error {
 	return nil
 }
 
+func (r *FakeCommandRunner) Signal(cmd *exec.Cmd, signal os.Signal) error {
+	r.Lock()
+	defer r.Unlock()
+
+	r.signalledCommands[cmd] = signal
+
+	return nil
+}
+
 func (r *FakeCommandRunner) ServerRoot() string {
 	return r.ServerRootPath
 }
@@ -167,4 +180,11 @@ func (r *FakeCommandRunner) KilledCommands() []*exec.Cmd {
 	defer r.RUnlock()
 
 	return r.killedCommands
+}
+
+func (r *FakeCommandRunner) SignalledCommands() map[*exec.Cmd]os.Signal {
+	r.RLock()
+	defer r.RUnlock()
+
+	return r.signalledCommands
 }

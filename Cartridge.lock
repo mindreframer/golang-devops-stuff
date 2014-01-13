@@ -1,6 +1,9 @@
-code.google.com/p/gogoprotobuf/proto	a2cbb9e3ce8ab9e350516a3cda5da7b61f926853
-code.google.com/p/gogoprotobuf/protoc-gen-gogo	a2cbb9e3ce8ab9e350516a3cda5da7b61f926853
-github.com/onsi/gomega	88f0d2817fdc1e2d1bc3ace4604a6ec75c8cec9b
-github.com/onsi/ginkgo	749c170ef7bce757ca878a29585d4ee548d527b0
-github.com/onsi/ginkgo/ginkgo	749c170ef7bce757ca878a29585d4ee548d527b0
-github.com/vito/cmdtest	4a7d54fd9ba82d865504964101bb2b3f04e52a0b
+code.google.com/p/gogoprotobuf/proto	a35ad7295e7ff41bc6a5e625e5e17486845cc225
+code.google.com/p/gogoprotobuf/protoc-gen-gogo	a35ad7295e7ff41bc6a5e625e5e17486845cc225
+github.com/onsi/gomega	d7685fbd45fb7bef327b43ca2781368c68bf72b7
+github.com/onsi/ginkgo	9019392d862065b9f2c4461623bd0d1abfd5f435
+github.com/onsi/ginkgo/ginkgo	9019392d862065b9f2c4461623bd0d1abfd5f435
+github.com/vito/cmdtest	4b86f8c2259c55e86e4b971cd7dc5dfb03e41b80
+github.com/vito/gordon	58891c9488b2a430261a29463587a0a536272110
+code.google.com/p/go.tools/cmd/cover	fd14daeb8181
+github.com/dustin/goveralls	0bb6195525a794a8b9e0a10f4752e1ac6a0683c8

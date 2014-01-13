@@ -14,8 +14,6 @@ skeleton: warden/warden
 	cp warden/warden/src/iomux/iomux-link root/linux/skeleton/bin
 	mkdir -p root/bin
 	cp warden/warden/src/repquota/repquota root/bin
-	go build -o root/linux/skeleton/bin/wshd ./backend/linux_backend/wshd
-	go build -o root/linux/skeleton/bin/wsh ./backend/linux_backend/wshd/wsh
 
 warden/warden:
 	git submodule update --init --recursive

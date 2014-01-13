@@ -6,6 +6,9 @@ import (
 
 type Backend interface {
 	Setup() error
+	Start() error
+	Stop()
+
 	Create(ContainerSpec) (Container, error)
 	Destroy(handle string) error
 	Containers() ([]Container, error)

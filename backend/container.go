@@ -1,9 +1,13 @@
 package backend
 
+import (
+	"time"
+)
+
 type Container interface {
 	ID() string
-
 	Handle() string
+	GraceTime() time.Duration
 
 	Start() error
 	Stop(kill bool) error
@@ -13,9 +17,17 @@ type Container interface {
 	CopyIn(srcPath, dstPath string) error
 	CopyOut(srcPath, dstPath, owner string) error
 
-	LimitBandwidth(limits BandwidthLimits) (BandwidthLimits, error)
-	LimitDisk(limits DiskLimits) (DiskLimits, error)
-	LimitMemory(limits MemoryLimits) (MemoryLimits, error)
+	LimitBandwidth(limits BandwidthLimits) error
+	CurrentBandwidthLimits() (BandwidthLimits, error)
+
+	LimitCPU(limits CPULimits) error
+	CurrentCPULimits() (CPULimits, error)
+
+	LimitDisk(limits DiskLimits) error
+	CurrentDiskLimits() (DiskLimits, error)
+
+	LimitMemory(limits MemoryLimits) error
+	CurrentMemoryLimits() (MemoryLimits, error)
 
 	Spawn(JobSpec) (uint32, error)
 	Stream(jobID uint32) (<-chan JobStream, error)
@@ -30,6 +42,7 @@ type JobSpec struct {
 	Privileged    bool
 	Limits        ResourceLimits
 	DiscardOutput bool
+	AutoLink      bool
 }
 
 type JobResult struct {
@@ -134,20 +147,24 @@ type MemoryLimits struct {
 	LimitInBytes uint64
 }
 
+type CPULimits struct {
+	LimitInShares uint64
+}
+
 type ResourceLimits struct {
-	As         uint64
-	Core       uint64
-	Cpu        uint64
-	Data       uint64
-	Fsize      uint64
-	Locks      uint64
-	Memlock    uint64
-	Msgqueue   uint64
-	Nice       uint64
-	Nofile     uint64
-	Nproc      uint64
-	Rss        uint64
-	Rtprio     uint64
-	Sigpending uint64
-	Stack      uint64
+	As         *uint64
+	Core       *uint64
+	Cpu        *uint64
+	Data       *uint64
+	Fsize      *uint64
+	Locks      *uint64
+	Memlock    *uint64
+	Msgqueue   *uint64
+	Nice       *uint64
+	Nofile     *uint64
+	Nproc      *uint64
+	Rss        *uint64
+	Rtprio     *uint64
+	Sigpending *uint64
+	Stack      *uint64
 }

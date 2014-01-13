@@ -1,6 +1,10 @@
 package fake_backend
 
 import (
+	"io"
+	"sync"
+	"time"
+
 	"github.com/vito/garden/backend"
 )
 
@@ -11,8 +15,11 @@ type FakeContainer struct {
 	Started    bool
 
 	StopError    error
-	Stopped      []StopSpec
+	stopped      []StopSpec
+	stopMutex    *sync.RWMutex
 	StopCallback func()
+
+	CleanedUp bool
 
 	CopyInError error
 	CopiedIn    [][]string
@@ -31,16 +38,35 @@ type FakeContainer struct {
 	StreamError       error
 	StreamedJobChunks []backend.JobStream
 	Streamed          []uint32
+	StreamDelay       time.Duration
 
+	DidLimitBandwidth   bool
 	LimitBandwidthError error
 	LimitedBandwidth    backend.BandwidthLimits
 
+	CurrentBandwidthLimitsResult backend.BandwidthLimits
+	CurrentBandwidthLimitsError  error
+
+	DidLimitMemory   bool
 	LimitMemoryError error
 	LimitedMemory    backend.MemoryLimits
 
-	LimitDiskError    error
-	LimitedDisk       backend.DiskLimits
-	LimitedDiskResult backend.DiskLimits
+	CurrentMemoryLimitsResult backend.MemoryLimits
+	CurrentMemoryLimitsError  error
+
+	DidLimitDisk   bool
+	LimitDiskError error
+	LimitedDisk    backend.DiskLimits
+
+	CurrentDiskLimitsResult backend.DiskLimits
+	CurrentDiskLimitsError  error
+
+	DidLimitCPU   bool
+	LimitCPUError error
+	LimitedCPU    backend.CPULimits
+
+	CurrentCPULimitsResult backend.CPULimits
+	CurrentCPULimitsError  error
 
 	NetInError error
 	MappedIn   [][]uint32
@@ -50,6 +76,10 @@ type FakeContainer struct {
 
 	InfoError    error
 	ReportedInfo backend.ContainerInfo
+
+	SnapshotError  error
+	SavedSnapshots []io.Writer
+	snapshotMutex  *sync.RWMutex
 }
 
 type NetOutSpec struct {
@@ -62,7 +92,12 @@ type StopSpec struct {
 }
 
 func NewFakeContainer(spec backend.ContainerSpec) *FakeContainer {
-	return &FakeContainer{Spec: spec}
+	return &FakeContainer{
+		Spec: spec,
+
+		stopMutex:     new(sync.RWMutex),
+		snapshotMutex: new(sync.RWMutex),
+	}
 }
 
 func (c *FakeContainer) ID() string {
@@ -71,6 +106,23 @@ func (c *FakeContainer) ID() string {
 
 func (c *FakeContainer) Handle() string {
 	return c.Spec.Handle
+}
+
+func (c *FakeContainer) GraceTime() time.Duration {
+	return c.Spec.GraceTime
+}
+
+func (c *FakeContainer) Snapshot(snapshot io.Writer) error {
+	if c.SnapshotError != nil {
+		return c.SnapshotError
+	}
+
+	c.snapshotMutex.Lock()
+	defer c.snapshotMutex.Unlock()
+
+	c.SavedSnapshots = append(c.SavedSnapshots, snapshot)
+
+	return nil
 }
 
 func (c *FakeContainer) Start() error {
@@ -92,9 +144,21 @@ func (c *FakeContainer) Stop(kill bool) error {
 		c.StopCallback()
 	}
 
-	c.Stopped = append(c.Stopped, StopSpec{kill})
+	// stops can happen asynchronously in tests (i.e. StopRequest with
+	// Background: true), so we need a mutex here
+	c.stopMutex.Lock()
+	defer c.stopMutex.Unlock()
+
+	c.stopped = append(c.stopped, StopSpec{kill})
 
 	return nil
+}
+
+func (c *FakeContainer) Stopped() []StopSpec {
+	c.stopMutex.RLock()
+	defer c.stopMutex.RUnlock()
+
+	return c.stopped
 }
 
 func (c *FakeContainer) Info() (backend.ContainerInfo, error) {
@@ -125,38 +189,84 @@ func (c *FakeContainer) CopyOut(src, dst, owner string) error {
 	return nil
 }
 
-func (c *FakeContainer) LimitBandwidth(limits backend.BandwidthLimits) (backend.BandwidthLimits, error) {
+func (c *FakeContainer) LimitBandwidth(limits backend.BandwidthLimits) error {
+	c.DidLimitBandwidth = true
+
 	if c.LimitBandwidthError != nil {
-		return backend.BandwidthLimits{}, c.LimitBandwidthError
+		return c.LimitBandwidthError
 	}
 
 	c.LimitedBandwidth = limits
 
-	return limits, nil
+	return nil
 }
 
-func (c *FakeContainer) LimitDisk(limits backend.DiskLimits) (backend.DiskLimits, error) {
+func (c *FakeContainer) CurrentBandwidthLimits() (backend.BandwidthLimits, error) {
+	if c.CurrentBandwidthLimitsError != nil {
+		return backend.BandwidthLimits{}, c.CurrentBandwidthLimitsError
+	}
+
+	return c.CurrentBandwidthLimitsResult, nil
+}
+
+func (c *FakeContainer) LimitDisk(limits backend.DiskLimits) error {
+	c.DidLimitDisk = true
+
 	if c.LimitDiskError != nil {
-		return backend.DiskLimits{}, c.LimitDiskError
+		return c.LimitDiskError
 	}
 
 	c.LimitedDisk = limits
 
-	if c.LimitedDiskResult != limits {
-		return c.LimitedDiskResult, nil
-	}
-
-	return limits, nil
+	return nil
 }
 
-func (c *FakeContainer) LimitMemory(limits backend.MemoryLimits) (backend.MemoryLimits, error) {
+func (c *FakeContainer) CurrentDiskLimits() (backend.DiskLimits, error) {
+	if c.CurrentDiskLimitsError != nil {
+		return backend.DiskLimits{}, c.CurrentDiskLimitsError
+	}
+
+	return c.CurrentDiskLimitsResult, nil
+}
+
+func (c *FakeContainer) LimitMemory(limits backend.MemoryLimits) error {
+	c.DidLimitMemory = true
+
 	if c.LimitMemoryError != nil {
-		return backend.MemoryLimits{}, c.LimitMemoryError
+		return c.LimitMemoryError
 	}
 
 	c.LimitedMemory = limits
 
-	return limits, nil
+	return nil
+}
+
+func (c *FakeContainer) CurrentMemoryLimits() (backend.MemoryLimits, error) {
+	if c.CurrentMemoryLimitsError != nil {
+		return backend.MemoryLimits{}, c.CurrentMemoryLimitsError
+	}
+
+	return c.CurrentMemoryLimitsResult, nil
+}
+
+func (c *FakeContainer) LimitCPU(limits backend.CPULimits) error {
+	c.DidLimitCPU = true
+
+	if c.LimitCPUError != nil {
+		return c.LimitCPUError
+	}
+
+	c.LimitedCPU = limits
+
+	return nil
+}
+
+func (c *FakeContainer) CurrentCPULimits() (backend.CPULimits, error) {
+	if c.CurrentCPULimitsError != nil {
+		return backend.CPULimits{}, c.CurrentCPULimitsError
+	}
+
+	return c.CurrentCPULimitsResult, nil
 }
 
 func (c *FakeContainer) Spawn(spec backend.JobSpec) (uint32, error) {
@@ -179,6 +289,7 @@ func (c *FakeContainer) Stream(jobID uint32) (<-chan backend.JobStream, error) {
 	stream := make(chan backend.JobStream, len(c.StreamedJobChunks))
 
 	for _, chunk := range c.StreamedJobChunks {
+		time.Sleep(c.StreamDelay)
 		stream <- chunk
 	}
 
@@ -215,4 +326,8 @@ func (c *FakeContainer) NetOut(network string, port uint32) error {
 	c.PermittedOut = append(c.PermittedOut, NetOutSpec{network, port})
 
 	return nil
+}
+
+func (c *FakeContainer) Cleanup() {
+	c.CleanedUp = true
 }

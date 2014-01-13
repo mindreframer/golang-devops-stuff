@@ -12,13 +12,24 @@ import (
 	"code.google.com/p/gogoprotobuf/proto"
 
 	"github.com/vito/garden/backend"
+	"github.com/vito/garden/drain"
 	"github.com/vito/garden/message_reader"
 	protocol "github.com/vito/garden/protocol"
+	"github.com/vito/garden/server/bomberman"
 )
 
 type WardenServer struct {
-	socketPath string
-	backend    backend.Backend
+	socketPath         string
+	containerGraceTime time.Duration
+	backend            backend.Backend
+
+	listener     net.Listener
+	openRequests *drain.Drain
+
+	setStopping chan bool
+	stopping    chan bool
+
+	bomberman *bomberman.Bomberman
 }
 
 type UnhandledRequestError struct {
@@ -29,32 +40,84 @@ func (e UnhandledRequestError) Error() string {
 	return fmt.Sprintf("unhandled request type: %T", e.Request)
 }
 
-func New(socketPath string, backend backend.Backend) *WardenServer {
+func New(
+	socketPath string,
+	containerGraceTime time.Duration,
+	backend backend.Backend,
+) *WardenServer {
 	return &WardenServer{
-		socketPath: socketPath,
-		backend:    backend,
+		socketPath:         socketPath,
+		containerGraceTime: containerGraceTime,
+		backend:            backend,
+
+		setStopping: make(chan bool),
+		stopping:    make(chan bool),
+
+		openRequests: drain.New(),
 	}
 }
 
 func (s *WardenServer) Start() error {
+	err := s.removeExistingSocket()
+	if err != nil {
+		return err
+	}
+
+	err = s.backend.Start()
+	if err != nil {
+		return err
+	}
+
 	listener, err := net.Listen("unix", s.socketPath)
 	if err != nil {
 		return err
 	}
 
+	s.listener = listener
+
 	os.Chmod(s.socketPath, 0777)
 
+	containers, err := s.backend.Containers()
+	if err != nil {
+		return err
+	}
+
+	s.bomberman = bomberman.New(s.reapContainer)
+
+	for _, container := range containers {
+		s.bomberman.Strap(container)
+	}
+
+	go s.trackStopping()
 	go s.handleConnections(listener)
 
 	return nil
+}
+
+func (s *WardenServer) Stop() {
+	s.setStopping <- true
+	s.listener.Close()
+	s.openRequests.Wait()
+	s.backend.Stop()
+}
+
+func (s *WardenServer) trackStopping() {
+	stopping := false
+
+	for {
+		select {
+		case stopping = <-s.setStopping:
+		case s.stopping <- stopping:
+		}
+	}
 }
 
 func (s *WardenServer) handleConnections(listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Println("error accepting connection:", err)
-			continue
+			// listener closed
+			break
 		}
 
 		go s.serveConnection(conn)
@@ -68,6 +131,11 @@ func (s *WardenServer) serveConnection(conn net.Conn) {
 		var response proto.Message
 		var err error
 
+		if <-s.stopping {
+			conn.Close()
+			break
+		}
+
 		request, err := message_reader.ReadRequest(read)
 		if err == io.EOF {
 			break
@@ -77,6 +145,13 @@ func (s *WardenServer) serveConnection(conn net.Conn) {
 			log.Println("error reading request:", err)
 			continue
 		}
+
+		if <-s.stopping {
+			conn.Close()
+			break
+		}
+
+		s.openRequests.Incr()
 
 		switch request.(type) {
 		case *protocol.PingRequest:
@@ -98,17 +173,25 @@ func (s *WardenServer) serveConnection(conn net.Conn) {
 		case *protocol.SpawnRequest:
 			response, err = s.handleSpawn(request.(*protocol.SpawnRequest))
 		case *protocol.LinkRequest:
+			s.openRequests.Decr()
 			response, err = s.handleLink(request.(*protocol.LinkRequest))
+			s.openRequests.Incr()
 		case *protocol.StreamRequest:
+			s.openRequests.Decr()
 			response, err = s.handleStream(conn, request.(*protocol.StreamRequest))
+			s.openRequests.Incr()
 		case *protocol.RunRequest:
+			s.openRequests.Decr()
 			response, err = s.handleRun(request.(*protocol.RunRequest))
+			s.openRequests.Incr()
 		case *protocol.LimitBandwidthRequest:
 			response, err = s.handleLimitBandwidth(request.(*protocol.LimitBandwidthRequest))
 		case *protocol.LimitMemoryRequest:
 			response, err = s.handleLimitMemory(request.(*protocol.LimitMemoryRequest))
 		case *protocol.LimitDiskRequest:
 			response, err = s.handleLimitDisk(request.(*protocol.LimitDiskRequest))
+		case *protocol.LimitCpuRequest:
+			response, err = s.handleLimitCpu(request.(*protocol.LimitCpuRequest))
 		case *protocol.NetInRequest:
 			response, err = s.handleNetIn(request.(*protocol.NetInRequest))
 		case *protocol.NetOutRequest:
@@ -126,466 +209,26 @@ func (s *WardenServer) serveConnection(conn net.Conn) {
 		}
 
 		protocol.Messages(response).WriteTo(conn)
+
+		s.openRequests.Decr()
 	}
 }
 
-func (s *WardenServer) handlePing(ping *protocol.PingRequest) (proto.Message, error) {
-	return &protocol.PingResponse{}, nil
+func (s *WardenServer) removeExistingSocket() error {
+	if _, err := os.Stat(s.socketPath); os.IsNotExist(err) {
+		return nil
+	}
+
+	err := os.Remove(s.socketPath)
+
+	if err != nil {
+		return fmt.Errorf("error deleting existing socket: %s", err)
+	}
+
+	return nil
 }
 
-func (s *WardenServer) handleEcho(echo *protocol.EchoRequest) (proto.Message, error) {
-	return &protocol.EchoResponse{Message: echo.Message}, nil
-}
-
-func (s *WardenServer) handleCreate(create *protocol.CreateRequest) (proto.Message, error) {
-	bindMounts := []backend.BindMount{}
-
-	for _, bm := range create.GetBindMounts() {
-		bindMount := backend.BindMount{
-			SrcPath: bm.GetSrcPath(),
-			DstPath: bm.GetDstPath(),
-			Mode:    backend.BindMountMode(bm.GetMode()),
-		}
-
-		bindMounts = append(bindMounts, bindMount)
-	}
-
-	container, err := s.backend.Create(backend.ContainerSpec{
-		Handle:     create.GetHandle(),
-		GraceTime:  time.Duration(create.GetGraceTime()) * time.Second,
-		RootFSPath: create.GetRootfs(),
-		Network:    create.GetNetwork(),
-		BindMounts: bindMounts,
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.CreateResponse{
-		Handle: proto.String(container.Handle()),
-	}, nil
-}
-
-func (s *WardenServer) handleDestroy(destroy *protocol.DestroyRequest) (proto.Message, error) {
-	handle := destroy.GetHandle()
-
-	err := s.backend.Destroy(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.DestroyResponse{}, nil
-}
-
-func (s *WardenServer) handleList(list *protocol.ListRequest) (proto.Message, error) {
-	containers, err := s.backend.Containers()
-	if err != nil {
-		return nil, err
-	}
-
-	handles := []string{}
-
-	for _, container := range containers {
-		handles = append(handles, container.Handle())
-	}
-
-	return &protocol.ListResponse{Handles: handles}, nil
-}
-
-func (s *WardenServer) handleCopyOut(copyOut *protocol.CopyOutRequest) (proto.Message, error) {
-	handle := copyOut.GetHandle()
-	srcPath := copyOut.GetSrcPath()
-	dstPath := copyOut.GetDstPath()
-	owner := copyOut.GetOwner()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	err = container.CopyOut(srcPath, dstPath, owner)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.CopyOutResponse{}, nil
-}
-
-func (s *WardenServer) handleStop(request *protocol.StopRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	kill := request.GetKill()
-	background := request.GetBackground()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	if background {
-		go container.Stop(kill)
-	} else {
-		err = container.Stop(kill)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return &protocol.StopResponse{}, nil
-}
-
-func (s *WardenServer) handleCopyIn(copyIn *protocol.CopyInRequest) (proto.Message, error) {
-	handle := copyIn.GetHandle()
-	srcPath := copyIn.GetSrcPath()
-	dstPath := copyIn.GetDstPath()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	err = container.CopyIn(srcPath, dstPath)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.CopyInResponse{}, nil
-}
-
-func (s *WardenServer) handleSpawn(spawn *protocol.SpawnRequest) (proto.Message, error) {
-	handle := spawn.GetHandle()
-	script := spawn.GetScript()
-	privileged := spawn.GetPrivileged()
-	discardOutput := spawn.GetDiscardOutput()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	jobSpec := backend.JobSpec{
-		Script:        script,
-		Privileged:    privileged,
-		DiscardOutput: discardOutput,
-	}
-
-	jobID, err := container.Spawn(jobSpec)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.SpawnResponse{JobId: proto.Uint32(jobID)}, nil
-}
-
-func (s *WardenServer) handleLink(link *protocol.LinkRequest) (proto.Message, error) {
-	handle := link.GetHandle()
-	jobID := link.GetJobId()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	jobResult, err := container.Link(jobID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.LinkResponse{
-		ExitStatus: proto.Uint32(jobResult.ExitStatus),
-		Stdout:     proto.String(string(jobResult.Stdout)),
-		Stderr:     proto.String(string(jobResult.Stderr)),
-	}, nil
-}
-
-func (s *WardenServer) handleRun(request *protocol.RunRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	script := request.GetScript()
-	privileged := request.GetPrivileged()
-	discardOutput := request.GetDiscardOutput()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	jobSpec := backend.JobSpec{
-		Script:        script,
-		Privileged:    privileged,
-		DiscardOutput: discardOutput,
-	}
-
-	jobID, err := container.Spawn(jobSpec)
-	if err != nil {
-		return nil, err
-	}
-
-	jobResult, err := container.Link(jobID)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.RunResponse{
-		ExitStatus: proto.Uint32(jobResult.ExitStatus),
-		Stdout:     proto.String(string(jobResult.Stdout)),
-		Stderr:     proto.String(string(jobResult.Stderr)),
-	}, nil
-}
-
-func (s *WardenServer) handleLimitBandwidth(request *protocol.LimitBandwidthRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	rate := request.GetRate()
-	burst := request.GetBurst()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	limits, err := container.LimitBandwidth(backend.BandwidthLimits{
-		RateInBytesPerSecond:      rate,
-		BurstRateInBytesPerSecond: burst,
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.LimitBandwidthResponse{
-		Rate:  proto.Uint64(limits.RateInBytesPerSecond),
-		Burst: proto.Uint64(limits.BurstRateInBytesPerSecond),
-	}, nil
-}
-
-func (s *WardenServer) handleLimitMemory(request *protocol.LimitMemoryRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	limitInBytes := request.GetLimitInBytes()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	limits, err := container.LimitMemory(backend.MemoryLimits{
-		LimitInBytes: limitInBytes,
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.LimitMemoryResponse{
-		LimitInBytes: proto.Uint64(limits.LimitInBytes),
-	}, nil
-}
-
-func (s *WardenServer) handleLimitDisk(request *protocol.LimitDiskRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	blockSoft := request.GetBlockSoft()
-	blockHard := request.GetBlockHard()
-	inodeSoft := request.GetInodeSoft()
-	inodeHard := request.GetInodeHard()
-	byteSoft := request.GetByteSoft()
-	byteHard := request.GetByteHard()
-
-	if request.Block != nil {
-		blockHard = request.GetBlock()
-	}
-
-	if request.BlockLimit != nil {
-		blockHard = request.GetBlockLimit()
-	}
-
-	if request.Inode != nil {
-		inodeHard = request.GetInode()
-	}
-
-	if request.InodeLimit != nil {
-		inodeHard = request.GetInodeLimit()
-	}
-
-	if request.Byte != nil {
-		byteHard = request.GetByte()
-	}
-
-	if request.ByteLimit != nil {
-		byteHard = request.GetByteLimit()
-	}
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	limits, err := container.LimitDisk(backend.DiskLimits{
-		BlockSoft: blockSoft,
-		BlockHard: blockHard,
-		InodeSoft: inodeSoft,
-		InodeHard: inodeHard,
-		ByteSoft:  byteSoft,
-		ByteHard:  byteHard,
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.LimitDiskResponse{
-		BlockSoft: proto.Uint64(limits.BlockSoft),
-		BlockHard: proto.Uint64(limits.BlockHard),
-		InodeSoft: proto.Uint64(limits.InodeSoft),
-		InodeHard: proto.Uint64(limits.InodeHard),
-		ByteSoft:  proto.Uint64(limits.ByteSoft),
-		ByteHard:  proto.Uint64(limits.ByteHard),
-	}, nil
-}
-
-func (s *WardenServer) handleNetIn(request *protocol.NetInRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	hostPort := request.GetHostPort()
-	containerPort := request.GetContainerPort()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	hostPort, containerPort, err = container.NetIn(hostPort, containerPort)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.NetInResponse{
-		HostPort:      proto.Uint32(hostPort),
-		ContainerPort: proto.Uint32(containerPort),
-	}, nil
-}
-
-func (s *WardenServer) handleNetOut(request *protocol.NetOutRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	network := request.GetNetwork()
-	port := request.GetPort()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	err = container.NetOut(network, port)
-	if err != nil {
-		return nil, err
-	}
-
-	return &protocol.NetOutResponse{}, nil
-}
-
-func (s *WardenServer) handleStream(conn net.Conn, request *protocol.StreamRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-	jobID := request.GetJobId()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	stream, err := container.Stream(jobID)
-	if err != nil {
-		return nil, err
-	}
-
-	var response proto.Message
-
-	for chunk := range stream {
-		if chunk.ExitStatus != nil {
-			response = &protocol.StreamResponse{
-				ExitStatus: proto.Uint32(*chunk.ExitStatus),
-			}
-
-			break
-		}
-
-		protocol.Messages(&protocol.StreamResponse{
-			Name: proto.String(chunk.Name),
-			Data: proto.String(string(chunk.Data)),
-		}).WriteTo(conn)
-	}
-
-	return response, nil
-}
-
-func (s *WardenServer) handleInfo(request *protocol.InfoRequest) (proto.Message, error) {
-	handle := request.GetHandle()
-
-	container, err := s.backend.Lookup(handle)
-	if err != nil {
-		return nil, err
-	}
-
-	info, err := container.Info()
-	if err != nil {
-		return nil, err
-	}
-
-	jobIDs := make([]uint64, len(info.JobIDs))
-	for i, jobID := range info.JobIDs {
-		jobIDs[i] = uint64(jobID)
-	}
-
-	return &protocol.InfoResponse{
-		State:         proto.String(info.State),
-		Events:        info.Events,
-		HostIp:        proto.String(info.HostIP),
-		ContainerIp:   proto.String(info.ContainerIP),
-		ContainerPath: proto.String(info.ContainerPath),
-		JobIds:        jobIDs,
-
-		MemoryStat: &protocol.InfoResponse_MemoryStat{
-			Cache:                   proto.Uint64(info.MemoryStat.Cache),
-			Rss:                     proto.Uint64(info.MemoryStat.Rss),
-			MappedFile:              proto.Uint64(info.MemoryStat.MappedFile),
-			Pgpgin:                  proto.Uint64(info.MemoryStat.Pgpgin),
-			Pgpgout:                 proto.Uint64(info.MemoryStat.Pgpgout),
-			Swap:                    proto.Uint64(info.MemoryStat.Swap),
-			Pgfault:                 proto.Uint64(info.MemoryStat.Pgfault),
-			Pgmajfault:              proto.Uint64(info.MemoryStat.Pgmajfault),
-			InactiveAnon:            proto.Uint64(info.MemoryStat.InactiveAnon),
-			ActiveAnon:              proto.Uint64(info.MemoryStat.ActiveAnon),
-			InactiveFile:            proto.Uint64(info.MemoryStat.InactiveFile),
-			ActiveFile:              proto.Uint64(info.MemoryStat.ActiveFile),
-			Unevictable:             proto.Uint64(info.MemoryStat.Unevictable),
-			HierarchicalMemoryLimit: proto.Uint64(info.MemoryStat.HierarchicalMemoryLimit),
-			HierarchicalMemswLimit:  proto.Uint64(info.MemoryStat.HierarchicalMemswLimit),
-			TotalCache:              proto.Uint64(info.MemoryStat.TotalCache),
-			TotalRss:                proto.Uint64(info.MemoryStat.TotalRss),
-			TotalMappedFile:         proto.Uint64(info.MemoryStat.TotalMappedFile),
-			TotalPgpgin:             proto.Uint64(info.MemoryStat.TotalPgpgin),
-			TotalPgpgout:            proto.Uint64(info.MemoryStat.TotalPgpgout),
-			TotalSwap:               proto.Uint64(info.MemoryStat.TotalSwap),
-			TotalPgfault:            proto.Uint64(info.MemoryStat.TotalPgfault),
-			TotalPgmajfault:         proto.Uint64(info.MemoryStat.TotalPgmajfault),
-			TotalInactiveAnon:       proto.Uint64(info.MemoryStat.TotalInactiveAnon),
-			TotalActiveAnon:         proto.Uint64(info.MemoryStat.TotalActiveAnon),
-			TotalInactiveFile:       proto.Uint64(info.MemoryStat.TotalInactiveFile),
-			TotalActiveFile:         proto.Uint64(info.MemoryStat.TotalActiveFile),
-			TotalUnevictable:        proto.Uint64(info.MemoryStat.TotalUnevictable),
-		},
-
-		CpuStat: &protocol.InfoResponse_CpuStat{
-			Usage:  proto.Uint64(info.CPUStat.Usage),
-			User:   proto.Uint64(info.CPUStat.User),
-			System: proto.Uint64(info.CPUStat.System),
-		},
-
-		DiskStat: &protocol.InfoResponse_DiskStat{
-			BytesUsed:  proto.Uint64(info.DiskStat.BytesUsed),
-			InodesUsed: proto.Uint64(info.DiskStat.InodesUsed),
-		},
-
-		BandwidthStat: &protocol.InfoResponse_BandwidthStat{
-			InRate:   proto.Uint64(info.BandwidthStat.InRate),
-			InBurst:  proto.Uint64(info.BandwidthStat.InBurst),
-			OutRate:  proto.Uint64(info.BandwidthStat.OutRate),
-			OutBurst: proto.Uint64(info.BandwidthStat.OutBurst),
-		},
-	}, nil
+func (s *WardenServer) reapContainer(container backend.Container) {
+	log.Printf("reaping %s (idle for %s)\n", container.Handle(), container.GraceTime())
+	s.backend.Destroy(container.Handle())
 }
