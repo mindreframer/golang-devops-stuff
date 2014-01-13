@@ -33,14 +33,14 @@ var _ = Describe("CrashCount", func() {
 	Describe("NewCrashCountFromJSON", func() {
 		It("should create right crash count", func() {
 			decoded, err := NewCrashCountFromJSON(crashCount.ToJSON())
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(decoded).Should(Equal(crashCount))
 		})
 
 		It("should error when passed invalid json", func() {
 			message, err := NewCrashCountFromJSON([]byte("∂"))
 			Ω(message).Should(BeZero())
-			Ω(err).Should(HaveOccured())
+			Ω(err).Should(HaveOccurred())
 		})
 	})
 

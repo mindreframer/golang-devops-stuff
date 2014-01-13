@@ -20,26 +20,26 @@ var _ = Describe("BasicAuthInfo", func() {
 			It("should return an error", func() {
 				authInfo, err := DecodeBasicAuthInfo("bWNhdDp0ZXN0aW5n")
 				Ω(authInfo).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 
 				authInfo, err = DecodeBasicAuthInfo("Basic " + base64.StdEncoding.EncodeToString([]byte("pink-flamingoes")))
 				Ω(authInfo).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 
 				authInfo, err = DecodeBasicAuthInfo("Basic " + base64.StdEncoding.EncodeToString([]byte("pink-flamingoes:password:oops")))
 				Ω(authInfo).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 
 				authInfo, err = DecodeBasicAuthInfo("Basic " + base64.StdEncoding.EncodeToString([]byte("pink-flamingoes:password")) + " oops")
 				Ω(authInfo).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 			})
 		})
 
 		Context("when all is well", func() {
 			It("should decode the user and password and not return an error", func() {
 				authInfo, err := DecodeBasicAuthInfo("Basic bWNhdDp0ZXN0aW5n")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				Ω(authInfo.User).Should(Equal("mcat"))
 				Ω(authInfo.Password).Should(Equal("testing"))

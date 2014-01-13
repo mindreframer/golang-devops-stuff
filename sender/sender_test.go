@@ -87,7 +87,7 @@ var _ = Describe("Sender", func() {
 	Context("when there are no start messages in the queue", func() {
 		It("should not send any messages", func() {
 			err := sender.Send()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(messageBus.PublishedMessages).Should(BeEmpty())
 		})
 	})
@@ -95,7 +95,7 @@ var _ = Describe("Sender", func() {
 	Context("when there are no stop messages in the queue", func() {
 		It("should not send any messages", func() {
 			err := sender.Send()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(messageBus.PublishedMessages).Should(BeEmpty())
 		})
 	})
@@ -131,7 +131,7 @@ var _ = Describe("Sender", func() {
 			})
 
 			It("should not error", func() {
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should not send the messages", func() {
@@ -169,7 +169,7 @@ var _ = Describe("Sender", func() {
 			})
 
 			It("should not error", func() {
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			Context("when the message should be kept alive", func() {
@@ -191,7 +191,7 @@ var _ = Describe("Sender", func() {
 					})
 
 					It("should return an error", func() {
-						Ω(err).Should(HaveOccured())
+						Ω(err).Should(HaveOccurred())
 					})
 				})
 			})
@@ -212,7 +212,7 @@ var _ = Describe("Sender", func() {
 					})
 
 					It("should return an error", func() {
-						Ω(err).Should(HaveOccured())
+						Ω(err).Should(HaveOccurred())
 					})
 				})
 			})
@@ -223,7 +223,7 @@ var _ = Describe("Sender", func() {
 				})
 
 				It("should return an error", func() {
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 				})
 
 				It("should not increment the metrics", func() {
@@ -301,7 +301,7 @@ var _ = Describe("Sender", func() {
 			})
 
 			It("should not error", func() {
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should not send the messages", func() {
@@ -324,7 +324,7 @@ var _ = Describe("Sender", func() {
 			})
 
 			It("should not error", func() {
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should send the message", func() {
@@ -363,7 +363,7 @@ var _ = Describe("Sender", func() {
 					})
 
 					It("should return an error", func() {
-						Ω(err).Should(HaveOccured())
+						Ω(err).Should(HaveOccurred())
 					})
 				})
 			})
@@ -384,7 +384,7 @@ var _ = Describe("Sender", func() {
 					})
 
 					It("should return an error", func() {
-						Ω(err).Should(HaveOccured())
+						Ω(err).Should(HaveOccurred())
 					})
 				})
 			})
@@ -395,7 +395,7 @@ var _ = Describe("Sender", func() {
 				})
 
 				It("should return an error", func() {
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 
 				})
 				It("should not increment the metrics", func() {
@@ -411,7 +411,7 @@ var _ = Describe("Sender", func() {
 			})
 
 			It("should not error", func() {
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should not increment the metrics", func() {
@@ -786,7 +786,7 @@ var _ = Describe("Sender", func() {
 
 			timeProvider.TimeToProvide = time.Unix(130, 0)
 			err := sender.Send()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		It("should limit the number of start messages that it sends", func() {

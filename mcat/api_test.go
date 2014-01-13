@@ -42,10 +42,10 @@ var _ = Describe("Serving API", func() {
 
 				close(done)
 			})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			err = coordinator.MessageBus.PublishWithReplyTo("app.state", replyTo, validRequest)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 	})
 
@@ -62,10 +62,10 @@ var _ = Describe("Serving API", func() {
 
 				close(done)
 			})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			err = coordinator.MessageBus.PublishWithReplyTo("app.state", replyTo, validRequest)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 	})
 })

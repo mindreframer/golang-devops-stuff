@@ -27,7 +27,7 @@ func NewNATSRunner(port int) *NATSRunner {
 func (runner *NATSRunner) Start() {
 	runner.natsCommand = exec.Command("gnatsd", "-p", strconv.Itoa(runner.port))
 	err := runner.natsCommand.Start()
-	Ω(err).ShouldNot(HaveOccured(), "Make sure to have gnatsd on your path")
+	Ω(err).ShouldNot(HaveOccurred(), "Make sure to have gnatsd on your path")
 
 	connectionInfo := &yagnats.ConnectionInfo{
 		Addr: fmt.Sprintf("127.0.0.1:%d", runner.port),
@@ -37,7 +37,7 @@ func (runner *NATSRunner) Start() {
 
 	Eventually(func() error {
 		return messageBus.Connect(connectionInfo)
-	}, 5, 0.1).ShouldNot(HaveOccured())
+	}, 5, 0.1).ShouldNot(HaveOccurred())
 
 	runner.MessageBus = messageBus
 }

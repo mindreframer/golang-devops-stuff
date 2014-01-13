@@ -26,7 +26,7 @@ var _ = Describe("Serving Metrics", func() {
 
 		var err error
 		ip, err = localip.LocalIP()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 	})
 
 	AfterEach(func() {
@@ -59,12 +59,12 @@ var _ = Describe("Serving Metrics", func() {
 
 		It("should not count as an app with missing instances", func() {
 			resp, err := http.Get(fmt.Sprintf("http://bob:password@%s:%d/varz", ip, coordinator.MetricsServerPort))
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			defer resp.Body.Close()
 			body, err := ioutil.ReadAll(resp.Body)
 			bodyAsString := string(body)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(bodyAsString).Should(ContainSubstring(`"name":"NumberOfAppsWithMissingInstances","value":0`))
 		})
 	})
@@ -78,12 +78,12 @@ var _ = Describe("Serving Metrics", func() {
 
 		It("should return the metrics", func() {
 			resp, err := http.Get(fmt.Sprintf("http://bob:password@%s:%d/varz", ip, coordinator.MetricsServerPort))
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			defer resp.Body.Close()
 			body, err := ioutil.ReadAll(resp.Body)
 			bodyAsString := string(body)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(bodyAsString).Should(ContainSubstring(`"name":"NumberOfUndesiredRunningApps","value":0`))
 			Ω(bodyAsString).Should(ContainSubstring(`"name":"NumberOfAppsWithMissingInstances","value":1`))
 			Ω(bodyAsString).Should(ContainSubstring(`"name":"StartMissing","value":1`))
@@ -99,12 +99,12 @@ var _ = Describe("Serving Metrics", func() {
 
 		It("should return -1 for all metrics", func() {
 			resp, err := http.Get(fmt.Sprintf("http://bob:password@%s:%d/varz", ip, coordinator.MetricsServerPort))
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			defer resp.Body.Close()
 			body, err := ioutil.ReadAll(resp.Body)
 			bodyAsString := string(body)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(bodyAsString).Should(ContainSubstring(`"name":"NumberOfUndesiredRunningApps","value":-1`))
 			Ω(bodyAsString).Should(ContainSubstring(`"name":"NumberOfAppsWithMissingInstances","value":-1`))
 			Ω(bodyAsString).Should(ContainSubstring(`"name":"HM9000"`))

@@ -64,7 +64,7 @@ var _ = Describe("Config", func() {
 	Context("when passed valid JSON", func() {
 		It("deserializes", func() {
 			config, err := FromJSON([]byte(configJSON))
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(config.HeartbeatPeriod).Should(BeNumerically("==", 10))
 			Ω(config.HeartbeatTTL()).Should(BeNumerically("==", 30))
 			Ω(config.ActualFreshnessTTL()).Should(BeNumerically("==", 30))
@@ -132,7 +132,7 @@ var _ = Describe("Config", func() {
 	Describe("loading up the default config", func() {
 		It("should load up the JSON in default_config.json", func() {
 			config, err := DefaultConfig()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			expectedConfig, _ := FromJSON([]byte(configJSON))
 			Ω(config).Should(Equal(expectedConfig))
@@ -144,7 +144,7 @@ var _ = Describe("Config", func() {
 			ioutil.WriteFile("/tmp/_test_config.json", []byte(configJSON), 0777)
 
 			config, err := FromFile("/tmp/_test_config.json")
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			expectedConfig, _ := FromJSON([]byte(configJSON))
 			Ω(config).Should(Equal(expectedConfig))
@@ -154,7 +154,7 @@ var _ = Describe("Config", func() {
 	Context("when passed invalid JSON", func() {
 		It("should not deserialize", func() {
 			config, err := FromJSON([]byte("¥"))
-			Ω(err).Should(HaveOccured())
+			Ω(err).Should(HaveOccurred())
 			Ω(config).Should(BeNil())
 		})
 	})

@@ -110,6 +110,7 @@ func (a *App) InstanceWithGuid(instanceGuid string) InstanceHeartbeat {
 }
 
 func (a *App) ExtraStartingOrRunningInstances() (extras []InstanceHeartbeat) {
+	extras = []InstanceHeartbeat{}
 	for _, heartbeat := range a.InstanceHeartbeats {
 		if !a.IsIndexDesired(heartbeat.InstanceIndex) && heartbeat.IsStartingOrRunning() {
 			extras = append(extras, heartbeat)
@@ -139,6 +140,7 @@ func (a *App) NumberOfDesiredIndicesWithAStartingOrRunningInstance() (count int)
 }
 
 func (a *App) StartingOrRunningInstancesAtIndex(index int) (instances []InstanceHeartbeat) {
+	instances = []InstanceHeartbeat{}
 	for _, heartbeat := range a.InstanceHeartbeatsAtIndex(index) {
 		if heartbeat.IsStartingOrRunning() {
 			instances = append(instances, heartbeat)
@@ -159,6 +161,8 @@ func (a *App) HeartbeatsByIndex() (heartbeatsByIndex map[int][]InstanceHeartbeat
 }
 
 func (a *App) EvacuatingInstancesAtIndex(index int) (instances []InstanceHeartbeat) {
+	instances = []InstanceHeartbeat{}
+
 	for _, heartbeat := range a.InstanceHeartbeats {
 		if heartbeat.IsEvacuating() && heartbeat.InstanceIndex == index {
 			instances = append(instances, heartbeat)
@@ -265,7 +269,12 @@ func (a *App) NumberOfCrashedIndices() (count int) {
 
 func (a *App) InstanceHeartbeatsAtIndex(index int) (heartbeats []InstanceHeartbeat) {
 	a.verifyInstanceHeartbeatsByIndexIsReady()
-	return a.instanceHeartbeatsByIndex[index]
+	heartbeats, hasInstanceHeartbeatsAtIndex := a.instanceHeartbeatsByIndex[index]
+	if !hasInstanceHeartbeatsAtIndex {
+		return []InstanceHeartbeat{}
+	} else {
+		return heartbeats
+	}
 }
 
 func (a *App) verifyInstanceHeartbeatsByIndexIsReady() {

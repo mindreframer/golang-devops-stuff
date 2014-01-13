@@ -63,9 +63,9 @@ var _ = Describe("Fetching from CC and storing the result in the Store", func() 
 
 	It("bumps the freshness", func() {
 		Eventually(func() error {
-			_, err := storeAdapter.Get("/v1" + conf.DesiredFreshnessKey)
+			_, err := storeAdapter.Get("/hm/v1" + conf.DesiredFreshnessKey)
 			return err
-		}, 1, 0.1).ShouldNot(HaveOccured())
+		}, 1, 0.1).ShouldNot(HaveOccurred())
 	})
 
 	It("reports success to the channel", func() {
@@ -73,7 +73,7 @@ var _ = Describe("Fetching from CC and storing the result in the Store", func() 
 		Ω(result.Success).Should(BeTrue())
 		Ω(result.NumResults).Should(Equal(3))
 		Ω(result.Message).Should(BeZero())
-		Ω(result.Error).ShouldNot(HaveOccured())
+		Ω(result.Error).ShouldNot(HaveOccurred())
 	})
 
 	Context("when fetching again, and apps have been stopped and/or deleted", func() {
@@ -95,7 +95,7 @@ var _ = Describe("Fetching from CC and storing the result in the Store", func() 
 			<-resultChan
 
 			desired, err := store.GetDesiredState()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(desired).Should(HaveLen(1))
 			Ω(desired).Should(HaveKey(a3.AppGuid + "," + a3.AppVersion))
 		})

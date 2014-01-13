@@ -67,7 +67,7 @@ var _ = Describe("Analyzer", func() {
 		Context("When there are no desired or running apps", func() {
 			It("should not send any start or stop messages", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(startMessages()).Should(BeEmpty())
 				Ω(stopMessages()).Should(BeEmpty())
 			})
@@ -85,7 +85,7 @@ var _ = Describe("Analyzer", func() {
 
 			It("should not send any start or stop messages", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(startMessages()).Should(BeEmpty())
 				Ω(stopMessages()).Should(BeEmpty())
 			})
@@ -103,7 +103,7 @@ var _ = Describe("Analyzer", func() {
 			Context("and none of the instances are running", func() {
 				It("should send a start message for each of the missing instances", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(stopMessages()).Should(BeEmpty())
 					Ω(startMessages()).Should(HaveLen(2))
 
@@ -145,7 +145,7 @@ var _ = Describe("Analyzer", func() {
 
 				It("should return a start message containing only the missing indices", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(stopMessages()).Should(BeEmpty())
 
 					Ω(startMessages()).Should(HaveLen(1))
@@ -171,7 +171,7 @@ var _ = Describe("Analyzer", func() {
 
 				It("should not start any missing instances", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(stopMessages()).Should(BeEmpty())
 					Ω(startMessages()).Should(BeEmpty())
 				})
@@ -187,7 +187,7 @@ var _ = Describe("Analyzer", func() {
 		Context("when there are no desired instances", func() {
 			It("should return an array of stop messages for the extra instances", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(startMessages()).Should(BeEmpty())
 				Ω(stopMessages()).Should(HaveLen(3))
 
@@ -228,7 +228,7 @@ var _ = Describe("Analyzer", func() {
 			Context("and all desired instances are present", func() {
 				It("should return an array of stop messages for the (correct) extra instances", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(startMessages()).Should(BeEmpty())
 
 					Ω(stopMessages()).Should(HaveLen(2))
@@ -243,12 +243,12 @@ var _ = Describe("Analyzer", func() {
 
 			Context("and desired instances are missing", func() {
 				BeforeEach(func() {
-					storeAdapter.Delete("/v1/apps/actual/" + app.AppGuid + "," + app.AppVersion + "/" + app.InstanceAtIndex(0).InstanceGuid)
+					storeAdapter.Delete("/hm/v1/apps/actual/" + app.AppGuid + "," + app.AppVersion + "/" + app.InstanceAtIndex(0).InstanceGuid)
 				})
 
 				It("should return a start message containing the missing indices and no stop messages", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(startMessages()).Should(HaveLen(1))
 
@@ -292,7 +292,7 @@ var _ = Describe("Analyzer", func() {
 				))
 
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(stopMessages()).Should(BeEmpty())
 
 				Ω(startMessages()).Should(HaveLen(2))
@@ -322,7 +322,7 @@ var _ = Describe("Analyzer", func() {
 
 			It("should schedule a stop for every running instance at the duplicated index with increasing delays", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(startMessages()).Should(BeEmpty())
 
 				Ω(stopMessages()).Should(HaveLen(3))
@@ -386,7 +386,7 @@ var _ = Describe("Analyzer", func() {
 				))
 
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(startMessages()).Should(BeEmpty())
 
 				Ω(stopMessages()).Should(HaveLen(3))
@@ -419,7 +419,7 @@ var _ = Describe("Analyzer", func() {
 		Context("when the app is no longer desired", func() {
 			It("should send an immediate stop", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				Ω(startMessages()).Should(BeEmpty())
 
@@ -442,7 +442,7 @@ var _ = Describe("Analyzer", func() {
 
 			It("should send an immediate start & stop (as the EVACUATING instance cannot be started on another DEA, but we're going to try...)", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				Ω(startMessages()).Should(HaveLen(1))
 				Ω(stopMessages()).Should(HaveLen(1))
@@ -462,7 +462,7 @@ var _ = Describe("Analyzer", func() {
 
 			It("should send an immediate stop", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				Ω(startMessages()).Should(BeEmpty())
 
@@ -481,7 +481,7 @@ var _ = Describe("Analyzer", func() {
 			Context("and no other instances", func() {
 				It("should schedule an immediate start message and no stop message", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(stopMessages()).Should(BeEmpty())
 
@@ -502,7 +502,7 @@ var _ = Describe("Analyzer", func() {
 
 				It("should schedule an immediate stop for the EVACUATING instance", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(startMessages()).Should(BeEmpty())
 
@@ -525,7 +525,7 @@ var _ = Describe("Analyzer", func() {
 
 					It("should schedule an immediate stop for both EVACUATING instances", func() {
 						err := analyzer.Analyze()
-						Ω(err).ShouldNot(HaveOccured())
+						Ω(err).ShouldNot(HaveOccurred())
 
 						Ω(startMessages()).Should(BeEmpty())
 
@@ -550,26 +550,26 @@ var _ = Describe("Analyzer", func() {
 
 				It("should not schedule anything", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(startMessages()).Should(BeEmpty())
 					Ω(stopMessages()).Should(BeEmpty())
 				})
 			})
 
-			Context("and the evacuating index's crash count exceeds NumberOfCrashesBeforeBackoffBegins", func() {
+			Context("and the evacuating index's crash count is greater than 0", func() {
 				BeforeEach(func() {
 					store.SaveCrashCounts(models.CrashCount{
 						AppGuid:       app.AppGuid,
 						AppVersion:    app.AppVersion,
 						InstanceIndex: 1,
-						CrashCount:    conf.NumberOfCrashesBeforeBackoffBegins + 1,
+						CrashCount:    1,
 					})
 				})
 
 				It("should schedule an immediate start message *and* a stop message for the EVACUATING instance", func() {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(startMessages()).Should(HaveLen(1))
 					expectedMessageForIndex1 := models.NewPendingStartMessage(timeProvider.Time(), 0, conf.GracePeriod(), app.AppGuid, app.AppVersion, 1, 2.0, models.PendingStartMessageReasonEvacuating)
@@ -588,7 +588,7 @@ var _ = Describe("Analyzer", func() {
 		Context("When there are multiple crashed instances on the same index", func() {
 			JustBeforeEach(func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			BeforeEach(func() {
@@ -669,7 +669,7 @@ var _ = Describe("Analyzer", func() {
 
 				for _, expectedDelay := range expectedDelays {
 					err := analyzer.Analyze()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(startMessages()[0].SendOn).Should(Equal(timeProvider.Time().Unix() + expectedDelay))
 					Ω(startMessages()[0].StartReason).Should(Equal(models.PendingStartMessageReasonCrashed))
 					store.DeletePendingStartMessages(startMessages()...)
@@ -689,7 +689,7 @@ var _ = Describe("Analyzer", func() {
 
 			It("should only try to start the index 0", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(startMessages()).Should(HaveLen(1))
 				Ω(startMessages()[0].IndexToStart).Should(Equal(0))
 			})
@@ -707,7 +707,7 @@ var _ = Describe("Analyzer", func() {
 
 			It("should only try to start the index 0", func() {
 				err := analyzer.Analyze()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(startMessages()).Should(HaveLen(2))
 				indexesToStart := []int{}
 				for _, message := range startMessages() {
@@ -748,7 +748,7 @@ var _ = Describe("Analyzer", func() {
 
 		It("should analyze each app-version combination separately", func() {
 			err := analyzer.Analyze()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			Ω(startMessages()).Should(HaveLen(3))
 

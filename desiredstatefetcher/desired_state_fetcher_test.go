@@ -47,7 +47,7 @@ var _ = Describe("DesiredStateFetcher", func() {
 	BeforeEach(func() {
 		var err error
 		conf, err = config.DefaultConfig()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		metricsAccountant = fakemetricsaccountant.New()
 
@@ -75,7 +75,7 @@ var _ = Describe("DesiredStateFetcher", func() {
 			result := <-resultChan
 			Ω(result.Success).Should(BeFalse())
 			Ω(result.Message).Should(Equal("Failed to generate URL request"))
-			Ω(result.Error).Should(HaveOccured())
+			Ω(result.Error).Should(HaveOccurred())
 			close(done)
 		}, 0.1)
 	})
@@ -118,7 +118,7 @@ var _ = Describe("DesiredStateFetcher", func() {
 				result := <-resultChan
 				Ω(result.Success).Should(BeFalse())
 				Ω(result.Message).Should(Equal(expectedMessage))
-				Ω(result.Error).Should(HaveOccured())
+				Ω(result.Error).Should(HaveOccurred())
 				close(done)
 			}, 1.0)
 		}
@@ -227,7 +227,7 @@ var _ = Describe("DesiredStateFetcher", func() {
 					result := <-resultChan
 					Ω(result.Success).Should(BeTrue())
 					Ω(result.Message).Should(BeZero())
-					Ω(result.Error).ShouldNot(HaveOccured())
+					Ω(result.Error).ShouldNot(HaveOccurred())
 					close(done)
 				}, 0.1)
 

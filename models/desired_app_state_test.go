@@ -35,7 +35,7 @@ var _ = Describe("DesiredAppState", func() {
 	                    "package_state":"STAGED"
 	                }`))
 
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(jsonDesired).Should(EqualDesiredState(desiredAppState))
 				})
@@ -46,7 +46,7 @@ var _ = Describe("DesiredAppState", func() {
 					desired, err := NewDesiredAppStateFromJSON([]byte(`{`))
 
 					Ω(desired).Should(BeZero())
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 				})
 			})
 		})
@@ -55,7 +55,7 @@ var _ = Describe("DesiredAppState", func() {
 			It("outputs to JSON", func() {
 				var decoded DesiredAppState
 				err := json.Unmarshal(desiredAppState.ToJSON(), &decoded)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(decoded).Should(EqualDesiredState(desiredAppState))
 			})
 		})
@@ -64,7 +64,7 @@ var _ = Describe("DesiredAppState", func() {
 			Context("When all is well", func() {
 				It("should, like, totally build from CSV", func() {
 					csvDesired, err := NewDesiredAppStateFromCSV("app_guid_abc", "app_version_123", []byte("3,STOPPED,STAGED"))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(csvDesired).Should(EqualDesiredState(desiredAppState))
 				})
 			})
@@ -73,11 +73,11 @@ var _ = Describe("DesiredAppState", func() {
 				It("returns a zero desired state and an error", func() {
 					desired, err := NewDesiredAppStateFromCSV("app_guid_abc", "app_version_123", []byte(`1,STOPPED`))
 					Ω(desired).Should(BeZero())
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 
 					desired, err = NewDesiredAppStateFromCSV("app_guid_abc", "app_version_123", []byte(`LOL,STOPPED`))
 					Ω(desired).Should(BeZero())
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 				})
 			})
 		})

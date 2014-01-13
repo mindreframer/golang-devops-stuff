@@ -131,18 +131,6 @@ func main() {
 				hm.Dump(logger, conf, c.Bool("raw"))
 			},
 		},
-		{
-			Name:        "clear_store",
-			Description: "Clears contents of the data store",
-			Usage:       "hm clear_store --config=/path/to/config",
-			Flags: []cli.Flag{
-				cli.StringFlag{"config", "", "Path to config file"},
-			},
-			Action: func(c *cli.Context) {
-				logger, _, conf := loadLoggerAndConfig(c, "store_clearer")
-				hm.Clear(logger, conf)
-			},
-		},
 	}
 
 	app.Run(os.Args)

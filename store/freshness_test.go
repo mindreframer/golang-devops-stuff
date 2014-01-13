@@ -26,7 +26,7 @@ var _ = Describe("Freshness", func() {
 	BeforeEach(func() {
 		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
 		err := storeAdapter.Connect()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		store = NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 	})
@@ -45,13 +45,13 @@ var _ = Describe("Freshness", func() {
 					Ω(err).Should(Equal(storeadapter.ErrorKeyNotFound))
 
 					err = bump(store, timestamp)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should create the key with the current timestamp and a TTL", func() {
 					value, err := storeAdapter.Get(key)
 
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					var freshnessTimestamp models.FreshnessTimestamp
 					json.Unmarshal(value.Value, &freshnessTimestamp)
@@ -65,15 +65,15 @@ var _ = Describe("Freshness", func() {
 			Context("when the key is present", func() {
 				BeforeEach(func() {
 					err := bump(store, time.Unix(100, 0))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					err = bump(store, timestamp)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should bump the key's TTL but not change the timestamp", func() {
 					value, err := storeAdapter.Get(key)
 
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(value.TTL).Should(BeNumerically("==", ttl))
 
@@ -87,7 +87,7 @@ var _ = Describe("Freshness", func() {
 		}
 
 		Context("the actual state", func() {
-			bumpingFreshness("/v1"+conf.ActualFreshnessKey, conf.ActualFreshnessTTL(), Store.BumpActualFreshness)
+			bumpingFreshness("/hm/v1"+conf.ActualFreshnessKey, conf.ActualFreshnessTTL(), Store.BumpActualFreshness)
 
 			Context("revoking actual state freshness", func() {
 				BeforeEach(func() {
@@ -96,20 +96,20 @@ var _ = Describe("Freshness", func() {
 
 				It("should no longer be fresh", func() {
 					fresh, err := store.IsActualStateFresh(time.Unix(130, 0))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(fresh).Should(BeTrue())
 
 					store.RevokeActualFreshness()
 
 					fresh, err = store.IsActualStateFresh(time.Unix(130, 0))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(fresh).Should(BeFalse())
 				})
 			})
 		})
 
 		Context("the desired state", func() {
-			bumpingFreshness("/v1"+conf.DesiredFreshnessKey, conf.DesiredFreshnessTTL(), Store.BumpDesiredFreshness)
+			bumpingFreshness("/hm/v1"+conf.DesiredFreshnessKey, conf.DesiredFreshnessTTL(), Store.BumpDesiredFreshness)
 		})
 	})
 
@@ -142,7 +142,7 @@ var _ = Describe("Freshness", func() {
 				store.BumpActualFreshness(time.Unix(100, 0))
 				store.BumpDesiredFreshness(time.Unix(100, 0))
 				err := store.VerifyFreshness(time.Unix(int64(100+conf.ActualFreshnessTTL()), 0))
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 		})
 	})
@@ -151,7 +151,7 @@ var _ = Describe("Freshness", func() {
 		Context("if the freshness key is not present", func() {
 			It("returns that the state is not fresh", func() {
 				fresh, err := store.IsDesiredStateFresh()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(fresh).Should(BeFalse())
 			})
 		})
@@ -163,7 +163,7 @@ var _ = Describe("Freshness", func() {
 
 			It("returns that the state is fresh", func() {
 				fresh, err := store.IsDesiredStateFresh()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(fresh).Should(BeTrue())
 			})
 		})
@@ -172,11 +172,11 @@ var _ = Describe("Freshness", func() {
 			BeforeEach(func() {
 				err := storeAdapter.Set([]storeadapter.StoreNode{
 					{
-						Key:   "/v1/desired-fresh/mwahaha",
+						Key:   "/hm/v1/desired-fresh/mwahaha",
 						Value: []byte("i'm a directory...."),
 					},
 				})
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should return the store's error", func() {
@@ -191,7 +191,7 @@ var _ = Describe("Freshness", func() {
 		Context("if the freshness key is not present", func() {
 			It("returns that the state is not fresh", func() {
 				fresh, err := store.IsActualStateFresh(time.Unix(130, 0))
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(fresh).Should(BeFalse())
 			})
 		})
@@ -204,7 +204,7 @@ var _ = Describe("Freshness", func() {
 			Context("if the creation time of the key is outside the last x seconds", func() {
 				It("returns that the state is fresh", func() {
 					fresh, err := store.IsActualStateFresh(time.Unix(130, 0))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(fresh).Should(BeTrue())
 				})
 			})
@@ -212,7 +212,7 @@ var _ = Describe("Freshness", func() {
 			Context("if the creation time of the key is within the last x seconds", func() {
 				It("returns that the state is not fresh", func() {
 					fresh, err := store.IsActualStateFresh(time.Unix(129, 0))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(fresh).Should(BeFalse())
 				})
 			})
@@ -221,7 +221,7 @@ var _ = Describe("Freshness", func() {
 				BeforeEach(func() {
 					storeAdapter.Set([]storeadapter.StoreNode{
 						{
-							Key:   "/v1/actual-fresh",
+							Key:   "/hm/v1/actual-fresh",
 							Value: []byte("ß"),
 						},
 					})
@@ -229,7 +229,7 @@ var _ = Describe("Freshness", func() {
 
 				It("should return an error", func() {
 					fresh, err := store.IsActualStateFresh(time.Unix(129, 0))
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 					Ω(fresh).Should(BeFalse())
 				})
 			})
@@ -239,11 +239,11 @@ var _ = Describe("Freshness", func() {
 			BeforeEach(func() {
 				err := storeAdapter.Set([]storeadapter.StoreNode{
 					{
-						Key:   "/v1/actual-fresh/mwahaha",
+						Key:   "/hm/v1/actual-fresh/mwahaha",
 						Value: []byte("i'm a directory...."),
 					},
 				})
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should return the store's error", func() {

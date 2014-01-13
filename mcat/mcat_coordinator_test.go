@@ -53,7 +53,7 @@ func NewMCATCoordinator(parallelNode int, verbose bool) *MCATCoordinator {
 
 func (coordinator *MCATCoordinator) loadConfig() {
 	conf, err := config.DefaultConfig()
-	Ω(err).ShouldNot(HaveOccured())
+	Ω(err).ShouldNot(HaveOccurred())
 	coordinator.Conf = conf
 }
 
@@ -102,7 +102,7 @@ func (coordinator *MCATCoordinator) StartETCD() {
 
 	coordinator.StoreAdapter = storeadapter.NewETCDStoreAdapter(coordinator.StoreRunner.NodeURLS(), workerpool.NewWorkerPool(coordinator.Conf.StoreMaxConcurrentRequests))
 	err := coordinator.StoreAdapter.Connect()
-	Ω(err).ShouldNot(HaveOccured())
+	Ω(err).ShouldNot(HaveOccurred())
 }
 
 func (coordinator *MCATCoordinator) StartZooKeeper() {
@@ -113,7 +113,7 @@ func (coordinator *MCATCoordinator) StartZooKeeper() {
 
 	coordinator.StoreAdapter = storeadapter.NewZookeeperStoreAdapter(coordinator.StoreRunner.NodeURLS(), workerpool.NewWorkerPool(coordinator.Conf.StoreMaxConcurrentRequests), &timeprovider.RealTimeProvider{}, time.Second)
 	err := coordinator.StoreAdapter.Connect()
-	Ω(err).ShouldNot(HaveOccured())
+	Ω(err).ShouldNot(HaveOccurred())
 }
 
 func (coordinator *MCATCoordinator) StopStore() {

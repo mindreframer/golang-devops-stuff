@@ -16,9 +16,12 @@ func FetchDesiredState(l logger.Logger, conf *config.Config, poll bool) {
 
 	if poll {
 		l.Info("Starting Desired State Daemon...")
+
+		locker := buildLocker(l, conf, "fetcher")
+
 		err := Daemonize("Fetcher", func() error {
 			return fetchDesiredState(l, conf, store)
-		}, conf.FetcherPollingInterval(), conf.FetcherTimeout(), l)
+		}, conf.FetcherPollingInterval(), conf.FetcherTimeout(), l, locker)
 		if err != nil {
 			l.Error("Desired State Daemon Errored", err)
 		}

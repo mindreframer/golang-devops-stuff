@@ -132,7 +132,7 @@ func (adapter *ZookeeperStoreAdapter) ListRecursively(key string) (StoreNode, er
 
 	if len(nodeKeys) == 0 {
 		if adapter.isNodeDirectory(key) {
-			return StoreNode{Key: key, Dir: true}, nil
+			return StoreNode{Key: key, Dir: true, ChildNodes: []StoreNode{}}, nil
 		} else {
 			return StoreNode{}, ErrorNodeIsNotDirectory
 		}
@@ -166,7 +166,7 @@ func (adapter *ZookeeperStoreAdapter) ListRecursively(key string) (StoreNode, er
 }
 
 func (adapter *ZookeeperStoreAdapter) Delete(keys ...string) error {
-	//TODO: this can be optimized if we choose to go with zookeeper (can use the worker pool)
+	//NOTE: this can be optimized if we choose to go with zookeeper (can use the worker pool)
 	var finalErr error
 	for _, key := range keys {
 		exists, stat, err := adapter.client.Exists(key)

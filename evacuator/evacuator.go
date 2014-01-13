@@ -1,6 +1,7 @@
 package evacuator
 
 import (
+	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/helpers/logger"
 	"github.com/cloudfoundry/hm9000/helpers/timeprovider"
 	"github.com/cloudfoundry/hm9000/models"
@@ -12,14 +13,16 @@ type Evacuator struct {
 	messageBus   yagnats.NATSClient
 	store        store.Store
 	timeProvider timeprovider.TimeProvider
+	config       *config.Config
 	logger       logger.Logger
 }
 
-func New(messageBus yagnats.NATSClient, store store.Store, timeProvider timeprovider.TimeProvider, logger logger.Logger) *Evacuator {
+func New(messageBus yagnats.NATSClient, store store.Store, timeProvider timeprovider.TimeProvider, config *config.Config, logger logger.Logger) *Evacuator {
 	return &Evacuator{
 		messageBus:   messageBus,
 		store:        store,
 		timeProvider: timeProvider,
+		config:       config,
 		logger:       logger,
 	}
 }
@@ -42,7 +45,7 @@ func (e *Evacuator) handleExited(exited models.DropletExited) {
 		startMessage := models.NewPendingStartMessage(
 			e.timeProvider.Time(),
 			0,
-			0,
+			e.config.GracePeriod(),
 			exited.AppGuid,
 			exited.AppVersion,
 			exited.InstanceIndex,

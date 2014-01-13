@@ -30,28 +30,31 @@ func (adapter *ETCDStoreAdapter) Disconnect() error {
 	return nil
 }
 
+func (adapter *ETCDStoreAdapter) isETCDErrorWithCode(err error, code int) bool {
+	if err != nil {
+		etcdError, ok := err.(etcd.EtcdError)
+		if ok && etcdError.ErrorCode == code {
+			return true
+		}
+
+		etcdErrorP, ok := err.(*etcd.EtcdError)
+		if ok && etcdErrorP.ErrorCode == code {
+			return true
+		}
+	}
+	return false
+}
+
 func (adapter *ETCDStoreAdapter) isTimeoutError(err error) bool {
-	return err != nil && err.Error() == "Cannot reach servers"
+	return adapter.isETCDErrorWithCode(err, 501)
 }
 
 func (adapter *ETCDStoreAdapter) isMissingKeyError(err error) bool {
-	if err != nil {
-		etcdError, ok := err.(etcd.EtcdError)
-		if ok && etcdError.ErrorCode == 100 { //yup.  100.
-			return true
-		}
-	}
-	return false
+	return adapter.isETCDErrorWithCode(err, 100)
 }
 
 func (adapter *ETCDStoreAdapter) isNotAFileError(err error) bool {
-	if err != nil {
-		etcdError, ok := err.(etcd.EtcdError)
-		if ok && etcdError.ErrorCode == 102 { //yup.  102.
-			return true
-		}
-	}
-	return false
+	return adapter.isETCDErrorWithCode(err, 102)
 }
 
 func (adapter *ETCDStoreAdapter) Set(nodes []StoreNode) error {
@@ -87,18 +90,13 @@ func (adapter *ETCDStoreAdapter) Set(nodes []StoreNode) error {
 }
 
 func (adapter *ETCDStoreAdapter) Get(key string) (StoreNode, error) {
-	//TODO: remove this terribleness when we upgrade go-etcd
-	if key == "/" {
-		key = "/?garbage=foo&"
-	}
-
 	done := make(chan bool, 1)
 	var response *etcd.Response
 	var err error
 
 	//we route through the worker pool to enable usage tracking
 	adapter.workerPool.ScheduleWork(func() {
-		response, err = adapter.client.Get(key, false)
+		response, err = adapter.client.Get(key, false, false)
 		done <- true
 	})
 
@@ -115,31 +113,26 @@ func (adapter *ETCDStoreAdapter) Get(key string) (StoreNode, error) {
 		return StoreNode{}, err
 	}
 
-	if response.Dir {
+	if response.Node.Dir {
 		return StoreNode{}, ErrorNodeIsDirectory
 	}
 
 	return StoreNode{
-		Key:   response.Key,
-		Value: []byte(response.Value),
-		Dir:   response.Dir,
-		TTL:   uint64(response.TTL),
+		Key:   response.Node.Key,
+		Value: []byte(response.Node.Value),
+		Dir:   response.Node.Dir,
+		TTL:   uint64(response.Node.TTL),
 	}, nil
 }
 
 func (adapter *ETCDStoreAdapter) ListRecursively(key string) (StoreNode, error) {
-	//TODO: remove this terribleness when we upgrade go-etcd
-	if key == "/" {
-		key = "/?recursive=true&garbage=foo&"
-	}
-
 	done := make(chan bool, 1)
 	var response *etcd.Response
 	var err error
 
 	//we route through the worker pool to enable usage tracking
 	adapter.workerPool.ScheduleWork(func() {
-		response, err = adapter.client.GetAll(key, false)
+		response, err = adapter.client.Get(key, false, true)
 		done <- true
 	})
 
@@ -157,42 +150,36 @@ func (adapter *ETCDStoreAdapter) ListRecursively(key string) (StoreNode, error) 
 		return StoreNode{}, err
 	}
 
-	if !response.Dir {
+	if !response.Node.Dir {
 		return StoreNode{}, ErrorNodeIsNotDirectory
 	}
 
-	if len(response.Kvs) == 0 {
-		return StoreNode{Key: key, Dir: true}, nil
+	if len(response.Node.Nodes) == 0 {
+		return StoreNode{Key: key, Dir: true, Value: []byte{}, ChildNodes: []StoreNode{}}, nil
 	}
 
-	kvPair := etcd.KeyValuePair{
-		Key:     response.Key,
-		Value:   response.Value,
-		Dir:     response.Dir,
-		KVPairs: response.Kvs,
-	}
-
-	return adapter.makeStoreNode(kvPair), nil
+	return adapter.makeStoreNode(*response.Node), nil
 }
 
-func (adapter *ETCDStoreAdapter) makeStoreNode(kvPair etcd.KeyValuePair) StoreNode {
-	if kvPair.Dir {
+func (adapter *ETCDStoreAdapter) makeStoreNode(etcdNode etcd.Node) StoreNode {
+	if etcdNode.Dir {
 		node := StoreNode{
-			Key:        kvPair.Key,
+			Key:        etcdNode.Key,
 			Dir:        true,
+			Value:      []byte{},
 			ChildNodes: []StoreNode{},
 		}
 
-		for _, child := range kvPair.KVPairs {
+		for _, child := range etcdNode.Nodes {
 			node.ChildNodes = append(node.ChildNodes, adapter.makeStoreNode(child))
 		}
 
 		return node
 	} else {
 		return StoreNode{
-			Key:   kvPair.Key,
-			Value: []byte(kvPair.Value),
-			// TTL:   uint64(kvPair.TTL),
+			Key:   etcdNode.Key,
+			Value: []byte(etcdNode.Value),
+			TTL:   uint64(etcdNode.TTL),
 		}
 	}
 }
@@ -203,7 +190,7 @@ func (adapter *ETCDStoreAdapter) Delete(keys ...string) error {
 	for _, key := range keys {
 		key := key
 		adapter.workerPool.ScheduleWork(func() {
-			_, err := adapter.client.DeleteAll(key)
+			_, err := adapter.client.Delete(key, true)
 			results <- err
 		})
 	}

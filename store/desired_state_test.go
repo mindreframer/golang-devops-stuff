@@ -26,10 +26,10 @@ var _ = Describe("Desired State", func() {
 	BeforeEach(func() {
 		var err error
 		conf, err = config.DefaultConfig()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
 		err = storeAdapter.Connect()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		app1 = appfixture.NewAppFixture()
 		app2 = appfixture.NewAppFixture()
@@ -48,12 +48,12 @@ var _ = Describe("Desired State", func() {
 				app1.DesiredState(1),
 				app2.DesiredState(1),
 			)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		It("should store the passed in desired state", func() {
 			desiredState, err := store.GetDesiredState()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			Ω(desiredState).Should(HaveLen(2))
 			Ω(desiredState[app1.DesiredState(1).StoreKey()]).Should(EqualDesiredState(app1.DesiredState(1)))
@@ -67,12 +67,12 @@ var _ = Describe("Desired State", func() {
 						app2.DesiredState(2),
 						app3.DesiredState(1),
 					)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should store the differences, adding any new state and removing any unrepresented state", func() {
 					desiredState, err := store.GetDesiredState()
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(desiredState).Should(HaveLen(2))
 					Ω(desiredState[app2.DesiredState(2).StoreKey()]).Should(EqualDesiredState(app2.DesiredState(2)))
@@ -89,12 +89,12 @@ var _ = Describe("Desired State", func() {
 					app1.DesiredState(1),
 					app2.DesiredState(1),
 				)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("can fetch the desired state", func() {
 				desired, err := store.GetDesiredState()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(desired[app1.DesiredState(1).StoreKey()]).Should(EqualDesiredState(app1.DesiredState(1)))
 				Ω(desired[app2.DesiredState(1).StoreKey()]).Should(EqualDesiredState(app2.DesiredState(1)))
 			})
@@ -103,7 +103,7 @@ var _ = Describe("Desired State", func() {
 		Context("when the desired state is empty", func() {
 			It("returns an empty hash", func() {
 				desired, err := store.GetDesiredState()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(desired).Should(BeEmpty())
 			})
 		})

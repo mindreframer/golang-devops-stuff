@@ -24,13 +24,13 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 	BeforeEach(func() {
 		var err error
 		client, _, err = zk.Connect(zookeeperRunner.NodeURLS(), time.Second)
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		timeProvider = &faketimeprovider.FakeTimeProvider{}
 
 		adapter = NewZookeeperStoreAdapter(zookeeperRunner.NodeURLS(), workerpool.NewWorkerPool(100), timeProvider, time.Second)
 		err = adapter.Connect()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		creationTime = time.Unix(100, 0)
 		timeProvider.TimeToProvide = creationTime
@@ -51,7 +51,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					TTL:   0,
 				}
 				err := adapter.Set(nodeArr)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should be able to set the key", func() {
@@ -59,11 +59,11 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 				Ω(string(data)).Should(Equal("100,0,bar"))
 				Ω(stat.NumChildren).Should(BeNumerically("==", 0))
 				Ω(stat.Version).Should(BeNumerically("==", 0))
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				acl, _, err := client.GetACL("/foo")
 				Ω(acl).Should(Equal(zk.WorldACL(zk.PermAll)))
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			Context("setting the key again", func() {
@@ -71,7 +71,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					nodeArr[0].Value = []byte("baz")
 					nodeArr[0].TTL = 20
 					err := adapter.Set(nodeArr)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should be able to overwrite the key", func() {
@@ -79,7 +79,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					Ω(string(data)).Should(Equal("100,20,baz"))
 					Ω(stat.NumChildren).Should(BeNumerically("==", 0))
 					Ω(stat.Version).Should(BeNumerically("==", 1))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 			})
 		})
@@ -92,7 +92,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					TTL:   0,
 				}
 				err := adapter.Set(nodeArr)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should be able to set the key", func() {
@@ -100,22 +100,22 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 				Ω(string(data)).Should(Equal("100,0,waffle"))
 				Ω(stat.NumChildren).Should(BeNumerically("==", 0))
 				Ω(stat.Version).Should(BeNumerically("==", 0))
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				acl, _, err := client.GetACL("/menu/breakfast")
 				Ω(acl).Should(Equal(zk.WorldACL(zk.PermAll)))
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				_, stat, err = client.Get("/menu")
 				Ω(stat.NumChildren).Should(BeNumerically("==", 1))
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			Context("setting the key again", func() {
 				BeforeEach(func() {
 					nodeArr[0].Value = []byte("pancake")
 					err := adapter.Set(nodeArr)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should be able to overwrite the key", func() {
@@ -123,7 +123,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					Ω(string(data)).Should(Equal("100,0,pancake"))
 					Ω(stat.NumChildren).Should(BeNumerically("==", 0))
 					Ω(stat.Version).Should(BeNumerically("==", 1))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 			})
 
@@ -147,7 +147,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 						TTL:   0,
 					}
 					err := adapter.Set(nodeArr)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should be able to overwrite the key", func() {
@@ -155,7 +155,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					Ω(kiddos).Should(HaveLen(2))
 					Ω(kiddos).Should(ContainElement("breakfast"))
 					Ω(kiddos).Should(ContainElement("lunch"))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 			})
 		})
@@ -170,13 +170,13 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					TTL:   30,
 				}
 				err := adapter.Set(nodeArr)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			Context("and the node has no children and is still alive", func() {
 				It("returns the contents of the node", func() {
 					node, err := adapter.Get("/menu/breakfast")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(node.Key).Should(Equal("/menu/breakfast"))
 					Ω(string(node.Value)).Should(Equal("waffle,banana"))
 					Ω(int(node.TTL)).Should(Equal(30))
@@ -200,7 +200,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 
 					It("returns the node with the correct TTL", func() {
 						node, err := adapter.Get("/menu/breakfast")
-						Ω(err).ShouldNot(HaveOccured())
+						Ω(err).ShouldNot(HaveOccurred())
 						Ω(int(node.TTL)).Should(BeNumerically(">", 0))
 						Ω(int(node.TTL)).Should(BeNumerically("<=", 2))
 					})
@@ -213,7 +213,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 
 					It("returns the node without modifying the TTL", func() {
 						node, err := adapter.Get("/menu/breakfast")
-						Ω(err).ShouldNot(HaveOccured())
+						Ω(err).ShouldNot(HaveOccurred())
 						Ω(int(node.TTL)).Should(Equal(30))
 					})
 				})
@@ -221,7 +221,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 				Context("and the node's TTL has expired", func() {
 					BeforeEach(func() {
 						_, _, err := client.Get("/menu/breakfast")
-						Ω(err).ShouldNot(HaveOccured())
+						Ω(err).ShouldNot(HaveOccurred())
 
 						timeProvider.TimeToProvide = creationTime.Add(31 * time.Second)
 					})
@@ -235,7 +235,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					It("deletes the node", func() {
 						adapter.Get("/menu/breakfast")
 						_, _, err := client.Get("/menu/breakfast")
-						Ω(err).Should(HaveOccured())
+						Ω(err).Should(HaveOccurred())
 					})
 				})
 			})
@@ -249,13 +249,13 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					TTL:   0,
 				}
 				err := adapter.Set(nodeArr)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should never mark the node as expired", func() {
 				timeProvider.TimeToProvide = creationTime.Add(24 * time.Hour)
 				node, err := adapter.Get("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(string(node.Value)).Should(Equal("waffle"))
 				Ω(int(node.TTL)).Should(Equal(0))
 			})
@@ -318,14 +318,14 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 			}
 
 			err := adapter.Set([]StoreNode{breakfastNode, lunchNode, firstCourseDinnerNode, secondCourseDinnerNode})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		Context("when the node exists, and is a directory", func() {
 			Context("When the node is the root node", func() {
 				It("should return all the nodes in the directory (listed recursively)", func() {
 					value, err := adapter.ListRecursively("/")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(value.Key).Should(Equal("/"))
 					Ω(value.Dir).Should(BeTrue())
@@ -355,7 +355,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 			Context("when the node is not the root node", func() {
 				It("should return all the nodes in the directory (listed recursively)", func() {
 					menuNode, err := adapter.ListRecursively("/menu")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(menuNode.Key).Should(Equal("/menu"))
 					Ω(menuNode.Dir).Should(BeTrue())
@@ -384,7 +384,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 					timeProvider.TimeToProvide = creationTime.Add(11 * time.Second)
 					var err error
 					value, err := adapter.ListRecursively("/menu")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					nodes = value.ChildNodes
 				})
 
@@ -412,21 +412,21 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 
 				It("deletes the expired entries", func() {
 					_, _, err := client.Get("/menu/breakfast")
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 				})
 			})
 
 			Context("when the node is empty", func() {
 				BeforeEach(func() {
 					err := client.Delete("/menu/dinner/first_course", -1)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					err = client.Delete("/menu/dinner/second_course", -1)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should return an directory listing without erroring", func() {
 					value, err := adapter.ListRecursively("/menu/dinner")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(value.Key).Should(Equal("/menu/dinner"))
 					Ω(value.Dir).Should(BeTrue())
 					Ω(value.ChildNodes).Should(BeEmpty())
@@ -466,13 +466,13 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 			})
 
 			err := adapter.Set(nodeArr)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		Context("when the keys exist", func() {
 			It("should delete the keys", func() {
 				err := adapter.Delete("/menu/breakfast", "/menu/lunch")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				_, err = adapter.Get("/menu/breakfast")
 				Ω(err).Should(Equal(ErrorKeyNotFound))
 				_, err = adapter.Get("/menu/lunch")
@@ -483,7 +483,7 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 		Context("when the key is a directory", func() {
 			It("deletes the key and its contents", func() {
 				err := adapter.Delete("/menu")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				_, err = adapter.Get("/menu/breakfast")
 				Ω(err).Should(Equal(ErrorKeyNotFound))
@@ -496,11 +496,11 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 		Context("when the key is an *empty* directory", func() {
 			It("should delete the key", func() {
 				err := adapter.Delete("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				err = adapter.Delete("/menu")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				value, err := adapter.ListRecursively("/")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value.ChildNodes).Should(BeEmpty())
 			})
 		})
@@ -517,13 +517,13 @@ var _ = Describe("ZooKeeperStoreAdapter", func() {
 		BeforeEach(func() {
 			nodeArr[0] = StoreNode{Key: "/placeholder", Value: []byte{}}
 			err := adapter.Set(nodeArr)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		It("should allow the node to be retreived", func() {
 			node, err := adapter.Get("/placeholder")
 			Ω(node).Should(Equal(StoreNode{Key: "/placeholder", Value: []byte{}}))
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		It("should not allow listing the node", func() {

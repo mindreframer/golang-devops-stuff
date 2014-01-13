@@ -43,12 +43,12 @@ var _ = Describe("making requests", func() {
 		BeforeEach(func(done Done) {
 			url := fmt.Sprintf("%s/bulk/counts?model=user", serverURL)
 			resp, err := http.Get(url)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(resp.StatusCode).Should(Equal(http.StatusOK))
 
 			body := make([]byte, resp.ContentLength)
 			_, err = resp.Body.Read(body)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			err = json.Unmarshal(body, &response)
 
@@ -77,14 +77,14 @@ var _ = Describe("making requests", func() {
 		JustBeforeEach(func(done Done) {
 			url := fmt.Sprintf("%s/bulk/apps?batch_size=%d&bulk_token=%s", serverURL, batchSize, bulkTokenAsJson)
 			req, err := http.NewRequest("GET", url, nil)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			if authorization != "" {
 				req.Header.Add("Authorization", authorization)
 			}
 			client := &http.Client{}
 			resp, err = client.Do(req)
 
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			done <- true
 		}, 5)
 
@@ -152,7 +152,7 @@ var _ = Describe("making requests", func() {
 
 				body := make([]byte, resp.ContentLength)
 				_, err := resp.Body.Read(body)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				err = json.Unmarshal(body, &response)
 			})

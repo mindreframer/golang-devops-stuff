@@ -82,7 +82,7 @@ func NewStore(config *config.Config, adapter storeadapter.StoreAdapter, logger l
 }
 
 func (store *RealStore) SchemaRoot() string {
-	return "/v" + strconv.Itoa(store.config.StoreSchemaVersion)
+	return "/hm/v" + strconv.Itoa(store.config.StoreSchemaVersion)
 }
 
 func (store *RealStore) fetchNodesUnderDir(dir string) ([]storeadapter.StoreNode, error) {

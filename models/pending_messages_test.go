@@ -51,7 +51,7 @@ var _ = Describe("Pending Messages", func() {
                         "skip_verification": false,
                         "start_reason": "CRASHED"
                     }`))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					message.MessageId = "abc"
 					Ω(parsed).Should(Equal(message))
 				})
@@ -61,7 +61,7 @@ var _ = Describe("Pending Messages", func() {
 				It("should error", func() {
 					parsed, err := NewPendingStartMessageFromJSON([]byte(`ß`))
 					Ω(parsed).Should(BeZero())
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 				})
 			})
 		})
@@ -69,7 +69,7 @@ var _ = Describe("Pending Messages", func() {
 		Describe("ToJSON", func() {
 			It("should generate valid JSON", func() {
 				roundTripMessage, err := NewPendingStartMessageFromJSON(message.ToJSON())
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(roundTripMessage).Should(Equal(message))
 			})
 		})
@@ -190,7 +190,7 @@ var _ = Describe("Pending Messages", func() {
                         "message_id": "abc",
                         "stop_reason": "EXTRA"
                     }`))
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					message.MessageId = "abc"
 					Ω(parsed).Should(Equal(message))
 				})
@@ -200,7 +200,7 @@ var _ = Describe("Pending Messages", func() {
 				It("should error", func() {
 					parsed, err := NewPendingStopMessageFromJSON([]byte(`ß`))
 					Ω(parsed).Should(BeZero())
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 				})
 			})
 		})
@@ -208,7 +208,7 @@ var _ = Describe("Pending Messages", func() {
 		Describe("ToJSON", func() {
 			It("should generate valid JSON", func() {
 				roundTripMessage, err := NewPendingStopMessageFromJSON(message.ToJSON())
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(roundTripMessage).Should(Equal(message))
 			})
 		})
