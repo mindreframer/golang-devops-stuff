@@ -1,9 +1,9 @@
 package roundrobin
 
 import (
-	"container/heap"
 	"fmt"
 	"github.com/golang/glog"
+	"github.com/mailgun/minheap"
 	"github.com/mailgun/vulcan/loadbalance"
 	"hash/fnv"
 )
@@ -16,17 +16,14 @@ type cursorMap struct {
 	cursors map[uint32][]*cursor
 	// keep expiration times in the priority queue (min heap) so we can TTL effectively
 	// priority queue holds the ttls
-	expiryTimes *priorityQueue
+	expiryTimes *minheap.MinHeap
 }
 
 func newCursorMap() *cursorMap {
-	m := &cursorMap{
+	return &cursorMap{
 		cursors:     make(map[uint32][]*cursor),
-		expiryTimes: &priorityQueue{},
+		expiryTimes: minheap.NewMinHeap(),
 	}
-
-	heap.Init(m.expiryTimes)
-	return m
 }
 
 // Creates a new cursor and returns the existing one if it already exists. If the cursor exists,
@@ -35,18 +32,18 @@ func (cm *cursorMap) upsertCursor(endpoints []loadbalance.Endpoint, expiryTime i
 	c := cm.getCursor(endpoints)
 	if c != nil {
 		// In case if the set is present, use it and update expiry seconds
-		cm.expiryTimes.Update(c.item, expiryTime)
+		cm.expiryTimes.UpdateEl(c.item, expiryTime)
 		return c
 	} else {
 		c := cm.addCursor(endpoints)
 		// In case if we have not seen this set of endpoints before,
 		// add it to the expiryTimes priority queue and the map of our endpoint set
-		item := &pqItem{
-			c:        c,
-			priority: expiryTime,
+		item := &minheap.Element{
+			Value:    c,
+			Priority: expiryTime,
 		}
 		c.item = item
-		heap.Push(cm.expiryTimes, item)
+		cm.expiryTimes.PushEl(item)
 		return c
 	}
 }
@@ -131,15 +128,15 @@ func (cm *cursorMap) deleteExpiredCursors(now int) {
 		if cm.expiryTimes.Len() == 0 {
 			break
 		}
-		item := cm.expiryTimes.Peek()
-		if item.priority > now {
-			glog.Infof("RoundRobin GC: Nothing to expire, earliest expiry is: Cursor(id=%d, lastAccess=%d), now is %d", item.c.hash, item.priority, now)
+		item := cm.expiryTimes.PeekEl()
+		if item.Priority > now {
+			glog.Infof("RoundRobin GC: Nothing to expire, earliest expiry is: Cursor(%v, lastAccess=%d), now is %d", item.Value, item.Priority, now)
 			break
 		} else {
-			glog.Infof("RoundRobin GC: Cursor(id=%s, lastAccess=%d) has expired (now=%d), deleting", item.c.hash, item.priority, now)
-			pitem := heap.Pop(cm.expiryTimes)
-			item := pitem.(*pqItem)
-			cm.deleteCursor(item.c)
+			glog.Infof("RoundRobin GC: Cursor(%v, lastAccess=%d) has expired (now=%d), deleting", item.Value, item.Priority, now)
+			el := cm.expiryTimes.PopEl()
+			cursor := (el.Value).(*cursor)
+			cm.deleteCursor(cursor)
 		}
 	}
 	glog.Infof("RoundRobin GC end: %d cursors, expiry times: %d", len(cm.cursors), cm.expiryTimes.Len())
@@ -150,7 +147,7 @@ type cursor struct {
 	// position in the upstreams
 	index       int
 	hash        uint32
-	item        *pqItem
+	item        *minheap.Element
 	endpointIds []string
 }
 

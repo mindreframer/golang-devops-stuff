@@ -1,4 +1,4 @@
-package instructions
+package command
 
 import (
 	"github.com/mailgun/vulcan/loadbalance"
@@ -12,7 +12,7 @@ type Endpoint struct {
 
 func NewEndpoint(upstream *Upstream, active bool) *Endpoint {
 	return &Endpoint{
-		Eid:      upstream.Id(),
+		Eid:      upstream.Id,
 		Upstream: upstream,
 		Active:   active,
 	}
