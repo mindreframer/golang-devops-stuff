@@ -23,7 +23,7 @@ func TestRobustly1(t *testing.T) {
 	CrashSetup("robustly_test.go:18:1")
 	tries := 0
 
-	panics := Run(func() { panicRateIters(time.Second, 5, &tries) }, 1, 1)
+	panics := Run(func() { panicRateIters(time.Second, 5, &tries) }, nil)
 	if panics != 5 {
 		t.Errorf("function panicked %d times, expected 5", panics)
 	}
@@ -46,7 +46,7 @@ func TestRobustly3(t *testing.T) {
 		}
 	}()
 	tries := 0
-	Run(func() { panicRateIters(time.Millisecond*300, 500, &tries) }, 1, 1)
+	Run(func() { panicRateIters(time.Millisecond*300, 500, &tries) }, nil)
 	t.Errorf("this code shouldn't run at all, the defer() should run")
 }
 
@@ -59,7 +59,7 @@ func TestRobustly4(t *testing.T) {
 		}
 	}()
 	tries := 0
-	panics := Run(func() { panicRateIters(time.Millisecond*300, 2, &tries) }, 1, 1)
+	panics := Run(func() { panicRateIters(time.Millisecond*300, 2, &tries) }, nil)
 	if panics != 2 {
 		t.Errorf("got %d panics, expected 2", panics)
 	}
