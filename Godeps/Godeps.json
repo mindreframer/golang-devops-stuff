@@ -1,6 +1,6 @@
 {
 	"ImportPath": "github.com/globocom/tsuru",
-	"GoVersion": "devel +c67a1d0df694 Wed Oct 16 09:22:57 2013 -0700",
+	"GoVersion": "devel +7e1a4e190b02 Thu Dec 19 13:02:06 2013 +0900",
 	"Packages": [
 		"./..."
 	],
@@ -24,6 +24,14 @@
 			"ImportPath": "code.google.com/p/gosqlite/sqlite3",
 			"Comment": "null-16",
 			"Rev": "74691fb6f83716190870cde1b658538dd4b18eb0"
+		},
+		{
+			"ImportPath": "github.com/adeven/redis",
+			"Rev": "6a7dfb6ac870f9bf9cece7fb7181dd31cf59f7a8"
+		},
+		{
+			"ImportPath": "github.com/adeven/redismq",
+			"Rev": "ec92d9cf876da73ed9659011d2a19c5ca325d2e7"
 		},
 		{
 			"ImportPath": "github.com/bmizerany/pat",
@@ -68,11 +76,16 @@
 		},
 		{
 			"ImportPath": "github.com/globocom/docker-cluster/cluster",
-			"Rev": "00b8740722f32c314a757660fead910ef7de031b"
+			"Rev": "c9d685f315a37f6a8e6a3ddae53935a937ee94ea"
 		},
 		{
 			"ImportPath": "github.com/globocom/docker-cluster/storage",
-			"Rev": "00b8740722f32c314a757660fead910ef7de031b"
+			"Rev": "c9d685f315a37f6a8e6a3ddae53935a937ee94ea"
+		},
+		{
+			"ImportPath": "github.com/globocom/gandalf/testing",
+			"Comment": "0.2.0-6-g40c834e",
+			"Rev": "40c834e1e93ded4d7b2df333ddb75dd697ffe43d"
 		},
 		{
 			"ImportPath": "github.com/globocom/go-gandalfclient",
@@ -100,8 +113,12 @@
 			"Rev": "3b1f6487b7fc649d5f146df04e623bd55ba1bf7f"
 		},
 		{
+			"ImportPath": "github.com/vmihailenco/bufio",
+			"Rev": "5a6706bb583bf168d886202cb376c877e9c85521"
+		},
+		{
 			"ImportPath": "labix.org/v2/mgo",
-			"Comment": "246",
+			"Comment": "253",
 			"Rev": "gustavo@niemeyer.net-20130906162000-1oo19qtbrtr6xk98"
 		},
 		{
@@ -136,7 +153,7 @@
 		},
 		{
 			"ImportPath": "launchpad.net/goyaml",
-			"Comment": "47",
+			"Comment": "50",
 			"Rev": "gustavo@niemeyer.net-20130620163049-221erv1tss39x0xe"
 		}
 	]

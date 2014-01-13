@@ -19,11 +19,11 @@ import (
 	"github.com/globocom/tsuru/quota"
 	"github.com/globocom/tsuru/repository"
 	"io"
+	"labix.org/v2/mgo"
 	"labix.org/v2/mgo/bson"
 	"launchpad.net/goamz/aws"
 	"launchpad.net/goamz/iam"
 	"strconv"
-	"strings"
 )
 
 var (
@@ -73,33 +73,6 @@ var reserveUserApp = action.Action{
 	MinParams: 2,
 }
 
-var createAppQuota = action.Action{
-	Name: "create-app-quota",
-	Forward: func(ctx action.FWContext) (action.Result, error) {
-		var app App
-		switch ctx.Params[0].(type) {
-		case App:
-			app = ctx.Params[0].(App)
-		case *App:
-			app = *ctx.Params[0].(*App)
-		default:
-			return nil, errors.New("First parameter must be App or *App.")
-		}
-		if limit, err := config.GetUint("quota:units-per-app"); err == nil {
-			if limit == 0 {
-				return nil, errors.New("app creation is disallowed")
-			}
-			quota.Create(app.Name, uint(limit))
-			quota.Reserve(app.Name, app.Name+"-0")
-		}
-		return app.Name, nil
-	},
-	Backward: func(ctx action.BWContext) {
-		quota.Delete(ctx.FWResult.(string))
-	},
-	MinParams: 1,
-}
-
 // insertApp is an action that inserts an app in the database in Forward and
 // removes it in the Backward.
 //
@@ -125,9 +98,9 @@ var insertApp = action.Action{
 		if limit, err := config.GetInt("quota:units-per-app"); err == nil {
 			app.Quota.Limit = limit
 		}
-		app.Units = append(app.Units, Unit{QuotaItem: app.Name + "-0"})
+		app.Units = append(app.Units, Unit{})
 		err = conn.Apps().Insert(app)
-		if err != nil && strings.HasPrefix(err.Error(), "E11000") {
+		if mgo.IsDup(err) {
 			return nil, ErrAppAlreadyExists
 		}
 		return &app, err
@@ -364,12 +337,12 @@ var reserveUnitsToAdd = action.Action{
 		default:
 			return nil, errors.New("First parameter must be App or *App.")
 		}
-		var n uint
+		var n int
 		switch ctx.Params[1].(type) {
 		case int:
-			n = uint(ctx.Params[1].(int))
+			n = ctx.Params[1].(int)
 		case uint:
-			n = ctx.Params[1].(uint)
+			n = int(ctx.Params[1].(uint))
 		default:
 			return nil, errors.New("Second parameter must be int or uint.")
 		}
@@ -382,12 +355,11 @@ var reserveUnitsToAdd = action.Action{
 		if err != nil {
 			return nil, ErrAppNotFound
 		}
-		ids := generateUnitQuotaItems(&app, int(n))
-		err = quota.Reserve(app.Name, ids...)
-		if err != nil && err != quota.ErrQuotaNotFound {
+		err = reserveUnits(&app, n)
+		if err != nil {
 			return nil, err
 		}
-		return ids, nil
+		return n, nil
 	},
 	Backward: func(ctx action.BWContext) {
 		var app App
@@ -397,15 +369,17 @@ var reserveUnitsToAdd = action.Action{
 		case *App:
 			app = *ctx.Params[0].(*App)
 		}
-		ids := ctx.FWResult.([]string)
-		quota.Release(app.Name, ids...)
+		qty := ctx.FWResult.(int)
+		err := releaseUnits(&app, qty)
+		if err != nil {
+			log.Errorf("Failed to rollback reserveUnitsToAdd: %s", err)
+		}
 	},
 	MinParams: 2,
 }
 
 type addUnitsActionResult struct {
 	units []provision.Unit
-	ids   []string
 }
 
 var provisionAddUnits = action.Action{
@@ -420,9 +394,9 @@ var provisionAddUnits = action.Action{
 		default:
 			return nil, errors.New("First parameter must be App or *App.")
 		}
-		result := addUnitsActionResult{ids: ctx.Previous.([]string)}
-		n := uint(len(result.ids))
-		units, err := Provisioner.AddUnits(&app, n)
+		n := ctx.Previous.(int)
+		var result addUnitsActionResult
+		units, err := Provisioner.AddUnits(&app, uint(n))
 		if err != nil {
 			return nil, err
 		}
@@ -469,7 +443,7 @@ var saveNewUnitsInDatabase = action.Action{
 		}
 		messages := make([]queue.Message, len(prev.units)*2)
 		mCount := 0
-		for i, unit := range prev.units {
+		for _, unit := range prev.units {
 			unit := Unit{
 				Name:       unit.Name,
 				Type:       unit.Type,
@@ -477,7 +451,6 @@ var saveNewUnitsInDatabase = action.Action{
 				Machine:    unit.Machine,
 				State:      provision.StatusBuilding.String(),
 				InstanceId: unit.InstanceId,
-				QuotaItem:  prev.ids[i],
 			}
 			app.AddUnit(&unit)
 			messages[mCount] = queue.Message{Action: RegenerateApprcAndStart, Args: []string{app.Name, unit.Name}}

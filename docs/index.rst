@@ -21,6 +21,7 @@ Application Deployment
 * :doc:`ruby/rails </apps/quickstart/ruby>`
 * :doc:`php </apps/quickstart/php>`
 * :doc:`understanding deployment hooks </apps/deploy-hooks>`
+* :doc:`recovery and troubleshooting </apps/recovery>`
 
 CLI
 +++
@@ -57,6 +58,11 @@ Services
 * :doc:`crane usage guide </services/usage>`
 * :doc:`services api workflow </services/api>`
 
+Installing services
++++++++++++++++++++
+
+* :doc:`mysql </services/mysql-example>`
+
 Get Involved
 ------------
 
@@ -64,6 +70,7 @@ Get Involved
 * :doc:`coding style </contribute/coding-style>`
 * :doc:`setting up your development environment </contribute/setting-up-your-tsuru-development-environment>`
 * :doc:`community </community>`
+* :doc:`releases </releases/index>`
 
 .. toctree::
     :hidden:

@@ -72,8 +72,8 @@ func (s *SchedulerSuite) TestSchedulerSchedule(c *gocheck.C) {
 	defer s.storage.Apps().Remove(bson.M{"name": bson.M{"$in": []string{a1.Name, a2.Name, a3.Name}}})
 	coll := s.storage.Collection(schedulerCollection)
 	err = coll.Insert(
-		node{ID: "server0", Address: server0.URL(), Team: "tsuruteam"},
-		node{ID: "server1", Address: server1.URL(), Team: "tsuruteam"},
+		node{ID: "server0", Address: server0.URL(), Teams: []string{"tsuruteam"}},
+		node{ID: "server1", Address: server1.URL(), Teams: []string{"tsuruteam"}},
 		node{ID: "server2", Address: server2.URL()},
 	)
 	c.Assert(err, gocheck.IsNil)
@@ -82,7 +82,7 @@ func (s *SchedulerSuite) TestSchedulerSchedule(c *gocheck.C) {
 	config := docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/impius"}
 	node, _, err := scheduler.Schedule(&config)
 	c.Assert(err, gocheck.IsNil)
-	c.Check(node, gocheck.Equals, "server2")
+	c.Check(node, gocheck.Equals, "server1")
 	config = docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/mirror"}
 	node, _, err = scheduler.Schedule(&config)
 	c.Assert(err, gocheck.IsNil)
@@ -131,7 +131,7 @@ func (s *SchedulerSuite) TestSchedulerInvalidEndpoint(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	defer s.storage.Apps().Remove(bson.M{"name": app.Name})
 	coll := s.storage.Collection(schedulerCollection)
-	err = coll.Insert(node{ID: "server0", Address: "", Team: "jean"})
+	err = coll.Insert(node{ID: "server0", Address: "", Teams: []string{"jean"}})
 	c.Assert(err, gocheck.IsNil)
 	defer coll.Remove(bson.M{"_id": "server0"})
 	config := docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/bill"}
@@ -145,9 +145,9 @@ func (s *SchedulerSuite) TestSchedulerInvalidEndpoint(c *gocheck.C) {
 func (s *SchedulerSuite) TestSchedulerNodes(c *gocheck.C) {
 	coll := s.storage.Collection(schedulerCollection)
 	err := coll.Insert(
-		node{ID: "server0", Address: "http://localhost:8080", Team: "tsuru"},
-		node{ID: "server1", Address: "http://localhost:8081", Team: "tsuru"},
-		node{ID: "server2", Address: "http://localhost:8082", Team: "tsuru"},
+		node{ID: "server0", Address: "http://localhost:8080", Teams: []string{"tsuru"}},
+		node{ID: "server1", Address: "http://localhost:8081", Teams: []string{"tsuru"}},
+		node{ID: "server2", Address: "http://localhost:8082", Teams: []string{"tsuru"}},
 	)
 	c.Assert(err, gocheck.IsNil)
 	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
@@ -162,37 +162,67 @@ func (s *SchedulerSuite) TestSchedulerNodes(c *gocheck.C) {
 	c.Assert(nodes, gocheck.DeepEquals, expected)
 }
 
+func (s *SchedulerSuite) TestSchedulerGetNode(c *gocheck.C) {
+	coll := s.storage.Collection(schedulerCollection)
+	err := coll.Insert(
+		node{ID: "server0", Address: "http://localhost:8080", Teams: []string{"tsuru"}},
+		node{ID: "server1", Address: "http://localhost:8081", Teams: []string{"tsuru"}},
+		node{ID: "server2", Address: "http://localhost:8082", Teams: []string{"tsuru"}},
+	)
+	c.Assert(err, gocheck.IsNil)
+	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
+	var tests = []struct {
+		input    string
+		expected node
+		err      error
+	}{
+		{"server0", node{ID: "server0", Address: "http://localhost:8080", Teams: []string{"tsuru"}}, nil},
+		{"server1", node{ID: "server1", Address: "http://localhost:8081", Teams: []string{"tsuru"}}, nil},
+		{"server2", node{ID: "server2", Address: "http://localhost:8082", Teams: []string{"tsuru"}}, nil},
+		{"server102", node{}, errNodeNotFound},
+	}
+	var scheduler segregatedScheduler
+	for _, t := range tests {
+		nd, err := scheduler.GetNode(t.input)
+		c.Check(err, gocheck.Equals, t.err)
+		c.Check(nd, gocheck.DeepEquals, t.expected)
+	}
+}
+
 func (s *SchedulerSuite) TestAddNodeToScheduler(c *gocheck.C) {
 	coll := s.storage.Collection(schedulerCollection)
 	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	err := addNodeToScheduler(nd, "team1")
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": "server0"})
+	defer coll.RemoveAll(bson.M{"_id": nd.ID})
 	var n node
-	err = coll.Find(bson.M{"_id": "server0"}).One(&n)
+	err = coll.Find(bson.M{"_id": nd.ID}).One(&n)
 	c.Assert(err, gocheck.IsNil)
-	c.Check(n.ID, gocheck.Equals, "server0")
-	c.Check(n.Team, gocheck.Equals, "team1")
+	c.Check(n.ID, gocheck.Equals, nd.ID)
+	c.Check(n.Teams, gocheck.DeepEquals, []string{"team1"})
 	c.Check(n.Address, gocheck.Equals, "http://localhost:8080")
 }
 
 func (s *SchedulerSuite) TestAddNodeDuplicated(c *gocheck.C) {
 	coll := s.storage.Collection(schedulerCollection)
 	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	err := addNodeToScheduler(nd, "team1")
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": "server0"})
-	err = addNodeToScheduler(nd, "team2")
+	defer coll.RemoveAll(bson.M{"_id": nd.ID})
+	err = scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team2"})
 	c.Assert(err, gocheck.Equals, errNodeAlreadyRegister)
 }
 
 func (s *SchedulerSuite) TestRemoveNodeFromScheduler(c *gocheck.C) {
 	coll := s.storage.Collection(schedulerCollection)
 	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	err := addNodeToScheduler(nd, "team1")
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
 	defer coll.RemoveAll(bson.M{"_id": "server0"})
-	err = removeNodeFromScheduler(nd)
+	err = scheduler.Unregister(map[string]string{"ID": nd.ID})
 	c.Assert(err, gocheck.IsNil)
 	n, err := coll.Find(bson.M{"_id": "server0"}).Count()
 	c.Assert(err, gocheck.IsNil)
@@ -200,29 +230,27 @@ func (s *SchedulerSuite) TestRemoveNodeFromScheduler(c *gocheck.C) {
 }
 
 func (s *SchedulerSuite) TesteRemoveUnknownNodeFromScheduler(c *gocheck.C) {
-	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	err := removeNodeFromScheduler(nd)
+	var scheduler segregatedScheduler
+	err := scheduler.Unregister(map[string]string{"ID": "server0"})
 	c.Assert(err, gocheck.Equals, errNodeNotFound)
 }
 
 func (s *SchedulerSuite) TestListNodesInTheScheduler(c *gocheck.C) {
 	coll := s.storage.Collection(schedulerCollection)
-	nd1 := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	nd2 := cluster.Node{ID: "server1", Address: "http://localhost:9090"}
-	nd3 := cluster.Node{ID: "server2", Address: "http://localhost:9090"}
-	err := addNodeToScheduler(nd1, "team1")
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:8080", "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
-	err = addNodeToScheduler(nd2, "team1")
+	err = scheduler.Register(map[string]string{"ID": "server1", "address": "http://localhost:9090", "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
-	err = addNodeToScheduler(nd3, "team1")
+	err = scheduler.Register(map[string]string{"ID": "server2", "address": "http://localhost:9090", "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
 	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
 	nodes, err := listNodesInTheScheduler()
 	c.Assert(err, gocheck.IsNil)
 	expected := []node{
-		{ID: "server0", Address: "http://localhost:8080", Team: "team1"},
-		{ID: "server1", Address: "http://localhost:9090", Team: "team1"},
-		{ID: "server2", Address: "http://localhost:9090", Team: "team1"},
+		{ID: "server0", Address: "http://localhost:8080", Teams: []string{"team1"}},
+		{ID: "server1", Address: "http://localhost:9090", Teams: []string{"team1"}},
+		{ID: "server2", Address: "http://localhost:9090", Teams: []string{"team1"}},
 	}
 	c.Assert(nodes, gocheck.DeepEquals, expected)
 }
@@ -250,7 +278,7 @@ func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdRun(c *gocheck.C) {
 	err = coll.Find(bson.M{"_id": "server0"}).One(&n)
 	c.Assert(err, gocheck.IsNil)
 	c.Check(n.ID, gocheck.Equals, "server0")
-	c.Check(n.Team, gocheck.Equals, "")
+	c.Check(n.Teams, gocheck.DeepEquals, []string{""})
 	c.Check(n.Address, gocheck.Equals, "http://localhost:8080")
 	c.Assert(buf.String(), gocheck.Equals, "Node successfully registered.\n")
 }
@@ -267,7 +295,7 @@ func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdRunWithTeam(c *gocheck.C) {
 	err = coll.Find(bson.M{"_id": "server0"}).One(&n)
 	c.Assert(err, gocheck.IsNil)
 	c.Check(n.ID, gocheck.Equals, "server0")
-	c.Check(n.Team, gocheck.Equals, "team1")
+	c.Check(n.Teams, gocheck.DeepEquals, []string{"team1"})
 	c.Check(n.Address, gocheck.Equals, "http://localhost:8080")
 	c.Assert(buf.String(), gocheck.Equals, "Node successfully registered.\n")
 }
@@ -275,7 +303,8 @@ func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdRunWithTeam(c *gocheck.C) {
 func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdFailure(c *gocheck.C) {
 	var buf bytes.Buffer
 	coll := s.storage.Collection(schedulerCollection)
-	err := addNodeToScheduler(cluster.Node{ID: "server0", Address: "http://localhost:4243"}, "")
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:4243", "team": ""})
 	c.Assert(err, gocheck.IsNil)
 	defer coll.Remove(bson.M{"_id": "server0"})
 	context := cmd.Context{Args: []string{"server0", "http://localhost:8080", "team1"}, Stdout: &buf}
@@ -298,8 +327,8 @@ func (s *SchedulerSuite) TestRemoveNodeFromTheSchedulerCmdInfo(c *gocheck.C) {
 func (s *SchedulerSuite) TestRemoveNodeFromTheSchedulerCmdRun(c *gocheck.C) {
 	var buf bytes.Buffer
 	coll := s.storage.Collection(schedulerCollection)
-	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	err := addNodeToScheduler(nd, "team1")
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:8080", "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
 	defer coll.Remove(bson.M{"_id": "server0"})
 	context := cmd.Context{Args: []string{"server0"}, Stdout: &buf}
@@ -330,14 +359,12 @@ func (s *SchedulerSuite) TestListNodesInTheSchedulerCmdInfo(c *gocheck.C) {
 
 func (s *SchedulerSuite) TestListNodesInTheSchedulerCmdRun(c *gocheck.C) {
 	coll := s.storage.Collection(schedulerCollection)
-	nd1 := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	nd2 := cluster.Node{ID: "server1", Address: "http://localhost:9090"}
-	nd3 := cluster.Node{ID: "server2", Address: "http://localhost:9090"}
-	err := addNodeToScheduler(nd1, "team1")
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:8080", "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
-	err = addNodeToScheduler(nd3, "")
+	err = scheduler.Register(map[string]string{"ID": "server1", "address": "http://localhost:9090", "team": "team1"})
 	c.Assert(err, gocheck.IsNil)
-	err = addNodeToScheduler(nd2, "team1")
+	err = scheduler.Register(map[string]string{"ID": "server2", "address": "http://localhost:9090", "team": ""})
 	c.Assert(err, gocheck.IsNil)
 	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
 	var buf bytes.Buffer

@@ -104,8 +104,7 @@ func (s *S) stopContainers(n uint) {
 
 func (s *S) TestDeploy(c *gocheck.C) {
 	h := &tsrTesting.TestHandler{}
-	t := &tsrTesting.T{}
-	gandalfServer := t.StartGandalfTestServer(h)
+	gandalfServer := tsrTesting.StartGandalfTestServer(h)
 	defer gandalfServer.Close()
 	go s.stopContainers(1)
 	err := newImage("tsuru/python", s.server.URL())
@@ -137,8 +136,6 @@ func (s *S) TestDeploy(c *gocheck.C) {
 	for _, u := range a.ProvisionedUnits() {
 		message, err := q.Get(1e6)
 		c.Assert(err, gocheck.IsNil)
-		defer message.Delete()
-		c.Assert(err, gocheck.IsNil)
 		c.Assert(message.Action, gocheck.Equals, app.BindService)
 		c.Assert(message.Args[0], gocheck.Equals, a.GetName())
 		c.Assert(message.Args[1], gocheck.Equals, u.GetName())
@@ -156,8 +153,7 @@ func getQueue() (queue.Q, error) {
 
 func (s *S) TestDeployEnqueuesBindService(c *gocheck.C) {
 	h := &tsrTesting.TestHandler{}
-	t := &tsrTesting.T{}
-	gandalfServer := t.StartGandalfTestServer(h)
+	gandalfServer := tsrTesting.StartGandalfTestServer(h)
 	defer gandalfServer.Close()
 	go s.stopContainers(1)
 	err := newImage("tsuru/python", s.server.URL())
@@ -187,8 +183,6 @@ func (s *S) TestDeployEnqueuesBindService(c *gocheck.C) {
 	for _, u := range a.ProvisionedUnits() {
 		message, err := q.Get(1e6)
 		c.Assert(err, gocheck.IsNil)
-		defer message.Delete()
-		c.Assert(err, gocheck.IsNil)
 		c.Assert(message.Action, gocheck.Equals, app.BindService)
 		c.Assert(message.Args[0], gocheck.Equals, a.GetName())
 		c.Assert(message.Args[1], gocheck.Equals, u.GetName())
@@ -208,8 +202,7 @@ func (w *writer) Write(c []byte) (int, error) {
 
 func (s *S) TestDeployRemoveContainersEvenWhenTheyreNotInTheAppsCollection(c *gocheck.C) {
 	h := &tsrTesting.TestHandler{}
-	t := &tsrTesting.T{}
-	gandalfServer := t.StartGandalfTestServer(h)
+	gandalfServer := tsrTesting.StartGandalfTestServer(h)
 	defer gandalfServer.Close()
 	go s.stopContainers(3)
 	err := newImage("tsuru/python", s.server.URL())
@@ -244,8 +237,6 @@ func (s *S) TestDeployRemoveContainersEvenWhenTheyreNotInTheAppsCollection(c *go
 	c.Assert(err, gocheck.IsNil)
 	for _, u := range a.ProvisionedUnits() {
 		message, err := q.Get(1e6)
-		c.Assert(err, gocheck.IsNil)
-		defer message.Delete()
 		c.Assert(err, gocheck.IsNil)
 		c.Assert(message.Action, gocheck.Equals, app.BindService)
 		c.Assert(message.Args[0], gocheck.Equals, a.GetName())
@@ -623,4 +614,22 @@ func (s *S) TestExecuteCommandOnceWithoutContainers(c *gocheck.C) {
 func (s *S) TestDeployPipeline(c *gocheck.C) {
 	p := dockerProvisioner{}
 	c.Assert(p.DeployPipeline(), gocheck.NotNil)
+}
+
+func (s *S) TestProvisionerStart(c *gocheck.C) {
+	var p dockerProvisioner
+	app := testing.NewFakeApp("almah", "static", 1)
+	container, err := s.newContainer(&newContainerOpts{AppName: app.GetName()})
+	c.Assert(err, gocheck.IsNil)
+	defer s.removeTestContainer(container)
+	dcli, err := dockerClient.NewClient(s.server.URL())
+	c.Assert(err, gocheck.IsNil)
+	dockerContainer, err := dcli.InspectContainer(container.ID)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(dockerContainer.State.Running, gocheck.Equals, false)
+	err = p.Start(app)
+	c.Assert(err, gocheck.IsNil)
+	dockerContainer, err = dcli.InspectContainer(container.ID)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(dockerContainer.State.Running, gocheck.Equals, true)
 }
