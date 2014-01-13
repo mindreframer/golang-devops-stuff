@@ -1,13 +1,18 @@
-For launch:
-include muxado pun somewhere
-
-Add support for extensions
-Add heartbeat
+improve the formatting of the docs to look nice for godoc
+use a better example in the docs first before showing the clever integration with the net.Listener/net.Conn APIs
+Make all errors support Temporary() API so applications can better decide what to do
 Handle case of running out of stream ids + test
 writeFrame errors should kill the session, but only if it's not a timeout + test
 Short read should cause an error + test
 Decrement() in outBuffer needs to have deadline support
 
+Extensions:
+    Heartbeat extension needs tests
+    Make extensions a public API instead of a private API
+    Document how extensions work
+    Don't include any extensions by default
+
+heartbeat test
 Finish writing buffer tests
 Write stress test
 Write multi-frame write test
@@ -27,3 +32,4 @@ Write frame/goaway tests
 - Eliminate unlikely race on s.remoteDebug between handleFrame() and die()
 - Should writeFrame calls for rst/wndinc set the write deadline?
 - don't send reset if the stream is fully closed
+- include muxado pun somewhere in the docs

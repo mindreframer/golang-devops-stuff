@@ -15,8 +15,8 @@ func (a *streamAdaptor) Id() StreamId {
 	return StreamId(a.IStream.Id())
 }
 
-func (a *streamAdaptor) RelatedStreamId() StreamId {
-	return StreamId(a.IStream.RelatedStreamId())
+func (a *streamAdaptor) StreamType() StreamType {
+	return StreamType(a.IStream.StreamType())
 }
 
 func (a *streamAdaptor) Session() Session {
@@ -39,8 +39,8 @@ func (a *sessionAdaptor) Open() (Stream, error) {
 	return &streamAdaptor{str}, err
 }
 
-func (a *sessionAdaptor) OpenStream(priority StreamPriority, related StreamId, fin bool) (Stream, error) {
-	str, err := a.ISession.OpenStream(frame.StreamPriority(priority), frame.StreamId(related), fin)
+func (a *sessionAdaptor) OpenStream(priority StreamPriority, streamType StreamType, fin bool) (Stream, error) {
+	str, err := a.ISession.OpenStream(frame.StreamPriority(priority), frame.StreamType(streamType), fin)
 	return &streamAdaptor{str}, err
 }
 

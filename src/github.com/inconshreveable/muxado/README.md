@@ -116,8 +116,7 @@ muxado is also a poor choice when sending large payloads and speed is a priority
 It shines best when the application workload needs to quickly open a large number of small-payload streams.
 
 ## Status
-Most of muxado's features are implemented (and tested!), but there are a few that are notably lacking. (Heartbeating, for instance).
-This situation will improve as the project matures.
+Most of muxado's features are implemented (and tested!), but there are many that are still rough or could be improved. See the TODO file for suggestions on what needs to improve.
 
 ## License
 Apache

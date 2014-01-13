@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	firstStream             = 0x100   // streams 0-255 are reserved
 	defaultWindowSize       = 0x10000 // 64KB
 	defaultAcceptQueueDepth = 100
+	MinExtensionType        = 0xFFFFFFFF - 0x100 // 512 extensions
 )
 
 // private interface for Sessions to call Streams
@@ -25,6 +25,12 @@ type stream interface {
 	closeWith(error)
 }
 
+// for extensions
+type ExtAccept func() (IStream, error)
+type Extension interface {
+	Start(ISession, ExtAccept) frame.StreamType
+}
+
 type deadReason struct {
 	errorCode   frame.ErrorCode
 	err         error
@@ -32,7 +38,7 @@ type deadReason struct {
 }
 
 // factory function that creates new streams
-type streamFactory func(id, related frame.StreamId, priority frame.StreamPriority, finLocal bool, finRemote bool, windowSize uint32, sess session) stream
+type streamFactory func(id frame.StreamId, priority frame.StreamPriority, streamType frame.StreamType, finLocal bool, finRemote bool, windowSize uint32, sess session) stream
 
 // checks the parity of a stream id (local vs remote, client vs server)
 type parityFn func(frame.StreamId) bool
@@ -49,35 +55,37 @@ type halfState struct {
 // - It completely ignores stream priority when processing and writing frames
 // - It offers no customization of settings like window size/ping time
 type Session struct {
-	conn              net.Conn          // connection the transport is running over
-	transport         frame.Transport   // transport
-	streams           StreamMap         // all active streams
-	local             halfState         // client state
-	remote            halfState         // server state
-	syn               *frame.WStreamSyn // STREAM_SYN frame for opens
-	wr                sync.Mutex        // synchronization when writing frames
-	accept            chan stream       // new streams opened by the remote
-	diebit            int32             // true if we're dying
-	remoteDebug       []byte            // debugging data sent in the remote's GoAway frame
-	defaultWindowSize uint32            // window size when creating new streams
-	newStream         streamFactory     // factory function to make new streams
-	dead              chan deadReason   // dead
-	isLocal           parityFn          // determines if a stream id is local or remote
+	conn              net.Conn                         // connection the transport is running over
+	transport         frame.Transport                  // transport
+	streams           StreamMap                        // all active streams
+	local             halfState                        // client state
+	remote            halfState                        // server state
+	syn               *frame.WStreamSyn                // STREAM_SYN frame for opens
+	wr                sync.Mutex                       // synchronization when writing frames
+	accept            chan stream                      // new streams opened by the remote
+	diebit            int32                            // true if we're dying
+	remoteDebug       []byte                           // debugging data sent in the remote's GoAway frame
+	defaultWindowSize uint32                           // window size when creating new streams
+	newStream         streamFactory                    // factory function to make new streams
+	dead              chan deadReason                  // dead
+	isLocal           parityFn                         // determines if a stream id is local or remote
+	exts              map[frame.StreamType]chan stream // map of extension stream type -> accept channel for the extension
 }
 
-func NewSession(conn net.Conn, newStream streamFactory, isClient bool) ISession {
+func NewSession(conn net.Conn, newStream streamFactory, isClient bool, exts []Extension) ISession {
 	sess := &Session{
 		conn:              conn,
 		transport:         frame.NewBasicTransport(conn),
 		streams:           NewConcurrentStreamMap(),
-		local:             halfState{lastId: firstStream},
-		remote:            halfState{lastId: firstStream},
+		local:             halfState{lastId: 0},
+		remote:            halfState{lastId: 0},
 		syn:               frame.NewWStreamSyn(),
 		diebit:            0,
 		defaultWindowSize: defaultWindowSize,
 		accept:            make(chan stream, defaultAcceptQueueDepth),
 		newStream:         newStream,
 		dead:              make(chan deadReason, 1), // don't block die() if there is no Wait call
+		exts:              make(map[frame.StreamType]chan stream),
 	}
 
 	if isClient {
@@ -86,6 +94,10 @@ func NewSession(conn net.Conn, newStream streamFactory, isClient bool) ISession 
 	} else {
 		sess.isLocal = sess.isServer
 		sess.remote.lastId += 1
+	}
+
+	for _, ext := range exts {
+		sess.startExtension(ext)
 	}
 
 	go sess.reader()
@@ -101,7 +113,7 @@ func (s *Session) Open() (IStream, error) {
 	return s.OpenStream(0, 0, false)
 }
 
-func (s *Session) OpenStream(priority frame.StreamPriority, relatedStreamId frame.StreamId, fin bool) (ret IStream, err error) {
+func (s *Session) OpenStream(priority frame.StreamPriority, streamType frame.StreamType, fin bool) (ret IStream, err error) {
 	// check if the remote has gone away
 	if atomic.LoadInt32(&s.remote.goneAway) == 1 {
 		return nil, fmt.Errorf("Failed to create stream, remote has gone away.")
@@ -119,13 +131,13 @@ func (s *Session) OpenStream(priority frame.StreamPriority, relatedStreamId fram
 	nextId := frame.StreamId(atomic.AddUint32(&s.local.lastId, 2))
 
 	// make the stream
-	str := s.newStream(nextId, relatedStreamId, priority, fin, false, s.defaultWindowSize, s)
+	str := s.newStream(nextId, priority, streamType, fin, false, s.defaultWindowSize, s)
 
 	// add to to the stream map
 	s.streams.Set(nextId, str)
 
 	// write the frame
-	if err = s.syn.Set(nextId, relatedStreamId, priority, fin); err != nil {
+	if err = s.syn.Set(nextId, priority, streamType, fin); err != nil {
 		s.wr.Unlock()
 		s.die(frame.InternalError, err)
 		return
@@ -292,10 +304,30 @@ func (s *Session) handleFrame(rf frame.RFrame) {
 		atomic.StoreUint32(&s.remote.lastId, uint32(f.StreamId()))
 
 		// make the new stream
-		str := s.newStream(f.StreamId(), f.RelatedStreamId(), f.StreamPriority(), false, f.Fin(), s.defaultWindowSize, s)
+		str := s.newStream(f.StreamId(), f.StreamPriority(), f.StreamType(), false, f.Fin(), s.defaultWindowSize, s)
 
 		// add it to the stream map
 		s.streams.Set(f.StreamId(), str)
+
+		// check if this is an extension stream
+		if f.StreamType() >= MinExtensionType {
+			extAccept, ok := s.exts[f.StreamType()]
+			if !ok {
+				// Extension type of stream not registered
+				fRst := frame.NewWStreamRst()
+				if err := fRst.Set(f.StreamId(), frame.StreamClosed); err != nil {
+					s.die(frame.InternalError, err)
+				}
+
+				s.wr.Lock()
+				defer s.wr.Unlock()
+				s.transport.WriteFrame(fRst)
+			} else {
+				extAccept <- str
+			}
+
+			return
+		}
 
 		// put the new stream on the accept channel
 		s.accept <- str
@@ -375,11 +407,29 @@ func (s *Session) getStream(id frame.StreamId) (str stream) {
 
 // check if a stream id is for a client stream. client streams are odd
 func (s *Session) isClient(id frame.StreamId) bool {
-	return uint32(id) & 1 == 1
+	return uint32(id)&1 == 1
 }
 
 func (s *Session) isServer(id frame.StreamId) bool {
 	return !s.isClient(id)
+}
+
+//////////////////////////////////////////////
+// session extensions
+//////////////////////////////////////////////
+func (s *Session) startExtension(ext Extension) {
+	accept := make(chan stream)
+	extAccept := func() (IStream, error) {
+		s, ok := <-accept
+		if !ok {
+			return nil, fmt.Errorf("Failed to accept connection, shutting down")
+		}
+
+		return s, nil
+	}
+
+	extType := ext.Start(s, extAccept)
+	s.exts[extType] = accept
 }
 
 //////////////////////////////////////////////
@@ -403,6 +453,6 @@ func (a *netListenerAdaptor) Addr() net.Addr {
 }
 
 func (a *netListenerAdaptor) Accept() (net.Conn, error) {
-	str, err := a.Accept()
+	str, err := a.Session.Accept()
 	return net.Conn(str), err
 }

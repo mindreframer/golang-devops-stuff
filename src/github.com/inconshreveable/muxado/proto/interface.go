@@ -15,7 +15,7 @@ type IStream interface {
 	SetWriteDeadline(time.Time) error
 	HalfClose([]byte) (int, error)
 	Id() frame.StreamId
-	RelatedStreamId() frame.StreamId
+	StreamType() frame.StreamType
 	Session() ISession
 	RemoteAddr() net.Addr
 	LocalAddr() net.Addr
@@ -23,7 +23,7 @@ type IStream interface {
 
 type ISession interface {
 	Open() (IStream, error)
-	OpenStream(frame.StreamPriority, frame.StreamId, bool) (IStream, error)
+	OpenStream(frame.StreamPriority, frame.StreamType, bool) (IStream, error)
 	Accept() (IStream, error)
 	Kill() error
 	GoAway(frame.ErrorCode, []byte) error

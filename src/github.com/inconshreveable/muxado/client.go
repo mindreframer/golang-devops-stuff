@@ -3,12 +3,13 @@ package muxado
 import (
 	"crypto/tls"
 	"github.com/inconshreveable/muxado/proto"
+	"github.com/inconshreveable/muxado/proto/ext"
 	"net"
 )
 
 // Client returns a new muxado client-side connection using conn as the transport.
 func Client(conn net.Conn) Session {
-	return &sessionAdaptor{proto.NewSession(conn, proto.NewStream, true)}
+	return &sessionAdaptor{proto.NewSession(conn, proto.NewStream, true, []proto.Extension{ext.NewDefaultHeartbeat()})}
 }
 
 // Dial opens a new connection to the given network/address and then beings a muxado client session on it.

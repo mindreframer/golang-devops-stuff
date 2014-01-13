@@ -8,6 +8,7 @@ import (
 
 type StreamId frame.StreamId
 type StreamPriority frame.StreamPriority
+type StreamType frame.StreamType
 type ErrorCode frame.ErrorCode
 
 // Stream is a full duplex stream-oriented connection that is multiplexed over a Session.
@@ -39,8 +40,8 @@ type Stream interface {
 	// Id returns the stream's id.
 	Id() StreamId
 
-	// RelatedStreamId returns the id of the related stream.
-	RelatedStreamId() StreamId
+	// StreamType returns the stream's type
+	StreamType() StreamType
 
 	// Session returns the session object this stream is running on.
 	Session() Session
@@ -62,9 +63,9 @@ type Session interface {
 	// Open initiates a new stream on the session. It is equivalent to OpenStream(0, 0, false)
 	Open() (Stream, error)
 
-	// OpenStream initiates a new stream on the session. A caller can specify a stream's priority and a related stream id.
+	// OpenStream initiates a new stream on the session. A caller can specify a stream's priority and an opaque stream type.
 	// Setting fin to true will cause the stream to be half-closed from the local side immediately upon creation.
-	OpenStream(priority StreamPriority, relatedId StreamId, fin bool) (Stream, error)
+	OpenStream(priority StreamPriority, streamType StreamType, fin bool) (Stream, error)
 
 	// Accept returns the next stream initiated by the remote side
 	Accept() (Stream, error)

@@ -33,7 +33,7 @@ type flagsType uint8
 const (
 	flagFin            = 0x1
 	flagStreamPriority = 0x2
-	flagRelatedStream  = 0x4
+	flagStreamType     = 0x4
 )
 
 func (ft flagsType) IsSet(f flagsType) bool {
@@ -53,6 +53,9 @@ type StreamId uint32
 
 // StreamPriority is 31-bit integer specifying a stream's priority
 type StreamPriority uint32
+
+// StreamType is 32-bit integer specifying a stream's type
+type StreamType uint32
 
 // ErrorCode is a 32-bit integer indicating a error condition included in rst/goaway frames
 type ErrorCode uint32
