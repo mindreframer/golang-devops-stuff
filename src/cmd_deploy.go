@@ -620,6 +620,9 @@ func (this *Deployment) deploy() error {
 			return err
 		}
 
+		fmt.Fprintf(titleLogger, "Arbitrary sleeping for 30s to allow dynos to warm up before syncing load balancers\n")
+		time.Sleep(30 * time.Second)
+
 		err = this.Server.SyncLoadBalancers(&e, addDynos, removeDynos)
 		if err != nil {
 			return err
