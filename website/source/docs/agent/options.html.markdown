@@ -36,6 +36,14 @@ The options below are all specified on the command-line.
   introduces support for non-consistent ports across the cluster. For more information,
   see the [compatibility page](/docs/compatibility.html).
 
+* `-advertise` - The advertise flag is used to change the address that we
+  advertise to other nodes in the cluster. By default, the bind address is
+  advertised. However, in some cases (specifically NAT traversal), there may
+  be a routable address that cannot be bound to. This flag enables gossiping
+  a different address to support this. If this address is not routable, the node
+  will be in a constant flapping state, as other nodes will treat the non-routability
+  as a failure.
+
 * `-config-file` - A configuration file to load. For more information on
   the format of this file, read the "Configuration Files" section below.
   This option can be specified multiple times to load multiple configuration
@@ -86,7 +94,7 @@ The options below are all specified on the command-line.
   configuration values for each environment, you can select a timing profile.
   The current choices are "lan", "wan", and "local". This defaults to "local".
   If a "lan" or "local" profile is used over the Internet, or a "local" profile
-  over the LAN, a high rate of false failures is risked, as the timing constaints
+  over the LAN, a high rate of false failures is risked, as the timing constrains
   are too tight.
 
 * `-protocol` - The Serf protocol version to use. This defaults to the latest
@@ -142,6 +150,8 @@ at a single JSON object with configuration within it.
 * `role` - Equivalent to the `-role` command-line flag.
 
 * `bind` - Equivalent to the `-bind` command-line flag.
+
+* `advertise` - Equivalent to the `-advertise` command-line flag.
 
 * `encrypt_key` - Equivalent to the `-encrypt` command-line flag.
 

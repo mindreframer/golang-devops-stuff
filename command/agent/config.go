@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -18,13 +19,16 @@ const DefaultBindPort int = 7946
 
 // DefaultConfig contains the defaults for configurations.
 var DefaultConfig = &Config{
-	BindAddr:     "0.0.0.0",
-	LogLevel:     "INFO",
-	RPCAddr:      "127.0.0.1:7373",
-	Protocol:     serf.ProtocolVersionMax,
-	ReplayOnJoin: false,
-	Profile:      "lan",
+	BindAddr:      "0.0.0.0",
+	AdvertiseAddr: "",
+	LogLevel:      "INFO",
+	RPCAddr:       "127.0.0.1:7373",
+	Protocol:      serf.ProtocolVersionMax,
+	ReplayOnJoin:  false,
+	Profile:       "lan",
 }
+
+type dirEnts []os.FileInfo
 
 // Config is the configuration that can be set for an Agent. Some of these
 // configurations are exposed as command-line flags to `serf agent`, whereas
@@ -42,6 +46,11 @@ type Config struct {
 	// and UDP connections. If no port is present in the address, the default
 	// port will be used.
 	BindAddr string `mapstructure:"bind"`
+
+	// AdvertiseAddr is the address that the Serf agent will advertise to
+	// other members of the cluster. Can be used for basic NAT traversal
+	// where both the internal ip:port and external ip:port are known.
+	AdvertiseAddr string `mapstructure:"advertise"`
 
 	// EncryptKey is the secret key to use for encrypting communication
 	// traffic for Serf. The secret key must be exactly 16-bytes, base64
@@ -94,8 +103,8 @@ type Config struct {
 
 // BindAddrParts returns the parts of the BindAddr that should be
 // used to configure Serf.
-func (c *Config) BindAddrParts() (string, int, error) {
-	checkAddr := c.BindAddr
+func (c *Config) AddrParts(address string) (string, int, error) {
+	checkAddr := address
 
 START:
 	_, _, err := net.SplitHostPort(checkAddr)
@@ -190,6 +199,9 @@ func MergeConfig(a, b *Config) *Config {
 	if b.BindAddr != "" {
 		result.BindAddr = b.BindAddr
 	}
+	if b.AdvertiseAddr != "" {
+		result.AdvertiseAddr = b.AdvertiseAddr
+	}
 	if b.EncryptKey != "" {
 		result.EncryptKey = b.EncryptKey
 	}
@@ -267,6 +279,9 @@ func ReadConfigPaths(paths []string) (*Config, error) {
 			return nil, fmt.Errorf("Error reading '%s': %s", path, err)
 		}
 
+		// Sort the contents, ensures lexical order
+		sort.Sort(dirEnts(contents))
+
 		for _, fi := range contents {
 			// Don't recursively read contents
 			if fi.IsDir() {
@@ -296,4 +311,17 @@ func ReadConfigPaths(paths []string) (*Config, error) {
 	}
 
 	return result, nil
+}
+
+// Implement the sort interface for dirEnts
+func (d dirEnts) Len() int {
+	return len(d)
+}
+
+func (d dirEnts) Less(i, j int) bool {
+	return d[i].Name() < d[j].Name()
+}
+
+func (d dirEnts) Swap(i, j int) {
+	d[i], d[j] = d[j], d[i]
 }
