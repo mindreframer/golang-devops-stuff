@@ -1,9 +1,15 @@
+// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Use of this source code is governed by The MIT License (MIT) that can be
+// found in the LICENSE file.
+
 package registry
 
 import (
 	"errors"
 	"fmt"
+	"github.com/miekg/dns"
 	"github.com/skynetservices/skydns/msg"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -22,10 +28,11 @@ type Registry interface {
 	Remove(s msg.Service) error
 	RemoveUUID(uuid string) error
 	UpdateTTL(uuid string, ttl uint32, expires time.Time) error
+	AddCallback(s msg.Service, c msg.Callback) error
 	Len() int
 }
 
-// Creates a new DefaultRegistry
+// New returns a new DefaultRegistry.
 func New() Registry {
 	return &DefaultRegistry{
 		tree:  newNode(),
@@ -33,14 +40,14 @@ func New() Registry {
 	}
 }
 
-// Datastore for registered services
+// DefaultRegistry is a datastore for registered services.
 type DefaultRegistry struct {
 	tree  *node
 	nodes map[string]*node
 	mutex sync.Mutex
 }
 
-// Add service to registry
+// Add adds a service to registry.
 func (r *DefaultRegistry) Add(s msg.Service) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -51,17 +58,14 @@ func (r *DefaultRegistry) Add(s msg.Service) error {
 	}
 
 	k := getRegistryKey(s)
-
 	n, err := r.tree.add(strings.Split(k, "."), s)
-
 	if err == nil {
 		r.nodes[n.value.UUID] = n
 	}
-
 	return err
 }
 
-// Remove Service specified by UUID
+// RemoveUUID removes a sErvice specified by an UUID.
 func (r *DefaultRegistry) RemoveUUID(uuid string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -69,11 +73,10 @@ func (r *DefaultRegistry) RemoveUUID(uuid string) error {
 	if n, ok := r.nodes[uuid]; ok {
 		return r.removeService(n.value)
 	}
-
 	return ErrNotExists
 }
 
-// Updates the TTL of a service, as well as pushes the expiration time out TTL seconds from now.
+// UpdateTTL updates the TTL of a service, as well as pushes the expiration time out TTL seconds from now.
 // This serves as a ping, for the service to keep SkyDNS aware of it's existence so that it is not expired, and purged.
 func (r *DefaultRegistry) UpdateTTL(uuid string, ttl uint32, expires time.Time) error {
 	r.mutex.Lock()
@@ -82,20 +85,22 @@ func (r *DefaultRegistry) UpdateTTL(uuid string, ttl uint32, expires time.Time) 
 	if n, ok := r.nodes[uuid]; ok {
 		n.value.TTL = ttl
 		n.value.Expires = expires
-
 		return nil
 	}
-
 	return ErrNotExists
 }
 
-
-// Remove service from registry while r.mutex is held
+// removeService remove service from registry while r.mutex is held.
 func (r *DefaultRegistry) removeService(s msg.Service) error {
 	// we can always delete, even if r.tree reports it doesn't exist,
-	// because this means, we just removed a bad service entry. 
+	// because this means, we just removed a bad service entry.
 	// Map deletion is also a no-op, if entry not found in map
 	delete(r.nodes, s.UUID)
+	// No matter what, call the callbacks
+	log.Println("Calling", len(s.Callback), "callback(s) for service", s.UUID)
+	for _, c := range s.Callback {
+		c.Call(s)
+	}
 
 	// TODO: Validate service has correct values, and getRegistryKey returns a valid value
 	k := getRegistryKey(s)
@@ -103,7 +108,7 @@ func (r *DefaultRegistry) removeService(s msg.Service) error {
 	return r.tree.remove(strings.Split(k, "."))
 }
 
-// Remove service from registry
+// Remove removes a service from registry.
 func (r *DefaultRegistry) Remove(s msg.Service) (err error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -114,7 +119,7 @@ func (r *DefaultRegistry) Remove(s msg.Service) (err error) {
 	return ErrNotExists
 }
 
-// Retrieve a service based on it's UUID
+// GetUUID retrieves a service based on its UUID.
 func (r *DefaultRegistry) GetUUID(uuid string) (s msg.Service, err error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -130,13 +135,12 @@ func (r *DefaultRegistry) GetUUID(uuid string) (s msg.Service, err error) {
 	return s, ErrNotExists
 }
 
-/* Retrieve a list of services from the registry that matches the given domain pattern
- *
- * uuid.host.region.version.service.environment
- * any of these positions may supply the wildcard "any" or "all", to have all values match in this position.
- * additionally, you only need to specify as much of the domain as needed the domain version.service.environment is perfectly acceptable,
- * and will assume "any" for all the ommited subdomain positions
- */
+// Get retrieves a list of services from the registry that matches the given domain pattern:
+//
+// uuid.host.region.version.service.environment
+// any of these positions may supply the wildcard "*", to have all values match in this position.
+// additionally, you only need to specify as much of the domain as needed the domain version.service.environment is perfectly acceptable,
+// and will assume "*" for all the ommited subdomain positions
 func (r *DefaultRegistry) Get(domain string) ([]msg.Service, error) {
 	// TODO: account for version wildcards
 	r.mutex.Lock()
@@ -147,7 +151,7 @@ func (r *DefaultRegistry) Get(domain string) ([]msg.Service, error) {
 		domain = domain[:len(domain)-1]
 	}
 
-	tree := strings.Split(domain, ".")
+	tree := dns.SplitDomainName(domain)
 
 	// Domains can be partial, and we should assume wildcards for the unsupplied portions
 	if len(tree) < 6 {
@@ -155,16 +159,15 @@ func (r *DefaultRegistry) Get(domain string) ([]msg.Service, error) {
 		t := make([]string, pad)
 
 		for i := 0; i < pad; i++ {
-			t[i] = "any"
+			t[i] = "*"
 		}
 
 		tree = append(t, tree...)
 	}
-
 	return r.tree.get(tree)
 }
 
-// Returns a slice of expired UUIDs
+// GetExpired returns a slice of expired UUIDs.
 func (r *DefaultRegistry) GetExpired() (uuids []string) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -180,6 +183,22 @@ func (r *DefaultRegistry) GetExpired() (uuids []string) {
 	return
 }
 
+// AddCallback adds callback c to the service s.
+func (r *DefaultRegistry) AddCallback(s msg.Service, c msg.Callback) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	if n, ok := r.nodes[s.UUID]; ok {
+		if n.value.Callback == nil {
+			n.value.Callback = make(map[string]msg.Callback)
+		}
+		n.value.Callback[c.UUID] = c
+		return nil
+	}
+	return ErrNotExists
+}
+
+// Len returns the size of the registry r.
 func (r *DefaultRegistry) Len() int {
 	return r.tree.size()
 }
@@ -274,7 +293,7 @@ func (n *node) get(tree []string) (services []msg.Service, err error) {
 	// We've hit the bottom
 	if len(tree) == 1 {
 		switch tree[0] {
-		case "all", "any":
+		case "*":
 			if len(n.leaves) == 0 {
 				return services, ErrNotExists
 			}
@@ -304,7 +323,7 @@ func (n *node) get(tree []string) (services []msg.Service, err error) {
 	k := tree[len(tree)-1]
 
 	switch k {
-	case "all", "any":
+	case "*":
 		if len(n.leaves) == 0 {
 			return services, ErrNotExists
 		}
@@ -327,7 +346,6 @@ func (n *node) get(tree []string) (services []msg.Service, err error) {
 
 		return n.leaves[k].get(tree[:len(tree)-1])
 	}
-
 	return
 }
 

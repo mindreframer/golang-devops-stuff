@@ -1,3 +1,7 @@
+// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Use of this source code is governed by The MIT License (MIT) that can be
+// found in the LICENSE file.
+
 package server
 
 import (
@@ -368,6 +372,125 @@ func TestAuthenticationSuccess(t *testing.T) {
 	}
 }
 
+func TestHostFailure(t *testing.T) {
+	s := newTestServer("", 9630, 9631, "")
+	defer s.Stop()
+
+	m := msg.Service{
+		Name:        "TestService",
+		Version:     "1.0.0",
+		Region:      "Test",
+		Environment: "Production",
+		Port:        9000,
+		TTL:         4,
+	}
+
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("PUT", "/skydns/services/123", bytes.NewBuffer(b))
+	resp := httptest.NewRecorder()
+
+	s.router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatal("Failed to detect empty Host.")
+	}
+}
+
+func TestCallback(t *testing.T) {
+	s := newTestServer("", 9640, 9641, "")
+	defer s.Stop()
+
+	m := msg.Service{
+		Name:        "TestService",
+		Version:     "1.0.0",
+		Region:      "Test",
+		Environment: "Production",
+		Host:        "localhost",
+		Port:        9000,
+		TTL:         4,
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("PUT", "/skydns/services/123", bytes.NewBuffer(b))
+	resp := httptest.NewRecorder()
+	s.router.ServeHTTP(resp, req)
+
+	c := msg.Callback{
+		Name:        "TestService",
+		Version:     "1.0.0",
+		Region:      "Test",
+		Environment: "Production",
+		Host:        "localhost",
+		Reply:       "localhost",
+		Port:        9650,
+	}
+	b, err = json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ = http.NewRequest("PUT", "/skydns/callbacks/101", bytes.NewBuffer(b))
+	resp = httptest.NewRecorder()
+
+	s.router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("Failed to perform callback: %d", resp.Code)
+	}
+	req, _ = http.NewRequest("DELETE", "/skydns/services/123", nil)
+	resp = httptest.NewRecorder()
+	s.router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusOK {
+		t.Fatal("Failed to remove service")
+		// TODO(miek): check for the callback to be performed
+	}
+}
+
+func TestCallbackFailure(t *testing.T) {
+	s := newTestServer("", 9650, 9651, "")
+	defer s.Stop()
+
+	m := msg.Service{
+		Name:        "TestService",
+		Version:     "1.0.0",
+		Region:      "Test",
+		Environment: "Production",
+		Host:        "localhost",
+		Port:        9000,
+		TTL:         4,
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ := http.NewRequest("PUT", "/skydns/services/123", bytes.NewBuffer(b))
+	resp := httptest.NewRecorder()
+	s.router.ServeHTTP(resp, req)
+
+	c := msg.Callback{
+		Name:        "TestService",
+		Version:     "1.0.0",
+		Region:      "Test",
+		Environment: "Testing", // should result in notFound
+		Host:        "localhost",
+		Reply:       "localhost",
+		Port:        9650,
+	}
+	b, err = json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, _ = http.NewRequest("PUT", "/skydns/callbacks/101", bytes.NewBuffer(b))
+	resp = httptest.NewRecorder()
+
+	s.router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusNotFound {
+		t.Fatal("Callback should result in service not found.")
+	}
+}
+
 var services = []msg.Service{
 	{
 		UUID:        "100",
@@ -496,11 +619,11 @@ var dnsTestCases = []dnsTestCase{
 
 	// Region Priority Test
 	{
-		Question: "region1.any.testservice.production.skydns.local.",
+		Question: "region1.*.testservice.production.skydns.local.",
 		Answer: []dns.SRV{
 			{
 				Hdr: dns.RR_Header{
-					Name:   "region1.any.testservice.production.skydns.local.",
+					Name:   "region1.*.testservice.production.skydns.local.",
 					Ttl:    30,
 					Rrtype: dns.TypeSRV,
 				},
@@ -511,7 +634,7 @@ var dnsTestCases = []dnsTestCase{
 			},
 			{
 				Hdr: dns.RR_Header{
-					Name:   "region1.any.testservice.production.skydns.local.",
+					Name:   "region1.*.testservice.production.skydns.local.",
 					Ttl:    33,
 					Rrtype: dns.TypeSRV,
 				},
@@ -522,7 +645,7 @@ var dnsTestCases = []dnsTestCase{
 			},
 			{
 				Hdr: dns.RR_Header{
-					Name:   "region1.any.testservice.production.skydns.local.",
+					Name:   "region1.*.testservice.production.skydns.local.",
 					Ttl:    34,
 					Rrtype: dns.TypeSRV,
 				},
@@ -541,11 +664,11 @@ type servicesTest struct {
 }
 
 var serviceTestArray []servicesTest = []servicesTest{
-	{"any", 7},
+	{"*", 7},
 	{"production", 5},
 	{"testservice.production", 3},
-	{"region1.any.any.production", 1},
-	{"region1.any.testservice.production", 1},
+	{"region1.*.*.production", 1},
+	{"region1.*.testservice.production", 1},
 }
 
 func TestGetServicesWithQueries(t *testing.T) {

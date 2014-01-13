@@ -1,3 +1,7 @@
+// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Use of this source code is governed by The MIT License (MIT) that can be
+// found in the LICENSE file.
+
 package server
 
 import (
@@ -19,7 +23,7 @@ func (s *Server) getRegionsHTTPHandler(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	srv, err := s.registry.Get("any")
+	srv, err := s.registry.Get("*")
 	if err != nil {
 		switch err {
 		case registry.ErrNotExists:
@@ -59,7 +63,7 @@ func (s *Server) getEnvironmentsHTTPHandler(w http.ResponseWriter, req *http.Req
 		return
 	}
 
-	srv, err := s.registry.Get("any")
+	srv, err := s.registry.Get("*")
 	if err != nil {
 		switch err {
 		case registry.ErrNotExists:
@@ -104,7 +108,7 @@ func (s *Server) getServicesHTTPHandler(w http.ResponseWriter, req *http.Request
 	var q string
 
 	if q = req.URL.Query().Get("query"); q == "" {
-		q = "any"
+		q = "*"
 	}
 
 	log.Println("Retrieving All Services for query", q)
@@ -126,5 +130,4 @@ func (s *Server) getServicesHTTPHandler(w http.ResponseWriter, req *http.Request
 	var b bytes.Buffer
 	json.NewEncoder(&b).Encode(srv)
 	w.Write(b.Bytes())
-
 }
