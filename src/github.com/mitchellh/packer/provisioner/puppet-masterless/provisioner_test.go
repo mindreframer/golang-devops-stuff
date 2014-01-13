@@ -76,6 +76,31 @@ func TestProvisionerPrepare_manifestFile(t *testing.T) {
 	}
 }
 
+func TestProvisionerPrepare_manifestDir(t *testing.T) {
+	config := testConfig()
+
+	delete(config, "manifestdir")
+	p := new(Provisioner)
+	err := p.Prepare(config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	// Test with a good one
+	td, err := ioutil.TempDir("", "packer")
+	if err != nil {
+		t.Fatalf("error: %s", err)
+	}
+	defer os.RemoveAll(td)
+
+	config["manifest_dir"] = td
+	p = new(Provisioner)
+	err = p.Prepare(config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+}
+
 func TestProvisionerPrepare_modulePaths(t *testing.T) {
 	config := testConfig()
 

@@ -17,7 +17,7 @@ containers with portable scripts or configuration management systems
 that are not tied to Docker in any way. It also has a simpler mental model:
 you provision containers much the same way you provision a normal virtualized
 or dedicated server. For more information, read the section on
-[Dockerfiles](#toc_3).
+[Dockerfiles](#toc_4).
 
 The Docker builder must run on a machine that has Docker installed. Therefore
 the builder only works on machines that support Docker (modern Linux machines).
@@ -40,8 +40,9 @@ no provisioners are defined, but it will effectively repackage an image.
 
 ## Configuration Reference
 
-Configuration options are organized below into two categories: required and optional. Within
-each category, the available options are alphabetized and described.
+Configuration options are organized below into two categories: required and
+optional. Within each category, the available options are alphabetized and
+described.
 
 Required:
 
@@ -57,6 +58,24 @@ Optional:
 * `pull` (bool) - If true, the configured image will be pulled using
   `docker pull` prior to use. Otherwise, it is assumed the image already
   exists and can be used. This defaults to true if not set.
+
+* `run_command` (array of strings) - An array of arguments to pass to
+  `docker` in order to run the container. By default this is set to
+  `["run", "-d", "-i", "-t", "-v", "{{.Volumes}}", "{{.Image}}", "/bin/bash"]`.
+  As you can see, you have a couple template variables to customize, as well.
+
+## Using the generated artifact
+
+Once the tar artifact has been generated, you will likely want to import, tag,
+and push it to a container repository. Until packer supports management of the
+docker image metadata, this process is manual. For example, the following will
+import `mycontainer-123456789.tar` to the repository
+`registry.mydomain.com/mycontainer`, tagged with `latest`:
+
+    sudo docker import - registry.mydomain.com/mycontainer:latest < mycontainer-123456789.tar
+
+You can then add additional tags and push the image as usual with `docker tag`
+and `docker push`, respectively.
 
 ## Dockerfiles
 

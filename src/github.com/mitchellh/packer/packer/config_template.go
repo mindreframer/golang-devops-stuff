@@ -4,10 +4,20 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/mitchellh/packer/common/uuid"
+	"os"
 	"strconv"
 	"text/template"
 	"time"
 )
+
+// InitTime is the UTC time when this package was initialized. It is
+// used as the timestamp for all configuration templates so that they
+// match for a single build.
+var InitTime time.Time
+
+func init() {
+	InitTime = time.Now().UTC()
+}
 
 // ConfigTemplate processes string data as a text/template with some common
 // elements and functions available. Plugin creators should process as
@@ -27,6 +37,8 @@ func NewConfigTemplate() (*ConfigTemplate, error) {
 
 	result.root = template.New("configTemplateRoot")
 	result.root.Funcs(template.FuncMap{
+		"env":       templateDisableEnv,
+		"pwd":       templatePwd,
 		"isotime":   templateISOTime,
 		"timestamp": templateTimestamp,
 		"user":      result.templateUser,
@@ -84,12 +96,30 @@ func (t *ConfigTemplate) templateUser(n string) (string, error) {
 	return result, nil
 }
 
+func templateDisableEnv(n string) (string, error) {
+	return "", fmt.Errorf(
+		"Environmental variables can only be used as default values for user variables.")
+}
+
+func templateDisableUser(n string) (string, error) {
+	return "", fmt.Errorf(
+		"User variable can't be used within a default value for a user variable: %s", n)
+}
+
+func templateEnv(n string) string {
+	return os.Getenv(n)
+}
+
 func templateISOTime() string {
 	return time.Now().UTC().Format(time.RFC3339)
 }
 
+func templatePwd() (string, error) {
+	return os.Getwd()
+}
+
 func templateTimestamp() string {
-	return strconv.FormatInt(time.Now().UTC().Unix(), 10)
+	return strconv.FormatInt(InitTime.Unix(), 10)
 }
 
 func templateUuid() string {

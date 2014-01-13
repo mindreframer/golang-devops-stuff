@@ -16,16 +16,19 @@ var builtins = map[string]string{
 type Config struct {
 	common.PackerConfig `mapstructure:",squash"`
 
-	Insecure           bool   `mapstructure:"insecure"`
-	Datacenter         string `mapstructure:"datacenter"`
-	Datastore          string `mapstructure:"datastore"`
-	Host               string `mapstructure:"host"`
-	Password           string `mapstructure:"password"`
-	PathToResourcePool string `mapstructure:"path_to_resource_pool"`
-	Username           string `mapstructure:"username"`
-	VMFolder           string `mapstructure:"vm_folder"`
-	VMName             string `mapstructure:"vm_name"`
-	VMNetwork          string `mapstructure:"vm_network"`
+	Insecure     bool   `mapstructure:"insecure"`
+	Cluster      string `mapstructure:"cluster"`
+	Datacenter   string `mapstructure:"datacenter"`
+	Datastore    string `mapstructure:"datastore"`
+	Host         string `mapstructure:"host"`
+	Password     string `mapstructure:"password"`
+	ResourcePool string `mapstructure:"resource_pool"`
+	Username     string `mapstructure:"username"`
+	VMFolder     string `mapstructure:"vm_folder"`
+	VMName       string `mapstructure:"vm_name"`
+	VMNetwork    string `mapstructure:"vm_network"`
+
+	tpl *packer.ConfigTemplate
 }
 
 type PostProcessor struct {
@@ -38,11 +41,11 @@ func (p *PostProcessor) Configure(raws ...interface{}) error {
 		return err
 	}
 
-	tpl, err := packer.NewConfigTemplate()
+	p.config.tpl, err = packer.NewConfigTemplate()
 	if err != nil {
 		return err
 	}
-	tpl.UserVars = p.config.PackerUserVars
+	p.config.tpl.UserVars = p.config.PackerUserVars
 
 	// Accumulate any errors
 	errs := new(packer.MultiError)
@@ -52,22 +55,29 @@ func (p *PostProcessor) Configure(raws ...interface{}) error {
 			errs, fmt.Errorf("ovftool not found: %s", err))
 	}
 
-	validates := map[string]*string{
-		"datacenter":            &p.config.Datacenter,
-		"datastore":             &p.config.Datastore,
-		"host":                  &p.config.Host,
-		"vm_network":            &p.config.VMNetwork,
-		"password":              &p.config.Password,
-		"path_to_resource_pool": &p.config.PathToResourcePool,
-		"username":              &p.config.Username,
-		"vm_folder":             &p.config.VMFolder,
-		"vm_name":               &p.config.VMName,
+	templates := map[string]*string{
+		"cluster":       &p.config.Cluster,
+		"datacenter":    &p.config.Datacenter,
+		"datastore":     &p.config.Datastore,
+		"host":          &p.config.Host,
+		"vm_network":    &p.config.VMNetwork,
+		"password":      &p.config.Password,
+		"resource_pool": &p.config.ResourcePool,
+		"username":      &p.config.Username,
+		"vm_folder":     &p.config.VMFolder,
+		"vm_name":       &p.config.VMName,
 	}
 
-	for n := range validates {
-		if *validates[n] == "" {
+	for key, ptr := range templates {
+		if *ptr == "" {
 			errs = packer.MultiErrorAppend(
-				errs, fmt.Errorf("%s must be set", n))
+				errs, fmt.Errorf("%s must be set", key))
+		}
+
+		*ptr, err = p.config.tpl.Process(*ptr, nil)
+		if err != nil {
+			errs = packer.MultiErrorAppend(
+				errs, fmt.Errorf("Error processing %s: %s", key, err))
 		}
 	}
 
@@ -95,8 +105,6 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 		return nil, false, fmt.Errorf("VMX file not found")
 	}
 
-	ui.Message(fmt.Sprintf("Uploading %s to vSphere", vmx))
-
 	args := []string{
 		fmt.Sprintf("--noSSLVerify=%t", p.config.Insecure),
 		"--acceptAllEulas",
@@ -104,14 +112,17 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 		fmt.Sprintf("--datastore=%s", p.config.Datastore),
 		fmt.Sprintf("--network=%s", p.config.VMNetwork),
 		fmt.Sprintf("--vmFolder=%s", p.config.VMFolder),
-		fmt.Sprintf("vi://%s:%s@%s/%s/%s",
+		fmt.Sprintf("%s", vmx),
+		fmt.Sprintf("vi://%s:%s@%s/%s/host/%s/Resources/%s",
 			p.config.Username,
 			p.config.Password,
 			p.config.Host,
 			p.config.Datacenter,
-			p.config.PathToResourcePool),
+			p.config.Cluster,
+			p.config.ResourcePool),
 	}
 
+	ui.Message(fmt.Sprintf("Uploading %s to vSphere", vmx))
 	var out bytes.Buffer
 	cmd := exec.Command("ovftool", args...)
 	cmd.Stdout = &out

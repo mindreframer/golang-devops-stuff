@@ -9,6 +9,8 @@ import (
 	"io/ioutil"
 	"os"
 	"sort"
+	"text/template"
+	"time"
 )
 
 // The rawTemplate struct represents the structure of a template read
@@ -16,6 +18,7 @@ import (
 // "interface{}" pointers since we actually don't know what their contents
 // are until we read the "type" field.
 type rawTemplate struct {
+	Description    string
 	Variables      map[string]interface{}
 	Builders       []map[string]interface{}
 	Hooks          map[string][]string
@@ -26,6 +29,7 @@ type rawTemplate struct {
 // The Template struct represents a parsed template, parsed into the most
 // completed form it can be without additional processing by the caller.
 type Template struct {
+	Description    string
 	Variables      map[string]RawVariable
 	Builders       map[string]RawBuilderConfig
 	Hooks          map[string][]string
@@ -61,16 +65,21 @@ type RawPostProcessorConfig struct {
 type RawProvisionerConfig struct {
 	TemplateOnlyExcept `mapstructure:",squash"`
 
-	Type     string
-	Override map[string]interface{}
+	Type           string
+	Override       map[string]interface{}
+	RawPauseBefore string `mapstructure:"pause_before"`
 
 	RawConfig interface{}
+
+	pauseBefore time.Duration
 }
 
 // RawVariable represents a variable configuration within a template.
 type RawVariable struct {
-	Default  string
-	Required bool
+	Default  string // The default value for this variable
+	Required bool   // If the variable is required or not
+	Value    string // The set value for this variable
+	HasValue bool   // True if the value was set
 }
 
 // ParseTemplate takes a byte slice and parses a Template from it, returning
@@ -78,7 +87,9 @@ type RawVariable struct {
 // could potentially be a MultiError, representing multiple errors. Knowing
 // and checking for this can be useful, if you wish to format it in a certain
 // way.
-func ParseTemplate(data []byte) (t *Template, err error) {
+//
+// The second parameter, vars, are the values for a set of user variables.
+func ParseTemplate(data []byte, vars map[string]string) (t *Template, err error) {
 	var rawTplInterface interface{}
 	err = jsonutil.Unmarshal(data, &rawTplInterface)
 	if err != nil {
@@ -115,6 +126,7 @@ func ParseTemplate(data []byte) (t *Template, err error) {
 	}
 
 	t = &Template{}
+	t.Description = rawTpl.Description
 	t.Variables = make(map[string]RawVariable)
 	t.Builders = make(map[string]RawBuilderConfig)
 	t.Hooks = rawTpl.Hooks
@@ -143,6 +155,13 @@ func ParseTemplate(data []byte) (t *Template, err error) {
 			errors = append(errors,
 				fmt.Errorf("Error decoding default value for user var '%s': %s", k, err))
 			continue
+		}
+
+		// Set the value of this variable if we have it
+		if val, ok := vars[k]; ok {
+			variable.HasValue = true
+			variable.Value = val
+			delete(vars, k)
 		}
 
 		t.Variables[k] = variable
@@ -286,11 +305,33 @@ func ParseTemplate(data []byte) (t *Template, err error) {
 			}
 		}
 
+		// Setup the pause settings
+		if raw.RawPauseBefore != "" {
+			duration, err := time.ParseDuration(raw.RawPauseBefore)
+			if err != nil {
+				errors = append(
+					errors, fmt.Errorf(
+						"provisioner %d: pause_before invalid: %s",
+						i+1, err))
+			}
+
+			raw.pauseBefore = duration
+		}
+
+		// Remove the pause_before setting if it is there so that we don't
+		// get template validation errors later.
+		delete(v, "pause_before")
+
 		raw.RawConfig = v
 	}
 
 	if len(t.Builders) == 0 {
 		errors = append(errors, fmt.Errorf("No builders are defined in the template."))
+	}
+
+	// Verify that all the variable sets were for real variables.
+	for k, _ := range vars {
+		errors = append(errors, fmt.Errorf("Unknown user variables: %s", k))
 	}
 
 	// If there were errors, we put it into a MultiError and return
@@ -305,7 +346,7 @@ func ParseTemplate(data []byte) (t *Template, err error) {
 
 // ParseTemplateFile takes the given template file and parses it into
 // a single template.
-func ParseTemplateFile(path string) (*Template, error) {
+func ParseTemplateFile(path string, vars map[string]string) (*Template, error) {
 	var data []byte
 
 	if path == "-" {
@@ -325,7 +366,7 @@ func ParseTemplateFile(path string) (*Template, error) {
 		}
 	}
 
-	return ParseTemplate(data)
+	return ParseTemplate(data, vars)
 }
 
 func parsePostProcessor(i int, rawV interface{}) (result []map[string]interface{}, errors []error) {
@@ -408,6 +449,57 @@ func (t *Template) Build(name string, components *ComponentFinder) (b Build, err
 	if builder == nil {
 		err = fmt.Errorf("Builder type not found: %s", builderConfig.Type)
 		return
+	}
+
+	// Prepare the variable template processor, which is a bit unique
+	// because we don't allow user variable usage and we add a function
+	// to read from the environment.
+	varTpl, err := NewConfigTemplate()
+	if err != nil {
+		return nil, err
+	}
+	varTpl.Funcs(template.FuncMap{
+		"env":  templateEnv,
+		"user": templateDisableUser,
+	})
+
+	// Prepare the variables
+	var varErrors []error
+	variables := make(map[string]string)
+	for k, v := range t.Variables {
+		if v.Required && !v.HasValue {
+			varErrors = append(varErrors,
+				fmt.Errorf("Required user variable '%s' not set", k))
+		}
+
+		var val string
+		if v.HasValue {
+			val = v.Value
+		} else {
+			val, err = varTpl.Process(v.Default, nil)
+			if err != nil {
+				varErrors = append(varErrors,
+					fmt.Errorf("Error processing user variable '%s': %s'", k, err))
+			}
+		}
+
+		variables[k] = val
+	}
+
+	if len(varErrors) > 0 {
+		return nil, &MultiError{varErrors}
+	}
+
+	// Process the name
+	tpl, err := NewConfigTemplate()
+	if err != nil {
+		return nil, err
+	}
+	tpl.UserVars = variables
+
+	name, err = tpl.Process(name, nil)
+	if err != nil {
+		return nil, err
 	}
 
 	// Gather the Hooks
@@ -495,17 +587,15 @@ func (t *Template) Build(name string, components *ComponentFinder) (b Build, err
 			}
 		}
 
+		if rawProvisioner.pauseBefore > 0 {
+			provisioner = &PausedProvisioner{
+				PauseBefore: rawProvisioner.pauseBefore,
+				Provisioner: provisioner,
+			}
+		}
+
 		coreProv := coreBuildProvisioner{provisioner, configs}
 		provisioners = append(provisioners, coreProv)
-	}
-
-	// Prepare the variables
-	variables := make(map[string]coreBuildVariable)
-	for k, v := range t.Variables {
-		variables[k] = coreBuildVariable{
-			Default:  v.Default,
-			Required: v.Required,
-		}
 	}
 
 	b = &coreBuild{

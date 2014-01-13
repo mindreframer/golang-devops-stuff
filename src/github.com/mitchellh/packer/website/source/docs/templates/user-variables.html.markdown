@@ -20,7 +20,7 @@ page first.
 
 User variables must first be defined in a `variables` section within your
 template. Even if you want a variable to default to an empty string, it
-must be defined. This explicitivity makes it easy for newcomers to your
+must be defined. This explicivity makes it easy for newcomers to your
 template to understand what can be modified using variables in your template.
 
 The `variables` section is a simple key/value mapping of the variable
@@ -57,6 +57,36 @@ the user function in the form of <code>{{user &#96;variable&#96;}}</code>.
 This function can be used in _any value_ within the template, in
 builders, provisioners, _anything_. The user variable is available globally
 within the template.
+
+## Environmental Variables
+
+Environmental variables can be used within your template using user
+variables. The `env` function is available _only_ within the default value
+of a user variable, allowing you to default a user variable to an
+environmental variable. An example is shown below:
+
+<pre class="prettyprint">
+{
+  "variables": {
+    "my_secret": "{{env `MY_SECRET`}}",
+  },
+
+  ...
+}
+</pre>
+
+This will default "my\_secret" to be the value of the "MY\_SECRET"
+environmental variable (or the empty string if it does not exist).
+
+<div class="alert alert-info">
+<strong>Why can't I use environmental variables elsewhere?</strong>
+User variables are the single source of configurable input to a template.
+We felt that having environmental variables used <em>anywhere</em> in a
+template would confuse the user about the possible inputs to a template.
+By allowing environmental variables only within default values for user
+variables, user variables remain as the single source of input to a template
+that a user can easily discover using <code>packer inspect</code>.
+</div>
 
 ## Setting Variables
 

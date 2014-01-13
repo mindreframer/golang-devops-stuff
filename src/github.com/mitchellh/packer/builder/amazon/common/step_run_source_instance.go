@@ -6,20 +6,21 @@ import (
 	"github.com/mitchellh/multistep"
 	"github.com/mitchellh/packer/packer"
 	"io/ioutil"
-	"log"
 )
 
 type StepRunSourceInstance struct {
-	Debug              bool
-	ExpectedRootDevice string
-	InstanceType       string
-	UserData           string
-	UserDataFile       string
-	SourceAMI          string
-	IamInstanceProfile string
-	SubnetId           string
-	AvailabilityZone   string
-	BlockDevices       BlockDevices
+	AssociatePublicIpAddress bool
+	AvailabilityZone         string
+	BlockDevices             BlockDevices
+	Debug                    bool
+	ExpectedRootDevice       string
+	InstanceType             string
+	IamInstanceProfile       string
+	SourceAMI                string
+	SubnetId                 string
+	Tags                     map[string]string
+	UserData                 string
+	UserDataFile             string
 
 	instance *ec2.Instance
 }
@@ -47,17 +48,18 @@ func (s *StepRunSourceInstance) Run(state multistep.StateBag) multistep.StepActi
 	}
 
 	runOpts := &ec2.RunInstances{
-		KeyName:            keyName,
-		ImageId:            s.SourceAMI,
-		InstanceType:       s.InstanceType,
-		UserData:           []byte(userData),
-		MinCount:           0,
-		MaxCount:           0,
-		SecurityGroups:     securityGroups,
-		IamInstanceProfile: s.IamInstanceProfile,
-		SubnetId:           s.SubnetId,
-		BlockDevices:       s.BlockDevices.BuildLaunchDevices(),
-		AvailZone:          s.AvailabilityZone,
+		KeyName:                  keyName,
+		ImageId:                  s.SourceAMI,
+		InstanceType:             s.InstanceType,
+		UserData:                 []byte(userData),
+		MinCount:                 0,
+		MaxCount:                 0,
+		SecurityGroups:           securityGroups,
+		IamInstanceProfile:       s.IamInstanceProfile,
+		SubnetId:                 s.SubnetId,
+		AssociatePublicIpAddress: s.AssociatePublicIpAddress,
+		BlockDevices:             s.BlockDevices.BuildLaunchDevices(),
+		AvailZone:                s.AvailabilityZone,
 	}
 
 	ui.Say("Launching a source AWS instance...")
@@ -89,11 +91,22 @@ func (s *StepRunSourceInstance) Run(state multistep.StateBag) multistep.StepActi
 	}
 
 	s.instance = &runResp.Instances[0]
-	log.Printf("instance id: %s", s.instance.InstanceId)
+	ui.Message(fmt.Sprintf("Instance ID: %s", s.instance.InstanceId))
+
+	ec2Tags := make([]ec2.Tag, 1, len(s.Tags)+1)
+	ec2Tags[0] = ec2.Tag{"Name", "Packer Builder"}
+	for k, v := range s.Tags {
+		ec2Tags = append(ec2Tags, ec2.Tag{k, v})
+	}
+
+	_, err = ec2conn.CreateTags([]string{s.instance.InstanceId}, ec2Tags)
+	if err != nil {
+		ui.Message(
+			fmt.Sprintf("Failed to tag a Name on the builder instance: %s", err))
+	}
 
 	ui.Say(fmt.Sprintf("Waiting for instance (%s) to become ready...", s.instance.InstanceId))
 	stateChange := StateChangeConf{
-		Conn:      ec2conn,
 		Pending:   []string{"pending"},
 		Target:    "running",
 		Refresh:   InstanceStateRefreshFunc(ec2conn, s.instance),
@@ -112,6 +125,10 @@ func (s *StepRunSourceInstance) Run(state multistep.StateBag) multistep.StepActi
 	if s.Debug {
 		if s.instance.DNSName != "" {
 			ui.Message(fmt.Sprintf("Public DNS: %s", s.instance.DNSName))
+		}
+
+		if s.instance.PublicIpAddress != "" {
+			ui.Message(fmt.Sprintf("Public IP: %s", s.instance.PublicIpAddress))
 		}
 
 		if s.instance.PrivateIpAddress != "" {
@@ -139,7 +156,6 @@ func (s *StepRunSourceInstance) Cleanup(state multistep.StateBag) {
 	}
 
 	stateChange := StateChangeConf{
-		Conn:    ec2conn,
 		Pending: []string{"pending", "running", "shutting-down", "stopped", "stopping"},
 		Refresh: InstanceStateRefreshFunc(ec2conn, s.instance),
 		Target:  "terminated",

@@ -54,7 +54,8 @@ func (p *Provisioner) Prepare(raws ...interface{}) error {
 
 	// Templates
 	templates := map[string]*string{
-		"staging_dir": &p.config.StagingDir,
+		"playbook_file": &p.config.PlaybookFile,
+		"staging_dir":   &p.config.StagingDir,
 	}
 
 	for n, ptr := range templates {
@@ -66,13 +67,29 @@ func (p *Provisioner) Prepare(raws ...interface{}) error {
 		}
 	}
 
+	sliceTemplates := map[string][]string{
+		"playbook_paths": p.config.PlaybookPaths,
+		"role_paths":     p.config.RolePaths,
+	}
+
+	for n, slice := range sliceTemplates {
+		for i, elem := range slice {
+			var err error
+			slice[i], err = p.config.tpl.Process(elem, nil)
+			if err != nil {
+				errs = packer.MultiErrorAppend(
+					errs, fmt.Errorf("Error processing %s[%d]: %s", n, i, err))
+			}
+		}
+	}
+
 	// Validation
 	err = validateFileConfig(p.config.PlaybookFile, "playbook_file", true)
 	if err != nil {
 		errs = packer.MultiErrorAppend(errs, err)
 	}
 	for _, path := range p.config.PlaybookPaths {
-		err := validateFileConfig(path, "playbook_paths", false)
+		err := validateDirConfig(path, "playbook_paths")
 		if err != nil {
 			errs = packer.MultiErrorAppend(errs, err)
 		}

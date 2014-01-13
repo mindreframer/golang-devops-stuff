@@ -1,9 +1,137 @@
-## 0.4.1 (unreleased)
+## 0.5.2 (unreleased)
+
+BUG FIXES:
+
+* builders/docker: user variables work properly. [GH-777]
+* builder/virtualbox,vmware: iso\_checksum is not required if the
+  checksum type is "none"
+
+## 0.5.1 (01/02/2014)
+
+BUG FIXES:
+
+* core: If a stream ID loops around, don't let it use stream ID 0 [GH-767]
+* core: Fix issue where large writes to plugins would result in stream
+  corruption. [GH-727]
+* builders/virtualbox-ovf: `shutdown_timeout` config works. [GH-772]
+* builders/vmware-iso: Remote driver works properly again. [GH-773]
+
+## 0.5.0 (12/30/2013)
+
+BACKWARDS INCOMPATIBILITIES:
+
+* "virtualbox" builder has been renamed to "virtualbox-iso". Running your
+   template through `packer fix` will resolve this.
+* "vmware" builder has been renamed to "vmware-iso". Running your template
+  through `packer fix` will resolve this.
+* post-processor/vagrant: Syntax for overriding by provider has changed.
+  See the documentation for more information. Running your template
+  through `packer fix` should resolve this.
+* post-processor/vsphere: Some available configuration options were
+  changed. Running your template through `packer fix` should resolve
+  this.
+* provisioner/puppet-masterless: The `execute_command` no longer has
+  the `Has*` variables, since the templating language now supports
+  comparison operations. See the Go documentation for more info:
+  http://golang.org/pkg/text/template/
+
+FEATURES:
+
+* **New builder:** Google Compute Engine. You can now build images for
+  use in Google Compute Engine. See the documentation for more information.
+  [GH-715]
+* **New builder:** "virtualbox-ovf" can build VirtualBox images from
+  an existing OVF or OVA. [GH-201]
+* **New builder:** "vmware-vmx" can build VMware images from an existing
+  VMX. [GH-201]
+* Environmental variables can now be accessed as default values for
+  user variables using the "env" function. See the documentation for more
+  information.
+* "description" field in templates: write a human-readable description
+  of what a template does. This will be shown in `packer inspect`.
+* Vagrant post-processor now accepts a list of files to include in the
+  box.
+* All provisioners can now have a "pause\_before" parameter to wait
+  some period of time before running that provisioner. This is useful
+  for reboots. [GH-737]
+
+IMPROVEMENTS:
+
+* core: Plugins communicate over a single TCP connection per plugin now,
+  instead of sometimes dozens. Performance around plugin communication
+  dramatically increased.
+* core: Build names are now template processed so you can use things
+  like user variables in them. [GH-744]
+* core: New "pwd" function available globally that returns the working
+  directory. [GH-762]
+* builder/amazon/all: Launched EC2 instances now have a name of
+  "Packer Builder" so that they are easily recognizable. [GH-642]
+* builder/amazon/all: Copying AMIs to multiple regions now happens
+  in parallel. [GH-495]
+* builder/amazon/all: Ability to specify "run\_tags" to tag the instance
+  while running. [GH-722]
+* builder/digitalocean: Private networking support. [GH-698]
+* builder/docker: A "run\_command" can be specified, configuring how
+  the container is started. [GH-648]
+* builder/openstack: In debug mode, the generated SSH keypair is saved
+  so you can SSH into the machine. [GH-746]
+* builder/qemu: Floppy files are supported. [GH-686]
+* builder/qemu: Next `run_once` option tells Qemu to run only once,
+  which is useful for Windows installs that handle reboots for you.
+  [GH-687]
+* builder/virtualbox: Nice errors if Packer can't write to
+  the output directory.
+* builder/virtualbox: ISO is ejected prior to export.
+* builder/virtualbox: Checksum type can be "none" [GH-471]
+* builder/vmware: Can now specify path to the Fusion application. [GH-677]
+* builder/vmware: Checksum type can be "none" [GH-471]
+* provisioner/puppet-masterless: Can now specify a `manifest_dir` to
+  upload manifests to the remote machine for imports. [GH-655]
+
+BUG FIXES:
+
+* core: No colored output in machine-readable output. [GH-684]
+* core: User variables can now be used for non-string fields. [GH-598]
+* core: Fix bad download paths if the download URL contained a "."
+  before a "/" [GH-716]
+* core: "{{timestamp}}" values will always be the same for the entire
+  duration of a build. [GH-744]
+* builder/amazon: Handle cases where security group isn't instantly
+  available. [GH-494]
+* builder/virtualbox: don't download guest additions if disabled. [GH-731]
+* post-processor/vsphere: Uploads VM properly. [GH-694]
+* post-processor/vsphere: Process user variables.
+* provisioner/ansible-local: all configurations are processed as templates
+  [GH-749]
+* provisioner/ansible-local: playbook paths are properly validated
+  as directories, not files. [GH-710]
+* provisioner/chef-solo: Environments are recognized. [GH-726]
+
+## 0.4.1 (December 7, 2013)
+
+IMPROVEMENTS:
+
+* builder/amazon/ebs: New option allows associating a public IP with
+  non-default VPC instances. [GH-660]
+* builder/openstack: A "proxy\_url" setting was added to define an HTTP
+  proxy to use when building with this builder. [GH-637]
 
 BUG FIXES:
 
 * core: Don't change background color on CLI anymore, making things look
   a tad nicer in some terminals.
+* core: multiple ISO URLs works properly in all builders. [GH-683]
+* builder/amazon/chroot: Block when obtaining file lock to allow
+  parallel builds. [GH-689]
+* builder/amazon/instance: Add location flag to upload bundle command
+  so that building AMIs works out of us-east-1 [GH-679]
+* builder/qemu: Qemu arguments are templated. [GH-688]
+* builder/vmware: Cleanup of VMX keys works properly so cd-rom won't
+  get stuck with ISO. [GH-685]
+* builder/vmware: File cleanup is more resilient to file delete races
+  with the operating system. [GH-675]
+* provisioner/puppet-masterless: Check for hiera config path existence
+  properly. [GH-656]
 
 ## 0.4.0 (November 19, 2013)
 

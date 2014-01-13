@@ -33,14 +33,13 @@ func (s *stepCreateAMI) Run(state multistep.StateBag) multistep.StepAction {
 	}
 
 	// Set the AMI ID in the state
-	ui.Say(fmt.Sprintf("AMI: %s", createResp.ImageId))
+	ui.Message(fmt.Sprintf("AMI: %s", createResp.ImageId))
 	amis := make(map[string]string)
 	amis[ec2conn.Region.Name] = createResp.ImageId
 	state.Put("amis", amis)
 
 	// Wait for the image to become ready
 	stateChange := awscommon.StateChangeConf{
-		Conn:      ec2conn,
 		Pending:   []string{"pending"},
 		Target:    "available",
 		Refresh:   awscommon.AMIStateRefreshFunc(ec2conn, createResp.ImageId),

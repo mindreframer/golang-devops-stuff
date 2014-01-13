@@ -34,7 +34,7 @@ func (c Command) Run(env packer.Environment, args []string) int {
 
 	// Read the file into a byte array so that we can parse the template
 	log.Printf("Reading template: %#v", args[0])
-	tpl, err := packer.ParseTemplateFile(args[0])
+	tpl, err := packer.ParseTemplateFile(args[0], nil)
 	if err != nil {
 		env.Ui().Error(fmt.Sprintf("Failed to parse template: %s", err))
 		return 1
@@ -42,6 +42,12 @@ func (c Command) Run(env packer.Environment, args []string) int {
 
 	// Convenience...
 	ui := env.Ui()
+
+	// Description
+	if tpl.Description != "" {
+		ui.Say("Description:\n")
+		ui.Say(tpl.Description + "\n")
+	}
 
 	// Variables
 	if len(tpl.Variables) == 0 {
@@ -135,6 +141,10 @@ func (c Command) Run(env packer.Environment, args []string) int {
 			ui.Say(fmt.Sprintf("  %s", v.Type))
 		}
 	}
+
+	ui.Say("\nNote: If your build names contain user variables or template\n" +
+		"functions such as 'timestamp', these are processed at build time,\n" +
+		"and therefore only show in their raw form here.")
 
 	return 0
 }

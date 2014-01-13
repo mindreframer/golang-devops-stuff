@@ -5,7 +5,7 @@ page_title: "vSphere Post-Processor"
 
 # vSphere Post-Processor
 
-Type: `vsphere-upload`
+Type: `vsphere`
 
 The vSphere post-processor takes an artifact from the VMware builder
 and uploads it to a vSphere endpoint.
@@ -18,6 +18,8 @@ each category, the available configuration keys are alphabetized.
 
 Required:
 
+* `cluster` (string) - The cluster to upload the VM to.
+
 * `datacenter` (string) - The name of the datacenter within vSphere to
   add the VM to.
 
@@ -29,8 +31,7 @@ Required:
 * `password` (string) - Password to use to authenticate to the vSphere
   endpoint.
 
-* `path_to_resource_pool` (string) - The path within the resource pool to
-  store the VM.
+* `resource_pool` (string) - The resource pool to upload the VM to.
 
 * `username` (string) - The username to use to authenticate to the vSphere
   endpoint.
