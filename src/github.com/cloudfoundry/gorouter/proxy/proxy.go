@@ -2,13 +2,14 @@ package proxy
 
 import (
 	"net/http"
-	"os"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	steno "github.com/cloudfoundry/gosteno"
 
+	"github.com/cloudfoundry/gorouter/access_log"
 	"github.com/cloudfoundry/gorouter/config"
 	"github.com/cloudfoundry/gorouter/registry"
 	"github.com/cloudfoundry/gorouter/route"
@@ -28,32 +29,19 @@ type Proxy struct {
 	*config.Config
 	*registry.Registry
 	varz.Varz
-	*AccessLogger
+	access_log.AccessLogger
 	*http.Transport
 }
 
-func NewProxy(c *config.Config, registry *registry.Registry, v varz.Varz) *Proxy {
-	p := &Proxy{
-		Config:    c,
+func NewProxy(config *config.Config, registry *registry.Registry, varz varz.Varz) *Proxy {
+	return &Proxy{
+		AccessLogger: access_log.CreateRunningAccessLogger(config),
+		Config:    config,
 		Logger:    steno.NewLogger("router.proxy"),
 		Registry:  registry,
-		Varz:      v,
-		Transport: &http.Transport{ResponseHeaderTimeout: c.EndpointTimeout},
+		Varz:      varz,
+		Transport: &http.Transport{ResponseHeaderTimeout: config.EndpointTimeout},
 	}
-
-	loggregatorUrl := c.LoggregatorConfig.Url
-	loggregatorSharedSecret := c.LoggregatorConfig.SharedSecret
-	if c.AccessLog != "" || loggregatorUrl != "" {
-		f, err := os.OpenFile(c.AccessLog, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
-		if err != nil && c.AccessLog != "" {
-			panic(err)
-		}
-
-		p.AccessLogger = NewAccessLogger(f, loggregatorUrl, loggregatorSharedSecret, c.Index)
-		go p.AccessLogger.Run()
-	}
-
-	return p
 }
 
 func hostWithoutPort(req *http.Request) string {
@@ -87,13 +75,18 @@ func (proxy *Proxy) Lookup(request *http.Request) (*route.Endpoint, bool) {
 
 func (proxy *Proxy) ServeHTTP(responseWriter http.ResponseWriter, request *http.Request) {
 	startedAt := time.Now()
-
+	originalURL := request.URL
+	request.URL = &url.URL{Host: originalURL.Host, Opaque: request.RequestURI}
 	handler := NewRequestHandler(request, responseWriter)
 
-	accessLog := AccessLogRecord{
+	accessLog := access_log.AccessLogRecord{
 		Request:   request,
 		StartedAt: startedAt,
 	}
+
+	defer func() {
+		proxy.AccessLogger.Log(accessLog)
+	}()
 
 	if !isProtocolSupported(request) {
 		handler.HandleUnsupportedProtocol()
@@ -152,10 +145,6 @@ func (proxy *Proxy) ServeHTTP(responseWriter http.ResponseWriter, request *http.
 
 	accessLog.FinishedAt = time.Now()
 	accessLog.BodyBytesSent = bytesSent
-
-	if proxy.AccessLogger != nil {
-		proxy.AccessLogger.Log(accessLog)
-	}
 }
 
 func isProtocolSupported(request *http.Request) bool {

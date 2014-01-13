@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"runtime"
 	"time"
 
@@ -15,7 +14,7 @@ import (
 	"github.com/cloudfoundry/gorouter/log"
 	"github.com/cloudfoundry/gorouter/proxy"
 	"github.com/cloudfoundry/gorouter/registry"
-	"github.com/cloudfoundry/gorouter/route"
+	"github.com/cloudfoundry/gorouter/server"
 	"github.com/cloudfoundry/gorouter/util"
 	"github.com/cloudfoundry/gorouter/varz"
 	"github.com/cloudfoundry/yagnats"
@@ -99,6 +98,7 @@ func (r *Router) Run() {
 		err = r.mbusClient.Connect(natsInfo)
 
 		if err == nil {
+			log.Infof("Connected to NATS")
 			break
 		}
 
@@ -140,7 +140,7 @@ func (r *Router) Run() {
 
 	log.Infof("Listening on %s", listen.Addr())
 
-	server := http.Server{Handler: r.proxy}
+	server := server.Server{Handler: r.proxy}
 
 	go func() {
 		err := server.Serve(listen)
@@ -154,16 +154,6 @@ func (r *Router) RegisterComponent() {
 	vcap.Register(r.component, r.mbusClient)
 }
 
-type registryMessage struct {
-	Host string            `json:"host"`
-	Port uint16            `json:"port"`
-	Uris []route.Uri       `json:"uris"`
-	Tags map[string]string `json:"tags"`
-	App  string            `json:"app"`
-
-	PrivateInstanceId string `json:"private_instance_id"`
-}
-
 func (r *Router) SubscribeRegister() {
 	r.subscribeRegistry("router.register", func(registryMessage *registryMessage) {
 		log.Debugf("Got router.register: %v", registryMessage)
@@ -171,7 +161,7 @@ func (r *Router) SubscribeRegister() {
 		for _, uri := range registryMessage.Uris {
 			r.registry.Register(
 				uri,
-				makeRouteEndpoint(registryMessage),
+				registryMessage.makeEndpoint(),
 			)
 		}
 	})
@@ -184,7 +174,7 @@ func (r *Router) SubscribeUnregister() {
 		for _, uri := range registryMessage.Uris {
 			r.registry.Unregister(
 				uri,
-				makeRouteEndpoint(registryMessage),
+				registryMessage.makeEndpoint(),
 			)
 		}
 	})
@@ -287,14 +277,3 @@ func (r *Router) subscribeRegistry(subject string, successCallback func(*registr
 	}
 }
 
-func makeRouteEndpoint(registryMessage *registryMessage) *route.Endpoint {
-	return &route.Endpoint{
-		Host: registryMessage.Host,
-		Port: registryMessage.Port,
-
-		ApplicationId: registryMessage.App,
-		Tags:          registryMessage.Tags,
-
-		PrivateInstanceId: registryMessage.PrivateInstanceId,
-	}
-}

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"net/url"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,9 +16,12 @@ import (
 	"github.com/cloudfoundry/yagnats/fakeyagnats"
 	. "launchpad.net/gocheck"
 
+	"github.com/cloudfoundry/gorouter/access_log"
 	"github.com/cloudfoundry/gorouter/config"
+	"github.com/cloudfoundry/gorouter/server"
 	"github.com/cloudfoundry/gorouter/registry"
 	"github.com/cloudfoundry/gorouter/route"
+	"github.com/cloudfoundry/gorouter/test_util"
 )
 
 type connHandler func(*httpConn)
@@ -62,6 +66,7 @@ func (x *httpConn) ReadRequest() (*http.Request, string) {
 func (x *httpConn) NewRequest(method, urlStr string, body io.Reader) *http.Request {
 	req, err := http.NewRequest(method, urlStr, body)
 	x.c.Assert(err, IsNil)
+	req.URL = &url.URL{Host: req.URL.Host, Opaque: urlStr}
 	return req
 }
 
@@ -150,7 +155,7 @@ func (s *ProxySuite) SetUpTest(c *C) {
 		panic(err)
 	}
 
-	server := http.Server{Handler: s.p}
+	server := server.Server{Handler: s.p}
 	go server.Serve(ln)
 
 	s.proxyServer = ln
@@ -180,41 +185,14 @@ func (s *ProxySuite) registerAddr(u string, a net.Addr) {
 	)
 }
 
-func (s *ProxySuite) TestProxyHasNoAccessLoggerIfNoAccesLogAndNoLoggregatorUrl(c *C) {
-	x := config.DefaultConfig()
-	proxy := NewProxy(x, nil, nil)
-	c.Assert(proxy.AccessLogger, IsNil)
-}
-
-func (s *ProxySuite) TestProxyHasAccessLoggerIfNoAccesLogButLoggregatorUrl(c *C) {
+func (s *ProxySuite) TestProxyCreatesAnAccessLogger(c *C) {
 	x := config.DefaultConfig()
 	x.LoggregatorConfig.Url = "10.10.3.13:4325"
 	x.AccessLog = ""
-	proxy := NewProxy(x, nil, nil)
-	c.Assert(proxy.AccessLogger, NotNil)
-}
 
-func (s *ProxySuite) TestProxyHasAccessLoggerIfAccesLogButNoLoggregatorUrl(c *C) {
-	x := config.DefaultConfig()
-	x.AccessLog = "/dev/null"
 	proxy := NewProxy(x, nil, nil)
-	c.Assert(proxy.AccessLogger, NotNil)
-}
-
-func (s *ProxySuite) TestProxyHasAccessLoggerIfBothAccesLogAndLoggregatorUrl(c *C) {
-	x := config.DefaultConfig()
-	x.LoggregatorConfig.Url = "10.10.3.13:4325"
-	x.AccessLog = "/dev/null"
-	proxy := NewProxy(x, nil, nil)
-	c.Assert(proxy.AccessLogger, NotNil)
-}
-
-func (s *ProxySuite) TestProxyPanicsIfInvalidAccessLogLocation(c *C) {
-	x := config.DefaultConfig()
-	x.AccessLog = "/this\\should/panic"
-	c.Assert(func() {
-		NewProxy(x, nil, nil)
-	}, PanicMatches, "open /this\\\\should/panic: no such file or directory")
+	var accessLoggerInterface access_log.AccessLogger
+	c.Assert(proxy.AccessLogger, Implements, &accessLoggerInterface)
 }
 
 func (s *ProxySuite) RegisterHandler(c *C, u string, h connHandler) net.Listener {
@@ -270,6 +248,54 @@ func (s *ProxySuite) TestRespondsToHttp10(c *C) {
 	})
 
 	x.CheckLine("HTTP/1.0 200 OK")
+}
+
+func (s *ProxySuite) TestLogsRequest(c *C) {
+	var fakeFile = new(test_util.FakeFile)
+	accessLog := access_log.NewFileAndLoggregatorAccessLogger(fakeFile, "localhost:9843", "secret", 42)
+	s.p.AccessLogger = accessLog
+	go accessLog.Run()
+
+	s.RegisterHandler(c, "test", func(x *httpConn) {
+			x.CheckLine("GET / HTTP/1.1")
+
+			x.WriteLines([]string{
+				"HTTP/1.1 200 OK",
+				"Content-Length: 0",
+			})
+		})
+
+	x := s.DialProxy(c)
+
+	x.WriteLines([]string{
+		"GET / HTTP/1.0",
+		"Host: test",
+	})
+
+	x.CheckLine("HTTP/1.0 200 OK")
+
+	c.Assert(string(fakeFile.Payload), Matches, "^test.*\n")
+	//make sure the record includes all the data
+	//since the building of the log record happens throughout the life of the request
+	c.Assert(string(fakeFile.Payload), Matches, ".*200.*\n")
+}
+
+func (s *ProxySuite) TestLogsRequestWhenExitsEarly(c *C) {
+	var fakeFile = new(test_util.FakeFile)
+	accessLog := access_log.NewFileAndLoggregatorAccessLogger(fakeFile, "localhost:9843", "secret", 42)
+	s.p.AccessLogger = accessLog
+	go accessLog.Run()
+
+	x := s.DialProxy(c)
+
+	x.WriteLines([]string{
+		"GET / HTTP/0.9",
+		"Host: test",
+	})
+
+	x.CheckLine("HTTP/1.0 400 Bad Request")
+
+	c.Assert(string(fakeFile.Payload), Matches, "^test.*\n")
 }
 
 func (s *ProxySuite) TestRespondsToHttp11(c *C) {
@@ -536,6 +562,7 @@ func (s *ProxySuite) TestStatusNoContentHasNoTransferEncodingInResponse(c *C) {
 	x := s.DialProxy(c)
 
 	req := x.NewRequest("GET", "/", nil)
+
 	req.Header.Set("Connection", "close")
 	req.Host = "not-modified"
 	x.WriteRequest(req)
@@ -544,6 +571,24 @@ func (s *ProxySuite) TestStatusNoContentHasNoTransferEncodingInResponse(c *C) {
 	fmt.Printf("response: %#v\n", resp)
 	c.Check(resp.StatusCode, Equals, http.StatusNoContent)
 	c.Check(resp.TransferEncoding, IsNil)
+}
+
+func (s *ProxySuite) TestRequestIsOkWithEncodedString(c *C) {
+	s.RegisterHandler(c, "encoding", func(x *httpConn) {
+		x.CheckLine("GET /hello%2Bworld?inline-depth=1 HTTP/1.1")
+		resp := newResponse(http.StatusOK)
+		x.WriteResponse(resp)
+		x.Close()
+	})
+
+	x := s.DialProxy(c)
+
+	req := x.NewRequest("GET", "/hello%2Bworld?inline-depth=1", nil)
+	req.Host = "encoding"
+	x.WriteRequest(req)
+	resp, _ := x.ReadResponse()
+	fmt.Printf("response: %#v\n", resp)
+	c.Check(resp.StatusCode, Equals, http.StatusOK)
 }
 
 func (s *ProxySuite) TestRequestTerminatesWhenResponseTakesTooLong(c *C) {

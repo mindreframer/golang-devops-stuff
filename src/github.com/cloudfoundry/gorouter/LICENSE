@@ -1,5 +1,4 @@
-
-				Apache License
+               Apache License
            Version 2.0, January 2004
         http://www.apache.org/licenses/
 
@@ -202,15 +201,16 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 
-=======================================================================   
+=======================================================================
 
-cf-gorouter:
+cf-gorouter
 
-cf-gorouter: includes a number of subcomponents with separate copyright 
-notices and license terms.  The product that includes this file
-does not necessarily use all the open source subcomponents referred 
-to below. Your use of the source code for the these subcomponents 
-is subject to the terms and conditions of the following licenses.
+cf-gorouter : includes a number of subcomponents with
+separate copyright notices and license terms.  The product that 
+includes this file does not necessarily use all the open source 
+subcomponents referred to below. Your use of the source
+code for the these subcomponents is subject to the terms and
+conditions of the following license 
 
 
 
@@ -218,8 +218,9 @@ SECTION 1: BSD-STYLE, MIT-STYLE, OR SIMILAR STYLE LICENSES
 
    >>> go-metrics-e4904e57d1c1a7f7674aaff498e24ea4287b764b
    >>> gocheck-85
-   >>> gouuid-bcd29efdea6dde845e4146e0b347d15df3a23957
+   >>> gouuid-87bcc4729f2c5a08d2513ad10684c6bbd256380f
    >>> goyaml-47
+
 
 
 --------------- SECTION 1:  BSD-STYLE, MIT-STYLE, OR SIMILAR STYLE LICENSES ----------
@@ -293,7 +294,7 @@ NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
->>> gouuid-bcd29efdea6dde845e4146e0b347d15df3a23957
+>>> gouuid-87bcc4729f2c5a08d2513ad10684c6bbd256380f
 
 Copyright (C) 2011 by Krzysztof Kowalik <chris@nu7hat.ch>
 
@@ -337,6 +338,7 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+ 
 
 
 ===========================================================================
@@ -349,13 +351,14 @@ the source code corresponding to the binaries for such open
 source components and modifications thereto, if any, (the
 "Source Files"), by downloading the Source Files from VMware's website at
 http://www.vmware.com/download/open_source.html, or by sending a request, 
-with your name and address to: GoPivotal, Inc., 1900 S. Norfolk Street #125, 
-San Mateo, CA 94403, Attention: General Counsel. All such requests should 
-clearly specify: OPEN SOURCE FILES REQUEST,
-Attention General Counsel. GoPivotal shall mail a copy of the
+with your name and address to: Pivotal Software Inc., 1900 S. Norfolk Street #125, 
+San Mateo, CA 94403, Attention: General Counsel. All such requests should clearly 
+specify: OPEN SOURCE FILES REQUEST,
+Attention General Counsel. Pivotal Software Inc., shall mail a copy of the
 Source Files to you on a CD or equivalent physical medium. This
 offer to obtain a copy of the Source Files is valid for three
 years from the date you acquired this Software product. 
-Alternatively, the Source Files may accompany the GoPivotal product.
+Alternatively, the Source Files may accompany the Pivotal Software Inc. product.
 
-[CFGOROUTER8152013SS082213]
+[CFGOROUTER11152013SS120313]
+

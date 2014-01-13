@@ -107,15 +107,15 @@ func (s *RouterSuite) TestDiscover(c *C) {
 	verify_health_z(cc.Host, s.router.registry, c)
 }
 
-func (s *RouterSuite) waitMsgReceived(a *test.TestApp, r bool, t time.Duration) bool {
-	i := time.Millisecond * 50
-	m := int(t / i)
+func (s *RouterSuite) waitMsgReceived(app *test.TestApp, expectedToBeFound bool, timeout time.Duration) bool {
+	interval := time.Millisecond * 50
+	repetitions := int(timeout / interval)
 
-	for j := 0; j < m; j++ {
+	for j := 0; j < repetitions; j++ {
 		received := true
-		for _, v := range a.Urls() {
-			_, ok := s.router.registry.Lookup(v)
-			if ok != r {
+		for _, url := range app.Urls() {
+			_, ok := s.router.registry.Lookup(url)
+			if ok != expectedToBeFound {
 				received = false
 				break
 			}
@@ -123,7 +123,7 @@ func (s *RouterSuite) waitMsgReceived(a *test.TestApp, r bool, t time.Duration) 
 		if received {
 			return true
 		}
-		time.Sleep(i)
+		time.Sleep(interval)
 	}
 
 	return false
@@ -150,34 +150,34 @@ func (s *RouterSuite) TestRegisterUnregister(c *C) {
 }
 
 func (s *RouterSuite) TestRegistryLastUpdatedVarz(c *C) {
-	initialUpdateTime := f(s.readVarz(), "ms_since_last_registry_update").(float64)
+	initialUpdateTime := fetchRecursively(s.readVarz(), "ms_since_last_registry_update").(float64)
 
 	app1 := test.NewGreetApp([]route.Uri{"test1.vcap.me"}, s.Config.Port, s.mbusClient, nil)
 	app1.Listen()
 	c.Assert(s.waitAppRegistered(app1, time.Second*5), Equals, true)
 
 	// varz time should be different
-	updateTime := f(s.readVarz(), "ms_since_last_registry_update").(float64)
+	updateTime := fetchRecursively(s.readVarz(), "ms_since_last_registry_update").(float64)
 
 	c.Assert(updateTime < initialUpdateTime, Equals, true)
 }
 
 func (s *RouterSuite) readVarz() map[string]interface{} {
-	x, err := s.router.varz.MarshalJSON()
+	varz_byte, err := s.router.varz.MarshalJSON()
 	if err != nil {
 		panic(err)
 	}
 
-	y := make(map[string]interface{})
-	err = json.Unmarshal(x, &y)
+	varz_data := make(map[string]interface{})
+	err = json.Unmarshal(varz_byte, &varz_data)
 	if err != nil {
 		panic(err)
 	}
 
-	return y
+	return varz_data
 }
 
-func f(x interface{}, s ...string) interface{} {
+func fetchRecursively(x interface{}, s ...string) interface{} {
 	var ok bool
 
 	for _, y := range s {
@@ -194,26 +194,27 @@ func f(x interface{}, s ...string) interface{} {
 func (s *RouterSuite) TestVarz(c *C) {
 	app := test.NewGreetApp([]route.Uri{"count.vcap.me"}, s.Config.Port, s.mbusClient, map[string]string{"framework": "rails"})
 	app.Listen()
-
+	additionalRequests := 100
+	go app.RegisterRepeatedly(100 *time.Millisecond)
 	c.Assert(s.waitAppRegistered(app, time.Millisecond*500), Equals, true)
 	// Send seed request
 	sendRequests(c, "count.vcap.me", s.Config.Port, 1)
-	vA := s.readVarz()
+	initial_varz := s.readVarz()
 
 	// Send requests
-	sendRequests(c, "count.vcap.me", s.Config.Port, 100)
-	vB := s.readVarz()
+	sendRequests(c, "count.vcap.me", s.Config.Port, additionalRequests)
+	updated_varz := s.readVarz()
 
 	// Verify varz update
-	RequestsA := int(f(vA, "requests").(float64))
-	RequestsB := int(f(vB, "requests").(float64))
-	allRequests := RequestsB - RequestsA
-	c.Check(allRequests, Equals, 100)
+	initialRequestCount := fetchRecursively(initial_varz, "requests").(float64)
+	updatedRequestCount := fetchRecursively(updated_varz, "requests").(float64)
+	requestCount := int(updatedRequestCount - initialRequestCount)
+	c.Check(requestCount, Equals, additionalRequests)
 
-	Responses2xxA := int(f(vA, "responses_2xx").(float64))
-	Responses2xxB := int(f(vB, "responses_2xx").(float64))
-	allResponses2xx := Responses2xxB - Responses2xxA
-	c.Check(allResponses2xx, Equals, 100)
+	initialResponse2xxCount := fetchRecursively(initial_varz, "responses_2xx").(float64)
+	updatedResponse2xxCount := fetchRecursively(updated_varz, "responses_2xx").(float64)
+	response2xxCount := int(updatedResponse2xxCount - initialResponse2xxCount)
+	c.Check(response2xxCount, Equals, additionalRequests)
 
 	app.Unregister()
 }
@@ -358,10 +359,10 @@ func (s *RouterSuite) TestProxyPutRequest(c *C) {
 func (s *RouterSuite) TestRouterSendsStartOnConnect(c *C) {
 	started := make(chan bool)
 
+
 	s.router.mbusClient.Subscribe("router.start", func(*yagnats.Message) {
 		started <- true
 	})
-
 	StopNats(s.natsServerCmd)
 	s.natsServerCmd = StartNats(int(s.natsPort))
 	<-s.WaitUntilNatsIsUp()
@@ -401,6 +402,8 @@ func (s *RouterSuite) Test100ContinueRequest(c *C) {
 	<-s.WaitUntilNatsIsUp()
 
 	app.Listen()
+	go app.RegisterRepeatedly(1 * time.Second)
+
 	c.Assert(s.waitAppRegistered(app, time.Second*5), Equals, true)
 
 	host := fmt.Sprintf("foo.vcap.me:%d", s.Config.Port)
@@ -437,6 +440,8 @@ func sendRequests(c *C, url string, rPort uint16, times int) {
 		}
 
 		c.Check(r.StatusCode, Equals, http.StatusOK)
+		// Close the body to avoid open files limit error
+		r.Body.Close()
 	}
 }
 
