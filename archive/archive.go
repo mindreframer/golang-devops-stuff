@@ -3,6 +3,8 @@ package archive
 import (
 	"archive/tar"
 	"bytes"
+	"compress/bzip2"
+	"compress/gzip"
 	"fmt"
 	"github.com/dotcloud/docker/utils"
 	"io"
@@ -57,6 +59,43 @@ func DetectCompression(source []byte) Compression {
 		}
 	}
 	return Uncompressed
+}
+
+func xzDecompress(archive io.Reader) (io.Reader, error) {
+	args := []string{"xz", "-d", "-c", "-q"}
+
+	return CmdStream(exec.Command(args[0], args[1:]...), archive, nil)
+}
+
+func DecompressStream(archive io.Reader) (io.Reader, error) {
+	buf := make([]byte, 10)
+	totalN := 0
+	for totalN < 10 {
+		n, err := archive.Read(buf[totalN:])
+		if err != nil {
+			if err == io.EOF {
+				return nil, fmt.Errorf("Tarball too short")
+			}
+			return nil, err
+		}
+		totalN += n
+		utils.Debugf("[tar autodetect] n: %d", n)
+	}
+	compression := DetectCompression(buf)
+	wrap := io.MultiReader(bytes.NewReader(buf), archive)
+
+	switch compression {
+	case Uncompressed:
+		return wrap, nil
+	case Gzip:
+		return gzip.NewReader(wrap)
+	case Bzip2:
+		return bzip2.NewReader(wrap), nil
+	case Xz:
+		return xzDecompress(wrap)
+	default:
+		return nil, fmt.Errorf("Unsupported compression format %s", (&compression).Extension())
+	}
 }
 
 func (compression *Compression) Flag() string {
@@ -155,7 +194,7 @@ func TarFilter(path string, options *TarOptions) (io.Reader, error) {
 		}
 	}
 
-	return CmdStream(exec.Command(args[0], args[1:]...), &files, func() {
+	return CmdStream(exec.Command(args[0], args[1:]...), bytes.NewBufferString(files), func() {
 		if tmpDir != "" {
 			_ = os.RemoveAll(tmpDir)
 		}
@@ -260,7 +299,7 @@ func CopyWithTar(src, dst string) error {
 //
 // If `dst` ends with a trailing slash '/', the final destination path
 // will be `dst/base(src)`.
-func CopyFileWithTar(src, dst string) error {
+func CopyFileWithTar(src, dst string) (err error) {
 	utils.Debugf("CopyFileWithTar(%s, %s)", src, dst)
 	srcSt, err := os.Stat(src)
 	if err != nil {
@@ -277,31 +316,44 @@ func CopyFileWithTar(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0700); err != nil && !os.IsExist(err) {
 		return err
 	}
-	buf := new(bytes.Buffer)
-	tw := tar.NewWriter(buf)
-	hdr, err := tar.FileInfoHeader(srcSt, "")
-	if err != nil {
-		return err
-	}
-	hdr.Name = filepath.Base(dst)
-	if err := tw.WriteHeader(hdr); err != nil {
-		return err
-	}
-	srcF, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(tw, srcF); err != nil {
-		return err
-	}
-	tw.Close()
-	return Untar(buf, filepath.Dir(dst), nil)
+
+	r, w := io.Pipe()
+	errC := utils.Go(func() error {
+		defer w.Close()
+
+		srcF, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer srcF.Close()
+
+		tw := tar.NewWriter(w)
+		hdr, err := tar.FileInfoHeader(srcSt, "")
+		if err != nil {
+			return err
+		}
+		hdr.Name = filepath.Base(dst)
+		if err := tw.WriteHeader(hdr); err != nil {
+			return err
+		}
+		if _, err := io.Copy(tw, srcF); err != nil {
+			return err
+		}
+		tw.Close()
+		return nil
+	})
+	defer func() {
+		if er := <-errC; err != nil {
+			err = er
+		}
+	}()
+	return Untar(r, filepath.Dir(dst), nil)
 }
 
 // CmdStream executes a command, and returns its stdout as a stream.
 // If the command fails to run or doesn't complete successfully, an error
 // will be returned, including anything written on stderr.
-func CmdStream(cmd *exec.Cmd, input *string, atEnd func()) (io.Reader, error) {
+func CmdStream(cmd *exec.Cmd, input io.Reader, atEnd func()) (io.Reader, error) {
 	if input != nil {
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
@@ -312,7 +364,7 @@ func CmdStream(cmd *exec.Cmd, input *string, atEnd func()) (io.Reader, error) {
 		}
 		// Write stdin if any
 		go func() {
-			_, _ = stdin.Write([]byte(*input))
+			io.Copy(stdin, input)
 			stdin.Close()
 		}()
 	}

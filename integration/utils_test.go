@@ -32,6 +32,7 @@ func mkRuntime(f utils.Fataler) *docker.Runtime {
 	config := &docker.DaemonConfig{
 		Root:        root,
 		AutoRestart: false,
+		Mtu:         docker.DefaultNetworkMtu,
 	}
 	r, err := docker.NewRuntimeFromDirectory(config)
 	if err != nil {
@@ -105,7 +106,7 @@ func containerWaitTimeout(eng *engine.Engine, id string, t utils.Fataler) error 
 }
 
 func containerKill(eng *engine.Engine, id string, t utils.Fataler) {
-	if err := getContainer(eng, id, t).Kill(); err != nil {
+	if err := eng.Job("kill", id).Run(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -185,6 +186,8 @@ func NewTestEngine(t utils.Fataler) *engine.Engine {
 	if err != nil {
 		t.Fatal(err)
 	}
+	eng.Stdout = ioutil.Discard
+	eng.Stderr = ioutil.Discard
 	// Load default plugins
 	// (This is manually copied and modified from main() until we have a more generic plugin system)
 	job := eng.Job("initapi")

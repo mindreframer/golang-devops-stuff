@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -56,6 +57,7 @@ func (graph *Graph) restore() error {
 			graph.idIndex.Add(id)
 		}
 	}
+	utils.Debugf("Restored %d elements", len(dir))
 	return nil
 }
 
@@ -85,17 +87,17 @@ func (graph *Graph) Get(name string) (*Image, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Check that the filesystem layer exists
-	rootfs, err := graph.driver.Get(img.ID)
-	if err != nil {
-		return nil, fmt.Errorf("Driver %s failed to get image rootfs %s: %s", graph.driver, img.ID, err)
-	}
 	if img.ID != id {
 		return nil, fmt.Errorf("Image stored at '%s' has wrong id '%s'", id, img.ID)
 	}
 	img.graph = graph
 
 	if img.Size < 0 {
+		rootfs, err := graph.driver.Get(img.ID)
+		if err != nil {
+			return nil, fmt.Errorf("Driver %s failed to get image rootfs %s: %s", graph.driver, img.ID, err)
+		}
+
 		var size int64
 		if img.Parent == "" {
 			if size, err = utils.TreeSize(rootfs); err != nil {
@@ -130,7 +132,8 @@ func (graph *Graph) Create(layerData archive.Archive, container *Container, comm
 		DockerVersion: VERSION,
 		Author:        author,
 		Config:        config,
-		Architecture:  "x86_64",
+		Architecture:  runtime.GOARCH,
+		OS:            runtime.GOOS,
 	}
 	if container != nil {
 		img.Parent = container.Image
@@ -219,7 +222,7 @@ func (graph *Graph) TempLayerArchive(id string, compression archive.Compression,
 	if err != nil {
 		return nil, err
 	}
-	return archive.NewTempArchive(utils.ProgressReader(ioutil.NopCloser(a), 0, output, sf, true, "", "Buffering to disk"), tmp)
+	return archive.NewTempArchive(utils.ProgressReader(ioutil.NopCloser(a), 0, output, sf, false, utils.TruncateID(id), "Buffering to disk"), tmp)
 }
 
 // Mktemp creates a temporary sub-directory inside the graph's filesystem.

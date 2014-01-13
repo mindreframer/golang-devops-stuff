@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"github.com/dotcloud/docker/archive"
 	"github.com/dotcloud/docker/graphdriver"
-	"github.com/dotcloud/docker/term"
+	"github.com/dotcloud/docker/mount"
+	"github.com/dotcloud/docker/pkg/term"
 	"github.com/dotcloud/docker/utils"
 	"github.com/kr/pty"
 	"io"
@@ -48,7 +49,6 @@ type Container struct {
 	network         *NetworkInterface
 	NetworkSettings *NetworkSettings
 
-	SysInitPath    string
 	ResolvConfPath string
 	HostnamePath   string
 	HostsPath      string
@@ -120,7 +120,7 @@ type BindMap struct {
 }
 
 var (
-	ErrContainerStart           = errors.New("The container failed to start. Unkown error")
+	ErrContainerStart           = errors.New("The container failed to start. Unknown error")
 	ErrContainerStartTimeout    = errors.New("The container failed to start due to timed out.")
 	ErrInvalidWorikingDirectory = errors.New("The working directory is invalid. It needs to be an absolute path.")
 	ErrConflictAttachDetach     = errors.New("Conflicting options: -a and -d")
@@ -297,7 +297,11 @@ func (container *Container) generateEnvConfig(env []string) error {
 	if err != nil {
 		return err
 	}
-	ioutil.WriteFile(container.EnvConfigPath(), data, 0600)
+	p, err := container.EnvConfigPath()
+	if err != nil {
+		return err
+	}
+	ioutil.WriteFile(p, data, 0600)
 	return nil
 }
 
@@ -574,7 +578,12 @@ func (container *Container) Start() (err error) {
 
 	// Networking
 	if !container.Config.NetworkDisabled {
-		params = append(params, "-g", container.network.Gateway.String())
+		network := container.NetworkSettings
+		params = append(params,
+			"-g", network.Gateway,
+			"-i", fmt.Sprintf("%s/%d", network.IPAddress, network.IPPrefixLen),
+			"-mtu", strconv.Itoa(container.runtime.config.Mtu),
+		)
 	}
 
 	// User
@@ -586,12 +595,15 @@ func (container *Container) Start() (err error) {
 	env := []string{
 		"HOME=/",
 		"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-		"container=lxc",
 		"HOSTNAME=" + container.Config.Hostname,
 	}
 
 	if container.Config.Tty {
 		env = append(env, "TERM=xterm")
+	}
+
+	if container.hostConfig.Privileged {
+		params = append(params, "-privileged")
 	}
 
 	// Init any links between the parent and children
@@ -671,6 +683,45 @@ func (container *Container) Start() (err error) {
 
 		params = []string{
 			"unshare", "-m", "--", "/bin/sh", "-c", shellString,
+		}
+	}
+
+	root := container.RootfsPath()
+	envPath, err := container.EnvConfigPath()
+	if err != nil {
+		return err
+	}
+
+	// Mount docker specific files into the containers root fs
+	if err := mount.Mount(runtime.sysInitPath, path.Join(root, "/.dockerinit"), "none", "bind,ro"); err != nil {
+		return err
+	}
+	if err := mount.Mount(envPath, path.Join(root, "/.dockerenv"), "none", "bind,ro"); err != nil {
+		return err
+	}
+	if err := mount.Mount(container.ResolvConfPath, path.Join(root, "/etc/resolv.conf"), "none", "bind,ro"); err != nil {
+		return err
+	}
+
+	if container.HostnamePath != "" && container.HostsPath != "" {
+		if err := mount.Mount(container.HostnamePath, path.Join(root, "/etc/hostname"), "none", "bind,ro"); err != nil {
+			return err
+		}
+		if err := mount.Mount(container.HostsPath, path.Join(root, "/etc/hosts"), "none", "bind,ro"); err != nil {
+			return err
+		}
+	}
+
+	// Mount user specified volumes
+
+	for r, v := range container.Volumes {
+		mountAs := "ro"
+		if container.VolumesRW[v] {
+			mountAs = "rw"
+		}
+
+		if err := mount.Mount(v, path.Join(root, r), "none", fmt.Sprintf("bind,%s", mountAs)); err != nil {
+			return err
 		}
 	}
 
@@ -774,14 +825,14 @@ func (container *Container) getBindMap() (map[string]BindMap, error) {
 		}
 		binds[path.Clean(dst)] = bindMap
 	}
-  return binds, nil
+	return binds, nil
 }
 
 func (container *Container) createVolumes() error {
-  binds, err := container.getBindMap()
-  if err != nil {
-    return err
-  }
+	binds, err := container.getBindMap()
+	if err != nil {
+		return err
+	}
 	volumesDriver := container.runtime.volumes.driver
 	// Create the requested volumes if they don't exist
 	for volPath := range container.Config.Volumes {
@@ -801,15 +852,10 @@ func (container *Container) createVolumes() error {
 			if strings.ToLower(bindMap.Mode) == "rw" {
 				srcRW = true
 			}
-			if file, err := os.Open(bindMap.SrcPath); err != nil {
+			if stat, err := os.Lstat(bindMap.SrcPath); err != nil {
 				return err
 			} else {
-				defer file.Close()
-				if stat, err := file.Stat(); err != nil {
-					return err
-				} else {
-					volIsDir = stat.IsDir()
-				}
+				volIsDir = stat.IsDir()
 			}
 			// Otherwise create an directory in $ROOT/volumes/ and use that
 		} else {
@@ -829,26 +875,25 @@ func (container *Container) createVolumes() error {
 		}
 		container.Volumes[volPath] = srcPath
 		container.VolumesRW[volPath] = srcRW
+
 		// Create the mountpoint
-		rootVolPath := path.Join(container.RootfsPath(), volPath)
-		if volIsDir {
-			if err := os.MkdirAll(rootVolPath, 0755); err != nil {
-				return err
-			}
+		volPath = path.Join(container.RootfsPath(), volPath)
+		rootVolPath, err := utils.FollowSymlinkInScope(volPath, container.RootfsPath())
+		if err != nil {
+			return err
 		}
 
-		volPath = path.Join(container.RootfsPath(), volPath)
-		if _, err := os.Stat(volPath); err != nil {
+		if _, err := os.Stat(rootVolPath); err != nil {
 			if os.IsNotExist(err) {
 				if volIsDir {
-					if err := os.MkdirAll(volPath, 0755); err != nil {
+					if err := os.MkdirAll(rootVolPath, 0755); err != nil {
 						return err
 					}
 				} else {
-					if err := os.MkdirAll(path.Dir(volPath), 0755); err != nil {
+					if err := os.MkdirAll(path.Dir(rootVolPath), 0755); err != nil {
 						return err
 					}
-					if f, err := os.OpenFile(volPath, os.O_CREATE, 0755); err != nil {
+					if f, err := os.OpenFile(rootVolPath, os.O_CREATE, 0755); err != nil {
 						return err
 					} else {
 						f.Close()
@@ -999,7 +1044,7 @@ ff02::2		ip6-allrouters
 
 	if container.Config.Domainname != "" {
 		hostsContent = append([]byte(fmt.Sprintf("%s\t%s.%s %s\n", IP, container.Config.Hostname, container.Config.Domainname, container.Config.Hostname)), hostsContent...)
-	} else {
+	} else if !container.Config.NetworkDisabled {
 		hostsContent = append([]byte(fmt.Sprintf("%s\t%s\n", IP, container.Config.Hostname)), hostsContent...)
 	}
 
@@ -1357,6 +1402,32 @@ func (container *Container) GetImage() (*Image, error) {
 }
 
 func (container *Container) Unmount() error {
+	var (
+		err    error
+		root   = container.RootfsPath()
+		mounts = []string{
+			path.Join(root, "/.dockerinit"),
+			path.Join(root, "/.dockerenv"),
+			path.Join(root, "/etc/resolv.conf"),
+		}
+	)
+
+	if container.HostnamePath != "" && container.HostsPath != "" {
+		mounts = append(mounts, path.Join(root, "/etc/hostname"), path.Join(root, "/etc/hosts"))
+	}
+
+	for r := range container.Volumes {
+		mounts = append(mounts, path.Join(root, r))
+	}
+
+	for _, m := range mounts {
+		if lastError := mount.Unmount(m); lastError != nil {
+			err = lastError
+		}
+	}
+	if err != nil {
+		return err
+	}
 	return container.runtime.Unmount(container)
 }
 
@@ -1376,8 +1447,20 @@ func (container *Container) jsonPath() string {
 	return path.Join(container.root, "config.json")
 }
 
-func (container *Container) EnvConfigPath() string {
-	return path.Join(container.root, "config.env")
+func (container *Container) EnvConfigPath() (string, error) {
+	p := path.Join(container.root, "config.env")
+	if _, err := os.Stat(p); err != nil {
+		if os.IsNotExist(err) {
+			f, err := os.Create(p)
+			if err != nil {
+				return "", err
+			}
+			f.Close()
+		} else {
+			return "", err
+		}
+	}
+	return p, nil
 }
 
 func (container *Container) lxcConfigPath() string {

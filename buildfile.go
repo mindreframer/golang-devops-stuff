@@ -1,18 +1,28 @@
 package docker
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
+	"github.com/dotcloud/docker/auth"
 	"github.com/dotcloud/docker/utils"
 	"io"
 	"io/ioutil"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
+)
+
+var (
+	ErrDockerfileEmpty = errors.New("Dockerfile cannot be empty")
 )
 
 type BuildFile interface {
@@ -25,13 +35,18 @@ type buildFile struct {
 	runtime *Runtime
 	srv     *Server
 
-	image        string
-	maintainer   string
-	config       *Config
-	context      string
+	image      string
+	maintainer string
+	config     *Config
+
+	contextPath string
+	context     *utils.TarSum
+
 	verbose      bool
 	utilizeCache bool
 	rm           bool
+
+	authConfig *auth.AuthConfig
 
 	tmpContainers map[string]struct{}
 	tmpImages     map[string]struct{}
@@ -57,7 +72,7 @@ func (b *buildFile) CmdFrom(name string) error {
 	if err != nil {
 		if b.runtime.graph.IsNotExist(err) {
 			remote, tag := utils.ParseRepositoryTag(name)
-			if err := b.srv.ImagePull(remote, tag, b.outOld, b.sf, nil, nil, true); err != nil {
+			if err := b.srv.ImagePull(remote, tag, b.outOld, b.sf, b.authConfig, nil, true); err != nil {
 				return err
 			}
 			image, err = b.runtime.repositories.LookupImage(name)
@@ -84,6 +99,27 @@ func (b *buildFile) CmdMaintainer(name string) error {
 	return b.commit("", b.config.Cmd, fmt.Sprintf("MAINTAINER %s", name))
 }
 
+// probeCache checks to see if image-caching is enabled (`b.utilizeCache`)
+// and if so attempts to look up the current `b.image` and `b.config` pair
+// in the current server `b.srv`. If an image is found, probeCache returns
+// `(true, nil)`. If no image is found, it returns `(false, nil)`. If there
+// is any error, it returns `(false, err)`.
+func (b *buildFile) probeCache() (bool, error) {
+	if b.utilizeCache {
+		if cache, err := b.srv.ImageGetCached(b.image, b.config); err != nil {
+			return false, err
+		} else if cache != nil {
+			fmt.Fprintf(b.outStream, " ---> Using cache\n")
+			utils.Debugf("[BUILDER] Use cached version")
+			b.image = cache.ID
+			return true, nil
+		} else {
+			utils.Debugf("[BUILDER] Cache miss")
+		}
+	}
+	return false, nil
+}
+
 func (b *buildFile) CmdRun(args string) error {
 	if b.image == "" {
 		return fmt.Errorf("Please provide a source image with `from` prior to run")
@@ -101,17 +137,12 @@ func (b *buildFile) CmdRun(args string) error {
 
 	utils.Debugf("Command to be executed: %v", b.config.Cmd)
 
-	if b.utilizeCache {
-		if cache, err := b.srv.ImageGetCached(b.image, b.config); err != nil {
-			return err
-		} else if cache != nil {
-			fmt.Fprintf(b.outStream, " ---> Using cache\n")
-			utils.Debugf("[BUILDER] Use cached version")
-			b.image = cache.ID
-			return nil
-		} else {
-			utils.Debugf("[BUILDER] Cache miss")
-		}
+	hit, err := b.probeCache()
+	if err != nil {
+		return err
+	}
+	if hit {
+		return nil
 	}
 
 	cid, err := b.run()
@@ -182,16 +213,30 @@ func (b *buildFile) CmdEnv(args string) error {
 	return b.commit("", b.config.Cmd, fmt.Sprintf("ENV %s", replacedVar))
 }
 
-func (b *buildFile) CmdCmd(args string) error {
+func (b *buildFile) buildCmdFromJson(args string) []string {
 	var cmd []string
 	if err := json.Unmarshal([]byte(args), &cmd); err != nil {
-		utils.Debugf("Error unmarshalling: %s, setting cmd to /bin/sh -c", err)
+		utils.Debugf("Error unmarshalling: %s, setting to /bin/sh -c", err)
 		cmd = []string{"/bin/sh", "-c", args}
 	}
-	if err := b.commit("", cmd, fmt.Sprintf("CMD %v", cmd)); err != nil {
+	return cmd
+}
+
+func (b *buildFile) CmdCmd(args string) error {
+	cmd := b.buildCmdFromJson(args)
+	b.config.Cmd = cmd
+	if err := b.commit("", b.config.Cmd, fmt.Sprintf("CMD %v", cmd)); err != nil {
 		return err
 	}
-	b.config.Cmd = cmd
+	return nil
+}
+
+func (b *buildFile) CmdEntrypoint(args string) error {
+	entrypoint := b.buildCmdFromJson(args)
+	b.config.Entrypoint = entrypoint
+	if err := b.commit("", b.config.Cmd, fmt.Sprintf("ENTRYPOINT %v", entrypoint)); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -212,23 +257,6 @@ func (b *buildFile) CmdInsert(args string) error {
 
 func (b *buildFile) CmdCopy(args string) error {
 	return fmt.Errorf("COPY has been deprecated. Please use ADD instead")
-}
-
-func (b *buildFile) CmdEntrypoint(args string) error {
-	if args == "" {
-		return fmt.Errorf("Entrypoint cannot be empty")
-	}
-
-	var entrypoint []string
-	if err := json.Unmarshal([]byte(args), &entrypoint); err != nil {
-		b.config.Entrypoint = []string{"/bin/sh", "-c", args}
-	} else {
-		b.config.Entrypoint = entrypoint
-	}
-	if err := b.commit("", b.config.Cmd, fmt.Sprintf("ENTRYPOINT %s", args)); err != nil {
-		return err
-	}
-	return nil
 }
 
 func (b *buildFile) CmdWorkdir(workdir string) error {
@@ -257,43 +285,26 @@ func (b *buildFile) CmdVolume(args string) error {
 	return nil
 }
 
-func (b *buildFile) addRemote(container *Container, orig, dest string) error {
-	file, err := utils.Download(orig)
+func (b *buildFile) checkPathForAddition(orig string) error {
+	origPath := path.Join(b.contextPath, orig)
+	if !strings.HasPrefix(origPath, b.contextPath) {
+		return fmt.Errorf("Forbidden path outside the build context: %s (%s)", orig, origPath)
+	}
+	_, err := os.Stat(origPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("%s: no such file or directory", orig)
 	}
-	defer file.Body.Close()
-
-	// If the destination is a directory, figure out the filename.
-	if strings.HasSuffix(dest, "/") {
-		u, err := url.Parse(orig)
-		if err != nil {
-			return err
-		}
-		path := u.Path
-		if strings.HasSuffix(path, "/") {
-			path = path[:len(path)-1]
-		}
-		parts := strings.Split(path, "/")
-		filename := parts[len(parts)-1]
-		if filename == "" {
-			return fmt.Errorf("cannot determine filename from url: %s", u)
-		}
-		dest = dest + filename
-	}
-
-	return container.Inject(file.Body, dest)
+	return nil
 }
 
 func (b *buildFile) addContext(container *Container, orig, dest string) error {
-	origPath := path.Join(b.context, orig)
-	destPath := path.Join(container.RootfsPath(), dest)
+	var (
+		origPath = path.Join(b.contextPath, orig)
+		destPath = path.Join(container.RootfsPath(), dest)
+	)
 	// Preserve the trailing '/'
 	if strings.HasSuffix(dest, "/") {
 		destPath = destPath + "/"
-	}
-	if !strings.HasPrefix(origPath, b.context) {
-		return fmt.Errorf("Forbidden path outside the build context: %s (%s)", orig, origPath)
 	}
 	fi, err := os.Stat(origPath)
 	if err != nil {
@@ -318,7 +329,7 @@ func (b *buildFile) addContext(container *Container, orig, dest string) error {
 }
 
 func (b *buildFile) CmdAdd(args string) error {
-	if b.context == "" {
+	if b.context == nil {
 		return fmt.Errorf("No context given. Impossible to use ADD")
 	}
 	tmp := strings.SplitN(args, " ", 2)
@@ -338,8 +349,112 @@ func (b *buildFile) CmdAdd(args string) error {
 
 	cmd := b.config.Cmd
 	b.config.Cmd = []string{"/bin/sh", "-c", fmt.Sprintf("#(nop) ADD %s in %s", orig, dest)}
-
 	b.config.Image = b.image
+
+	// FIXME: do we really need this?
+	var (
+		origPath   = orig
+		destPath   = dest
+		remoteHash string
+	)
+
+	if utils.IsURL(orig) {
+		resp, err := utils.Download(orig)
+		if err != nil {
+			return err
+		}
+		tmpDirName, err := ioutil.TempDir(b.contextPath, "docker-remote")
+		if err != nil {
+			return err
+		}
+		tmpFileName := path.Join(tmpDirName, "tmp")
+		tmpFile, err := os.OpenFile(tmpFileName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0600)
+		if err != nil {
+			return err
+		}
+		defer os.RemoveAll(tmpDirName)
+		if _, err = io.Copy(tmpFile, resp.Body); err != nil {
+			tmpFile.Close()
+			return err
+		}
+		origPath = path.Join(filepath.Base(tmpDirName), filepath.Base(tmpFileName))
+		tmpFile.Close()
+
+		// Process the checksum
+		r, err := archive.Tar(tmpFileName, archive.Uncompressed)
+		if err != nil {
+			return err
+		}
+		tarSum := utils.TarSum{Reader: r, DisableCompression: true}
+		remoteHash = tarSum.Sum(nil)
+
+		// If the destination is a directory, figure out the filename.
+		if strings.HasSuffix(dest, "/") {
+			u, err := url.Parse(orig)
+			if err != nil {
+				return err
+			}
+			path := u.Path
+			if strings.HasSuffix(path, "/") {
+				path = path[:len(path)-1]
+			}
+			parts := strings.Split(path, "/")
+			filename := parts[len(parts)-1]
+			if filename == "" {
+				return fmt.Errorf("cannot determine filename from url: %s", u)
+			}
+			destPath = dest + filename
+		}
+	}
+
+	if err := b.checkPathForAddition(origPath); err != nil {
+		return err
+	}
+
+	// Hash path and check the cache
+	if b.utilizeCache {
+		var (
+			hash string
+			sums = b.context.GetSums()
+		)
+
+		if remoteHash != "" {
+			hash = remoteHash
+		} else if fi, err := os.Stat(path.Join(b.contextPath, origPath)); err != nil {
+			return err
+		} else if fi.IsDir() {
+			var subfiles []string
+			for file, sum := range sums {
+				absFile := path.Join(b.contextPath, file)
+				absOrigPath := path.Join(b.contextPath, origPath)
+				if strings.HasPrefix(absFile, absOrigPath) {
+					subfiles = append(subfiles, sum)
+				}
+			}
+			sort.Strings(subfiles)
+			hasher := sha256.New()
+			hasher.Write([]byte(strings.Join(subfiles, ",")))
+			hash = "dir:" + hex.EncodeToString(hasher.Sum(nil))
+		} else {
+			if origPath[0] == '/' && len(origPath) > 1 {
+				origPath = origPath[1:]
+			}
+			origPath = strings.TrimPrefix(origPath, "./")
+			if h, ok := sums[origPath]; ok {
+				hash = "file:" + h
+			}
+		}
+		b.config.Cmd = []string{"/bin/sh", "-c", fmt.Sprintf("#(nop) ADD %s in %s", hash, dest)}
+		hit, err := b.probeCache()
+		if err != nil {
+			return err
+		}
+		// If we do not have a hash, never use the cache
+		if hit && hash != "" {
+			return nil
+		}
+	}
+
 	// Create the container and start it
 	container, _, err := b.runtime.Create(b.config, "")
 	if err != nil {
@@ -352,14 +467,8 @@ func (b *buildFile) CmdAdd(args string) error {
 	}
 	defer container.Unmount()
 
-	if utils.IsURL(orig) {
-		if err := b.addRemote(container, orig, dest); err != nil {
-			return err
-		}
-	} else {
-		if err := b.addContext(container, orig, dest); err != nil {
-			return err
-		}
+	if err := b.addContext(container, origPath, destPath); err != nil {
+		return err
 	}
 
 	if err := b.commit(container.ID, cmd, fmt.Sprintf("ADD %s in %s", orig, dest)); err != nil {
@@ -375,7 +484,7 @@ type StdoutFormater struct {
 }
 
 func (sf *StdoutFormater) Write(buf []byte) (int, error) {
-	formattedBuf := sf.StreamFormatter.FormatStatus("", "%s", string(buf))
+	formattedBuf := sf.StreamFormatter.FormatStream(string(buf))
 	n, err := sf.Writer.Write(formattedBuf)
 	if n != len(formattedBuf) {
 		return n, io.ErrShortWrite
@@ -389,7 +498,7 @@ type StderrFormater struct {
 }
 
 func (sf *StderrFormater) Write(buf []byte) (int, error) {
-	formattedBuf := sf.StreamFormatter.FormatStatus("", "%s", "\033[91m"+string(buf)+"\033[0m")
+	formattedBuf := sf.StreamFormatter.FormatStream("\033[91m" + string(buf) + "\033[0m")
 	n, err := sf.Writer.Write(formattedBuf)
 	if n != len(formattedBuf) {
 		return n, io.ErrShortWrite
@@ -457,17 +566,12 @@ func (b *buildFile) commit(id string, autoCmd []string, comment string) error {
 		b.config.Cmd = []string{"/bin/sh", "-c", "#(nop) " + comment}
 		defer func(cmd []string) { b.config.Cmd = cmd }(cmd)
 
-		if b.utilizeCache {
-			if cache, err := b.srv.ImageGetCached(b.image, b.config); err != nil {
-				return err
-			} else if cache != nil {
-				fmt.Fprintf(b.outStream, " ---> Using cache\n")
-				utils.Debugf("[BUILDER] Use cached version")
-				b.image = cache.ID
-				return nil
-			} else {
-				utils.Debugf("[BUILDER] Cache miss")
-			}
+		hit, err := b.probeCache()
+		if err != nil {
+			return err
+		}
+		if hit {
+			return nil
 		}
 
 		container, warnings, err := b.runtime.Create(b.config, "")
@@ -508,23 +612,27 @@ func (b *buildFile) commit(id string, autoCmd []string, comment string) error {
 var lineContinuation = regexp.MustCompile(`\s*\\\s*\n`)
 
 func (b *buildFile) Build(context io.Reader) (string, error) {
-	// FIXME: @creack "name" is a terrible variable name
-	name, err := ioutil.TempDir("", "docker-build")
+	tmpdirPath, err := ioutil.TempDir("", "docker-build")
 	if err != nil {
 		return "", err
 	}
-	if err := archive.Untar(context, name, nil); err != nil {
+	b.context = &utils.TarSum{Reader: context, DisableCompression: true}
+	if err := archive.Untar(b.context, tmpdirPath, nil); err != nil {
 		return "", err
 	}
-	defer os.RemoveAll(name)
-	b.context = name
-	filename := path.Join(name, "Dockerfile")
+	defer os.RemoveAll(tmpdirPath)
+
+	b.contextPath = tmpdirPath
+	filename := path.Join(tmpdirPath, "Dockerfile")
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		return "", fmt.Errorf("Can't build a directory with no Dockerfile")
 	}
 	fileBytes, err := ioutil.ReadFile(filename)
 	if err != nil {
 		return "", err
+	}
+	if len(fileBytes) == 0 {
+		return "", ErrDockerfileEmpty
 	}
 	dockerfile := string(fileBytes)
 	dockerfile = lineContinuation.ReplaceAllString(dockerfile, "")
@@ -565,10 +673,10 @@ func (b *buildFile) Build(context io.Reader) (string, error) {
 		}
 		return b.image, nil
 	}
-	return "", fmt.Errorf("An error occurred during the build\n")
+	return "", fmt.Errorf("No image was generated. This may be because the Dockerfile does not, like, do anything.\n")
 }
 
-func NewBuildFile(srv *Server, outStream, errStream io.Writer, verbose, utilizeCache, rm bool, outOld io.Writer, sf *utils.StreamFormatter) BuildFile {
+func NewBuildFile(srv *Server, outStream, errStream io.Writer, verbose, utilizeCache, rm bool, outOld io.Writer, sf *utils.StreamFormatter, auth *auth.AuthConfig) BuildFile {
 	return &buildFile{
 		runtime:       srv.runtime,
 		srv:           srv,
@@ -581,6 +689,7 @@ func NewBuildFile(srv *Server, outStream, errStream io.Writer, verbose, utilizeC
 		utilizeCache:  utilizeCache,
 		rm:            rm,
 		sf:            sf,
+		authConfig:    auth,
 		outOld:        outOld,
 	}
 }

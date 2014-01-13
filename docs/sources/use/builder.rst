@@ -1,12 +1,12 @@
-:title: Dockerfiles for Images
+:title: Build Images (Dockerfile Reference)
 :description: Dockerfiles use a simple DSL which allows you to automate the steps you would normally manually take to create an image.
 :keywords: builder, docker, Dockerfile, automation, image creation
 
 .. _dockerbuilder:
 
-======================
-Dockerfiles for Images
-======================
+===================================
+Build Images (Dockerfile Reference)
+===================================
 
 **Docker can act as a builder** and read instructions from a text
 ``Dockerfile`` to automate the steps you would otherwise take manually
@@ -250,6 +250,11 @@ All new files and directories are created with mode 0755, uid and gid
 .. note::
    if you build using STDIN (``docker build - < somefile``), there is no build 
    context, so the Dockerfile can only contain an URL based ADD statement.
+
+.. note::
+   if your URL files are protected using authentication, you will need to use
+   an ``RUN wget`` , ``RUN curl`` or other tool from within the container as
+   ADD does not support authentication.
 
 The copy obeys the following rules:
 

@@ -3,7 +3,7 @@ package docker
 import (
 	"fmt"
 	"github.com/dotcloud/docker/archive"
-	"github.com/dotcloud/docker/namesgenerator"
+	"github.com/dotcloud/docker/pkg/namesgenerator"
 	"github.com/dotcloud/docker/utils"
 	"io/ioutil"
 	"strconv"
@@ -321,7 +321,6 @@ func migratePortMappings(config *Config, hostConfig *HostConfig) error {
 	}
 	return nil
 }
-
 
 // Links come in the format of
 // name:alias

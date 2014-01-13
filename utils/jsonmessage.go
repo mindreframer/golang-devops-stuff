@@ -3,7 +3,7 @@ package utils
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/dotcloud/docker/term"
+	"github.com/dotcloud/docker/pkg/term"
 	"io"
 	"strings"
 	"time"
@@ -52,7 +52,7 @@ func (p *JSONProgress) String() string {
 	}
 	numbersBox = fmt.Sprintf("%8v/%v", current, total)
 
-	if p.Start > 0 {
+	if p.Start > 0 && percentage < 50 {
 		fromStart := time.Now().UTC().Sub(time.Unix(int64(p.Start), 0))
 		perEntry := fromStart / time.Duration(p.Current)
 		left := time.Duration(p.Total-p.Current) * perEntry
@@ -66,6 +66,7 @@ func (p *JSONProgress) String() string {
 }
 
 type JSONMessage struct {
+	Stream          string        `json:"stream,omitempty"`
 	Status          string        `json:"status,omitempty"`
 	Progress        *JSONProgress `json:"progressDetail,omitempty"`
 	ProgressMessage string        `json:"progress,omitempty"` //deprecated
@@ -87,7 +88,9 @@ func (jm *JSONMessage) Display(out io.Writer, isTerminal bool) error {
 	if isTerminal {
 		// <ESC>[2K = erase entire current line
 		fmt.Fprintf(out, "%c[2K\r", 27)
-		endl = "\r\n"
+		endl = "\r"
+	} else if jm.Progress != nil { //disable progressbar in non-terminal
+		return nil
 	}
 	if jm.Time != 0 {
 		fmt.Fprintf(out, "[%s] ", time.Unix(jm.Time, 0))
@@ -102,8 +105,10 @@ func (jm *JSONMessage) Display(out io.Writer, isTerminal bool) error {
 		fmt.Fprintf(out, "%s %s%s", jm.Status, jm.Progress.String(), endl)
 	} else if jm.ProgressMessage != "" { //deprecated
 		fmt.Fprintf(out, "%s %s%s", jm.Status, jm.ProgressMessage, endl)
+	} else if jm.Stream != "" {
+		fmt.Fprintf(out, "%s%s", jm.Stream, endl)
 	} else {
-		fmt.Fprintf(out, "%s%s", jm.Status, endl)
+		fmt.Fprintf(out, "%s%s\n", jm.Status, endl)
 	}
 	return nil
 }

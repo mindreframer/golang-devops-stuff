@@ -1,16 +1,15 @@
 package docker
 
 import (
-	_ "code.google.com/p/gosqlite/sqlite3" // registers sqlite
 	"container/list"
-	"database/sql"
 	"fmt"
 	"github.com/dotcloud/docker/archive"
-	"github.com/dotcloud/docker/graphdb"
+	"github.com/dotcloud/docker/cgroups"
 	"github.com/dotcloud/docker/graphdriver"
 	"github.com/dotcloud/docker/graphdriver/aufs"
 	_ "github.com/dotcloud/docker/graphdriver/devmapper"
 	_ "github.com/dotcloud/docker/graphdriver/vfs"
+	"github.com/dotcloud/docker/pkg/graphdb"
 	"github.com/dotcloud/docker/utils"
 	"io"
 	"io/ioutil"
@@ -18,16 +17,23 @@ import (
 	"os"
 	"os/exec"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Set the max depth to the aufs restriction
-const MaxImageDepth = 42
+// Set the max depth to the aufs default that most
+// kernels are compiled with
+// For more information see: http://sourceforge.net/p/aufs/aufs3-standalone/ci/aufs3.12/tree/config.mk
+const MaxImageDepth = 127
 
-var defaultDns = []string{"8.8.8.8", "8.8.4.4"}
+var (
+	defaultDns                = []string{"8.8.8.8", "8.8.4.4"}
+	validContainerNameChars   = `[a-zA-Z0-9_.-]`
+	validContainerNamePattern = regexp.MustCompile(`^/?` + validContainerNameChars + `+$`)
+)
 
 type Capabilities struct {
 	MemoryLimit            bool
@@ -182,7 +188,6 @@ func (runtime *Runtime) Register(container *Container) error {
 			}
 
 			container.waitLock = make(chan struct{})
-
 			go container.monitor()
 		}
 	}
@@ -256,9 +261,8 @@ func (runtime *Runtime) Destroy(container *Container) error {
 }
 
 func (runtime *Runtime) restore() error {
-	wheel := "-\\|/"
 	if os.Getenv("DEBUG") == "" && os.Getenv("TEST") == "" {
-		fmt.Printf("Loading containers:  ")
+		fmt.Printf("Loading containers: ")
 	}
 	dir, err := ioutil.ReadDir(runtime.repository)
 	if err != nil {
@@ -267,11 +271,11 @@ func (runtime *Runtime) restore() error {
 	containers := make(map[string]*Container)
 	currentDriver := runtime.driver.String()
 
-	for i, v := range dir {
+	for _, v := range dir {
 		id := v.Name()
 		container, err := runtime.load(id)
-		if i%21 == 0 && os.Getenv("DEBUG") == "" && os.Getenv("TEST") == "" {
-			fmt.Printf("\b%c", wheel[i%4])
+		if os.Getenv("DEBUG") == "" && os.Getenv("TEST") == "" {
+			fmt.Print(".")
 		}
 		if err != nil {
 			utils.Errorf("Failed to load container %v: %v", id, err)
@@ -295,6 +299,9 @@ func (runtime *Runtime) restore() error {
 
 	if entities := runtime.containerGraph.List("/", -1); entities != nil {
 		for _, p := range entities.Paths() {
+			if os.Getenv("DEBUG") == "" && os.Getenv("TEST") == "" {
+				fmt.Print(".")
+			}
 			e := entities[p]
 			if container, ok := containers[e.ID()]; ok {
 				register(container)
@@ -318,7 +325,7 @@ func (runtime *Runtime) restore() error {
 	}
 
 	if os.Getenv("DEBUG") == "" && os.Getenv("TEST") == "" {
-		fmt.Printf("\bdone.\n")
+		fmt.Printf(": done.\n")
 	}
 
 	return nil
@@ -326,7 +333,7 @@ func (runtime *Runtime) restore() error {
 
 // FIXME: comment please!
 func (runtime *Runtime) UpdateCapabilities(quiet bool) {
-	if cgroupMemoryMountpoint, err := utils.FindCgroupMountpoint("memory"); err != nil {
+	if cgroupMemoryMountpoint, err := cgroups.FindCgroupMountpoint("memory"); err != nil {
 		if !quiet {
 			log.Printf("WARNING: %s\n", err)
 		}
@@ -418,7 +425,12 @@ func (runtime *Runtime) Create(config *Config, name string) (*Container, []strin
 		if err != nil {
 			name = utils.TruncateID(id)
 		}
+	} else {
+		if !validContainerNamePattern.MatchString(name) {
+			return nil, nil, fmt.Errorf("Invalid container name (%s), only %s are allowed", name, validContainerNameChars)
+		}
 	}
+
 	if name[0] != '/' {
 		name = "/" + name
 	}
@@ -474,10 +486,8 @@ func (runtime *Runtime) Create(config *Config, name string) (*Container, []strin
 		hostConfig:      &HostConfig{},
 		Image:           img.ID, // Always use the resolved image id
 		NetworkSettings: &NetworkSettings{},
-		// FIXME: do we need to store this in the container?
-		SysInitPath: runtime.sysInitPath,
-		Name:        name,
-		Driver:      runtime.driver.String(),
+		Name:            name,
+		Driver:          runtime.driver.String(),
 	}
 	container.root = runtime.containerRoot(container.ID)
 	// Step 1: create the container directory.
@@ -573,11 +583,6 @@ func (runtime *Runtime) Commit(container *Container, repository, tag, comment, a
 	return img, nil
 }
 
-// FIXME: this is deprecated by the getFullName *function*
-func (runtime *Runtime) getFullName(name string) (string, error) {
-	return getFullName(name)
-}
-
 func getFullName(name string) (string, error) {
 	if name == "" {
 		return "", fmt.Errorf("Container name cannot be empty")
@@ -589,7 +594,7 @@ func getFullName(name string) (string, error) {
 }
 
 func (runtime *Runtime) GetByName(name string) (*Container, error) {
-	fullName, err := runtime.getFullName(name)
+	fullName, err := getFullName(name)
 	if err != nil {
 		return nil, err
 	}
@@ -605,7 +610,7 @@ func (runtime *Runtime) GetByName(name string) (*Container, error) {
 }
 
 func (runtime *Runtime) Children(name string) (map[string]*Container, error) {
-	name, err := runtime.getFullName(name)
+	name, err := getFullName(name)
 	if err != nil {
 		return nil, err
 	}
@@ -664,14 +669,17 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 	}
 
 	if ad, ok := driver.(*aufs.Driver); ok {
+		utils.Debugf("Migrating existing containers")
 		if err := ad.Migrate(config.Root, setupInitLayer); err != nil {
 			return nil, err
 		}
 	}
 
+	utils.Debugf("Escaping AppArmor confinement")
 	if err := linkLxcStart(config.Root); err != nil {
 		return nil, err
 	}
+	utils.Debugf("Creating images graph")
 	g, err := NewGraph(path.Join(config.Root, "graph"), driver)
 	if err != nil {
 		return nil, err
@@ -683,10 +691,12 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	utils.Debugf("Creating volumes graph")
 	volumes, err := NewGraph(path.Join(config.Root, "volumes"), volumesDriver)
 	if err != nil {
 		return nil, err
 	}
+	utils.Debugf("Creating repository list")
 	repositories, err := NewTagStore(path.Join(config.Root, "repositories-"+driver.String()), g)
 	if err != nil {
 		return nil, fmt.Errorf("Couldn't create Tag store: %s", err)
@@ -700,19 +710,7 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 	}
 
 	graphdbPath := path.Join(config.Root, "linkgraph.db")
-	initDatabase := false
-	if _, err := os.Stat(graphdbPath); err != nil {
-		if os.IsNotExist(err) {
-			initDatabase = true
-		} else {
-			return nil, err
-		}
-	}
-	conn, err := sql.Open("sqlite3", graphdbPath)
-	if err != nil {
-		return nil, err
-	}
-	graph, err := graphdb.NewDatabase(conn, initDatabase)
+	graph, err := graphdb.NewSqliteConn(graphdbPath)
 	if err != nil {
 		return nil, err
 	}
@@ -723,18 +721,18 @@ func NewRuntimeFromDirectory(config *DaemonConfig) (*Runtime, error) {
 		return nil, fmt.Errorf("Could not locate dockerinit: This usually means docker was built incorrectly. See http://docs.docker.io/en/latest/contributing/devenvironment for official build instructions.")
 	}
 
-	if !utils.IAMSTATIC {
-		if err := os.Mkdir(path.Join(config.Root, fmt.Sprintf("init")), 0700); err != nil && !os.IsExist(err) {
+	if sysInitPath != localCopy {
+		// When we find a suitable dockerinit binary (even if it's our local binary), we copy it into config.Root at localCopy for future use (so that the original can go away without that being a problem, for example during a package upgrade).
+		if err := os.Mkdir(path.Dir(localCopy), 0700); err != nil && !os.IsExist(err) {
 			return nil, err
 		}
-
 		if _, err := utils.CopyFile(sysInitPath, localCopy); err != nil {
 			return nil, err
 		}
-		sysInitPath = localCopy
-		if err := os.Chmod(sysInitPath, 0700); err != nil {
+		if err := os.Chmod(localCopy, 0700); err != nil {
 			return nil, err
 		}
+		sysInitPath = localCopy
 	}
 
 	runtime := &Runtime{
@@ -857,7 +855,7 @@ func linkLxcStart(root string) error {
 	}
 	targetPath := path.Join(root, "lxc-start-unconfined")
 
-	if _, err := os.Stat(targetPath); err != nil && !os.IsNotExist(err) {
+	if _, err := os.Lstat(targetPath); err != nil && !os.IsNotExist(err) {
 		return err
 	} else if err == nil {
 		if err := os.Remove(targetPath); err != nil {
