@@ -21,6 +21,13 @@ type AccessProvider interface {
 	Reauthenticate() error
 }
 
+// ServiceCatalogerIdentityV2 interface provides direct access to the service catalog as offered by the Identity V2 API.
+// We regret we need to fracture the namespace of what should otherwise be a simple concept; however,
+// the OpenStack community saw fit to render V3's service catalog completely incompatible with V2.
+type ServiceCatalogerForIdentityV2 interface {
+	V2ServiceCatalog() []CatalogEntry
+}
+
 // CloudServersProvider instances encapsulate a Cloud Servers API, should one exist in the service catalog
 // for your provider.
 type CloudServersProvider interface {
@@ -138,6 +145,10 @@ type CloudServersProvider interface {
 	// field.  However, if you have a lot of servers and all you need are addresses,
 	// this function might be more efficient.
 	ListAddresses(id string) (AddressSet, error)
+
+	// ListAddressesByNetwork yields the list of available addresses for a given server id and networkLabel.
+	// Example: ListAddressesByNetwork("234-4353-4jfrj-43j2s", "private")
+	ListAddressesByNetwork(id, networkLabel string) (NetworkAddress, error)
 
 	// Images
 

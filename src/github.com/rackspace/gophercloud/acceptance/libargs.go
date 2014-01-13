@@ -5,16 +5,18 @@ import (
 	"fmt"
 	"github.com/rackspace/gophercloud"
 	"os"
+	"strings"
 	"time"
 )
 
 // getCredentials will verify existence of needed credential information
 // provided through environment variables.  This function will not return
 // if at least one piece of required information is missing.
-func getCredentials() (provider, username, password string) {
+func getCredentials() (provider, username, password, apiKey string) {
 	provider = os.Getenv("SDK_PROVIDER")
 	username = os.Getenv("SDK_USERNAME")
 	password = os.Getenv("SDK_PASSWORD")
+	apiKey = os.Getenv("SDK_API_KEY")
 
 	if (provider == "") || (username == "") || (password == "") {
 		fmt.Fprintf(os.Stderr, "One or more of the following environment variables aren't set:\n")
@@ -56,11 +58,11 @@ func aSuitableImage(api gophercloud.CloudServersProvider) string {
 	//
 	// Until then, just return Ubuntu 12.04 LTS.
 	for i := 0; i < len(images); i++ {
-		if images[i].Id == "23b564c9-c3e6-49f9-bc68-86c7a9ab5018" {
+		if strings.Contains(images[i].Name, "Ubuntu 12.04 LTS") {
 			return images[i].Id
 		}
 	}
-	panic("Image 23b564c9-c3e6-49f9-bc68-86c7a9ab5018 (Ubuntu 12.04 LTS) not found.")
+	panic("Image for Ubuntu 12.04 LTS not found.")
 }
 
 // aSuitableFlavor finds the minimum flavor capable of running the test image
@@ -139,7 +141,7 @@ func findAlternativeImage() string {
 // withIdentity authenticates the user against the provider's identity service, and provides an
 // accessor for additional services.
 func withIdentity(ar bool, f func(gophercloud.AccessProvider)) {
-	provider, username, password := getCredentials()
+	provider, username, password, _ := getCredentials()
 	acc, err := gophercloud.Authenticate(
 		provider,
 		gophercloud.AuthOptions{
