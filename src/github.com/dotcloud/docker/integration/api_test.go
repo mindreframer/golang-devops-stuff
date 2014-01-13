@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/dotcloud/docker"
+	"github.com/dotcloud/docker/engine"
 	"github.com/dotcloud/docker/utils"
 	"io"
 	"net"
@@ -35,12 +36,22 @@ func TestGetVersion(t *testing.T) {
 	}
 	assertHttpNotError(r, t)
 
-	v := &docker.APIVersion{}
-	if err = json.Unmarshal(r.Body.Bytes(), v); err != nil {
+	out := engine.NewOutput()
+	v, err := out.AddEnv()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Version != docker.VERSION {
-		t.Errorf("Expected version %s, %s found", docker.VERSION, v.Version)
+	if _, err := io.Copy(out, r.Body); err != nil {
+		t.Fatal(err)
+	}
+	out.Close()
+	expected := docker.VERSION
+	if result := v.Get("Version"); result != expected {
+		t.Errorf("Expected version %s, %s found", expected, result)
+	}
+	expected = "application/json"
+	if result := r.HeaderMap.Get("Content-Type"); result != expected {
+		t.Errorf("Expected Content-Type %s, %s found", expected, result)
 	}
 }
 
@@ -65,13 +76,21 @@ func TestGetInfo(t *testing.T) {
 	}
 	assertHttpNotError(r, t)
 
-	infos := &docker.APIInfo{}
-	err = json.Unmarshal(r.Body.Bytes(), infos)
+	out := engine.NewOutput()
+	i, err := out.AddEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if infos.Images != len(initialImages) {
-		t.Errorf("Expected images: %d, %d found", len(initialImages), infos.Images)
+	if _, err := io.Copy(out, r.Body); err != nil {
+		t.Fatal(err)
+	}
+	out.Close()
+	if images := i.GetInt("Images"); images != len(initialImages) {
+		t.Errorf("Expected images: %d, %d found", len(initialImages), images)
+	}
+	expected := "application/json"
+	if result := r.HeaderMap.Get("Content-Type"); result != expected {
+		t.Errorf("Expected Content-Type %s, %s found", expected, result)
 	}
 }
 
@@ -421,7 +440,6 @@ func TestGetContainersChanges(t *testing.T) {
 }
 
 func TestGetContainersTop(t *testing.T) {
-	t.Skip("Fixme. Skipping test for now. Reported error when testing using dind: 'api_test.go:527: Expected 2 processes, found 0.'")
 	eng := NewTestEngine(t)
 	defer mkRuntimeFromEngine(eng, t).Nuke()
 	srv := mkServerFromEngine(eng, t)
@@ -464,7 +482,7 @@ func TestGetContainersTop(t *testing.T) {
 	})
 
 	r := httptest.NewRecorder()
-	req, err := http.NewRequest("GET", "/"+containerID+"/top?ps_args=u", bytes.NewReader([]byte{}))
+	req, err := http.NewRequest("GET", "/containers/"+containerID+"/top?ps_args=aux", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,11 +505,11 @@ func TestGetContainersTop(t *testing.T) {
 	if len(procs.Processes) != 2 {
 		t.Fatalf("Expected 2 processes, found %d.", len(procs.Processes))
 	}
-	if procs.Processes[0][10] != "/bin/sh" && procs.Processes[0][10] != "cat" {
-		t.Fatalf("Expected `cat` or `/bin/sh`, found %s.", procs.Processes[0][10])
+	if procs.Processes[0][10] != "/bin/sh -c cat" {
+		t.Fatalf("Expected `/bin/sh -c cat`, found %s.", procs.Processes[0][10])
 	}
-	if procs.Processes[1][10] != "/bin/sh" && procs.Processes[1][10] != "cat" {
-		t.Fatalf("Expected `cat` or `/bin/sh`, found %s.", procs.Processes[1][10])
+	if procs.Processes[1][10] != "/bin/sh -c cat" {
+		t.Fatalf("Expected `/bin/sh -c cat`, found %s.", procs.Processes[1][10])
 	}
 }
 
@@ -1113,7 +1131,7 @@ func TestDeleteImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := srv.ContainerTag(unitTestImageName, "test", "test", false); err != nil {
+	if err := eng.Job("tag", unitTestImageName, "test", "test").Run(); err != nil {
 		t.Fatal(err)
 	}
 	images, err := srv.Images(false, "")

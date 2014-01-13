@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/dotcloud/docker/iptables"
-	"github.com/dotcloud/docker/netlink"
+	"github.com/dotcloud/docker/pkg/iptables"
+	"github.com/dotcloud/docker/pkg/netlink"
 	"github.com/dotcloud/docker/proxy"
 	"github.com/dotcloud/docker/utils"
 	"log"
@@ -19,6 +19,7 @@ import (
 const (
 	DefaultNetworkBridge = "docker0"
 	DisableNetworkBridge = "none"
+	DefaultNetworkMtu    = 1500
 	portRangeStart       = 49153
 	portRangeEnd         = 65535
 	siocBRADDBR          = 0x89a0
@@ -129,22 +130,30 @@ func CreateBridgeIface(config *DaemonConfig) error {
 	}
 
 	var ifaceAddr string
-	for _, addr := range addrs {
-		_, dockerNetwork, err := net.ParseCIDR(addr)
+	if len(config.BridgeIp) != 0 {
+		_, _, err := net.ParseCIDR(config.BridgeIp)
 		if err != nil {
 			return err
 		}
-		routes, err := netlink.NetworkGetRoutes()
-		if err != nil {
-			return err
-		}
-		if err := checkRouteOverlaps(routes, dockerNetwork); err == nil {
-			if err := checkNameserverOverlaps(nameservers, dockerNetwork); err == nil {
-				ifaceAddr = addr
-				break
+		ifaceAddr = config.BridgeIp
+	} else {
+		for _, addr := range addrs {
+			_, dockerNetwork, err := net.ParseCIDR(addr)
+			if err != nil {
+				return err
 			}
-		} else {
-			utils.Debugf("%s: %s", addr, err)
+			routes, err := netlink.NetworkGetRoutes()
+			if err != nil {
+				return err
+			}
+			if err := checkRouteOverlaps(routes, dockerNetwork); err == nil {
+				if err := checkNameserverOverlaps(nameservers, dockerNetwork); err == nil {
+					ifaceAddr = addr
+					break
+				}
+			} else {
+				utils.Debugf("%s: %s", addr, err)
+			}
 		}
 	}
 	if ifaceAddr == "" {
@@ -178,7 +187,11 @@ func CreateBridgeIface(config *DaemonConfig) error {
 func createBridgeIface(name string) error {
 	s, err := syscall.Socket(syscall.AF_INET6, syscall.SOCK_STREAM, syscall.IPPROTO_IP)
 	if err != nil {
-		return fmt.Errorf("Error creating bridge creation socket: %s", err)
+		utils.Debugf("Bridge socket creation failed IPv6 probably not enabled: %v", err)
+		s, err = syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_IP)
+		if err != nil {
+			return fmt.Errorf("Error creating bridge creation socket: %s", err)
+		}
 	}
 	defer syscall.Close(s)
 
@@ -235,12 +248,12 @@ type PortMapper struct {
 }
 
 func (mapper *PortMapper) Map(ip net.IP, port int, backendAddr net.Addr) error {
-	mapKey := (&net.TCPAddr{Port: port, IP: ip}).String()
-	if _, exists := mapper.tcpProxies[mapKey]; exists {
-		return fmt.Errorf("Port %s is already in use", mapKey)
-	}
 
 	if _, isTCP := backendAddr.(*net.TCPAddr); isTCP {
+		mapKey := (&net.TCPAddr{Port: port, IP: ip}).String()
+		if _, exists := mapper.tcpProxies[mapKey]; exists {
+			return fmt.Errorf("TCP Port %s is already in use", mapKey)
+		}
 		backendPort := backendAddr.(*net.TCPAddr).Port
 		backendIP := backendAddr.(*net.TCPAddr).IP
 		if mapper.iptables != nil {
@@ -257,6 +270,10 @@ func (mapper *PortMapper) Map(ip net.IP, port int, backendAddr net.Addr) error {
 		mapper.tcpProxies[mapKey] = proxy
 		go proxy.Run()
 	} else {
+		mapKey := (&net.UDPAddr{Port: port, IP: ip}).String()
+		if _, exists := mapper.udpProxies[mapKey]; exists {
+			return fmt.Errorf("UDP: Port %s is already in use", mapKey)
+		}
 		backendPort := backendAddr.(*net.UDPAddr).Port
 		backendIP := backendAddr.(*net.UDPAddr).IP
 		if mapper.iptables != nil {
@@ -277,8 +294,8 @@ func (mapper *PortMapper) Map(ip net.IP, port int, backendAddr net.Addr) error {
 }
 
 func (mapper *PortMapper) Unmap(ip net.IP, port int, proto string) error {
-	mapKey := (&net.TCPAddr{Port: port, IP: ip}).String()
 	if proto == "tcp" {
+		mapKey := (&net.TCPAddr{Port: port, IP: ip}).String()
 		backendAddr, ok := mapper.tcpMapping[mapKey]
 		if !ok {
 			return fmt.Errorf("Port tcp/%s is not mapped", mapKey)
@@ -294,6 +311,7 @@ func (mapper *PortMapper) Unmap(ip net.IP, port int, proto string) error {
 		}
 		delete(mapper.tcpMapping, mapKey)
 	} else {
+		mapKey := (&net.UDPAddr{Port: port, IP: ip}).String()
 		backendAddr, ok := mapper.udpMapping[mapKey]
 		if !ok {
 			return fmt.Errorf("Port udp/%s is not mapped", mapKey)
@@ -615,7 +633,7 @@ func (iface *NetworkInterface) Release() {
 				log.Printf("Unable to release port %s", nat)
 			}
 		} else if nat.Port.Proto() == "udp" {
-			if err := iface.manager.tcpPortAllocator.Release(ip, hostPort); err != nil {
+			if err := iface.manager.udpPortAllocator.Release(ip, hostPort); err != nil {
 				log.Printf("Unable to release port %s: %s", nat, err)
 			}
 		}

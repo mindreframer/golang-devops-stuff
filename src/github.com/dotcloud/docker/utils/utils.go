@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"index/suffixarray"
 	"io"
@@ -26,6 +25,7 @@ import (
 var (
 	IAMSTATIC bool   // whether or not Docker itself was compiled statically via ./hack/make.sh binary
 	INITSHA1  string // sha1sum of separate static dockerinit, if Docker itself was compiled dynamically via ./hack/make.sh dynbinary
+	INITPATH  string // custom location to search for a valid dockerinit binary (available for packagers as a last resort escape hatch)
 )
 
 // A common interface to access the Fatal method of
@@ -45,14 +45,12 @@ func Go(f func() error) chan error {
 }
 
 // Request a given URL and return an io.Reader
-func Download(url string) (*http.Response, error) {
-	var resp *http.Response
-	var err error
+func Download(url string) (resp *http.Response, err error) {
 	if resp, err = http.Get(url); err != nil {
 		return nil, err
 	}
 	if resp.StatusCode >= 400 {
-		return nil, errors.New("Got HTTP status code >= 400: " + resp.Status)
+		return nil, fmt.Errorf("Got HTTP status code >= 400: %s", resp.Status)
 	}
 	return resp, nil
 }
@@ -162,14 +160,23 @@ func Trunc(s string, maxlen int) string {
 	return s[:maxlen]
 }
 
-// Figure out the absolute path of our own binary
+// Figure out the absolute path of our own binary (if it's still around).
 func SelfPath() string {
 	path, err := exec.LookPath(os.Args[0])
 	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
+		if execErr, ok := err.(*exec.Error); ok && os.IsNotExist(execErr.Err) {
+			return ""
+		}
 		panic(err)
 	}
 	path, err = filepath.Abs(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return ""
+		}
 		panic(err)
 	}
 	return path
@@ -190,7 +197,13 @@ func dockerInitSha1(target string) string {
 }
 
 func isValidDockerInitPath(target string, selfPath string) bool { // target and selfPath should be absolute (InitPath and SelfPath already do this)
+	if target == "" {
+		return false
+	}
 	if IAMSTATIC {
+		if selfPath == "" {
+			return false
+		}
 		if target == selfPath {
 			return true
 		}
@@ -216,6 +229,7 @@ func DockerInitPath(localCopy string) string {
 	}
 	var possibleInits = []string{
 		localCopy,
+		INITPATH,
 		filepath.Join(filepath.Dir(selfPath), "dockerinit"),
 
 		// FHS 3.0 Draft: "/usr/libexec includes internal binaries that are not intended to be executed directly by users or shell scripts. Applications may use a single subdirectory under /usr/libexec."
@@ -229,6 +243,9 @@ func DockerInitPath(localCopy string) string {
 		"/usr/local/lib/docker/dockerinit",
 	}
 	for _, dockerInit := range possibleInits {
+		if dockerInit == "" {
+			continue
+		}
 		path, err := exec.LookPath(dockerInit)
 		if err == nil {
 			path, err = filepath.Abs(path)
@@ -563,28 +580,6 @@ func CompareKernelVersion(a, b *KernelVersionInfo) int {
 	return 0
 }
 
-func FindCgroupMountpoint(cgroupType string) (string, error) {
-	output, err := ioutil.ReadFile("/proc/mounts")
-	if err != nil {
-		return "", err
-	}
-
-	// /proc/mounts has 6 fields per line, one mount per line, e.g.
-	// cgroup /sys/fs/cgroup/devices cgroup rw,relatime,devices 0 0
-	for _, line := range strings.Split(string(output), "\n") {
-		parts := strings.Split(line, " ")
-		if len(parts) == 6 && parts[2] == "cgroup" {
-			for _, opt := range strings.Split(parts[3], ",") {
-				if opt == cgroupType {
-					return parts[1], nil
-				}
-			}
-		}
-	}
-
-	return "", fmt.Errorf("cgroup mountpoint not found for %s", cgroupType)
-}
-
 func GetKernelVersion() (*KernelVersionInfo, error) {
 	var (
 		err error
@@ -776,14 +771,27 @@ func GetNameserversAsCIDR(resolvConf []byte) []string {
 	return nameservers
 }
 
-func ParseHost(host string, port int, addr string) (string, error) {
-	var proto string
+// FIXME: Change this not to receive default value as parameter
+func ParseHost(defaultHost string, defaultPort int, defaultUnix, addr string) (string, error) {
+	var (
+		proto string
+		host  string
+		port  int
+	)
+	addr = strings.TrimSpace(addr)
 	switch {
 	case strings.HasPrefix(addr, "unix://"):
-		return addr, nil
+		proto = "unix"
+		addr = strings.TrimPrefix(addr, "unix://")
+		if addr == "" {
+			addr = defaultUnix
+		}
 	case strings.HasPrefix(addr, "tcp://"):
 		proto = "tcp"
 		addr = strings.TrimPrefix(addr, "tcp://")
+	case addr == "":
+		proto = "unix"
+		addr = defaultUnix
 	default:
 		if strings.Contains(addr, "://") {
 			return "", fmt.Errorf("Invalid bind address protocol: %s", addr)
@@ -791,19 +799,29 @@ func ParseHost(host string, port int, addr string) (string, error) {
 		proto = "tcp"
 	}
 
-	if strings.Contains(addr, ":") {
+	if proto != "unix" && strings.Contains(addr, ":") {
 		hostParts := strings.Split(addr, ":")
 		if len(hostParts) != 2 {
 			return "", fmt.Errorf("Invalid bind address format: %s", addr)
 		}
 		if hostParts[0] != "" {
 			host = hostParts[0]
+		} else {
+			host = defaultHost
 		}
-		if p, err := strconv.Atoi(hostParts[1]); err == nil {
+
+		if p, err := strconv.Atoi(hostParts[1]); err == nil && p != 0 {
 			port = p
+		} else {
+			port = defaultPort
 		}
+
 	} else {
 		host = addr
+		port = defaultPort
+	}
+	if proto == "unix" {
+		return fmt.Sprintf("%s://%s", proto, host), nil
 	}
 	return fmt.Sprintf("%s://%s:%d", proto, host, port), nil
 }

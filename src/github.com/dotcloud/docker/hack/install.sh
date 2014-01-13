@@ -108,7 +108,13 @@ case "$lsb_dist" in
 		fi
 		(
 			set -x
-			$sh_c "$curl ${url}gpg | apt-key add -"
+			if [ "https://get.docker.io/" = "$url" ]; then
+				$sh_c "apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 36A1D7869245C8950F966E92D8576A8BA88D21E9"
+			elif [ "https://test.docker.io/" = "$url" ]; then
+				$sh_c "apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 740B314AE3941731B942C66ADF4FD13717AAD7D6"
+			else
+				$sh_c "$curl ${url}gpg | apt-key add -"
+			fi
 			$sh_c "echo deb ${url}ubuntu docker main > /etc/apt/sources.list.d/docker.list"
 			$sh_c 'sleep 3; apt-get update; apt-get install -y -q lxc-docker'
 		)
@@ -116,7 +122,7 @@ case "$lsb_dist" in
 			(
 				set -x
 				$sh_c 'docker run busybox echo "Docker has been successfully installed!"'
-			)
+			) || true
 		fi
 		exit 0
 		;;
