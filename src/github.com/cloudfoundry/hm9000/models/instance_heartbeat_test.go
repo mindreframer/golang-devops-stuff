@@ -34,7 +34,7 @@ var _ = Describe("InstanceHeartbeat", func() {
                     "dea_guid":"dea_abc"
                 }`))
 
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				Ω(jsonInstance).Should(Equal(instance))
 			})
@@ -45,7 +45,7 @@ var _ = Describe("InstanceHeartbeat", func() {
 				instance, err := NewInstanceHeartbeatFromJSON([]byte(`{`))
 
 				Ω(instance).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 			})
 		})
 	})
@@ -54,7 +54,7 @@ var _ = Describe("InstanceHeartbeat", func() {
 		It("should, like, totally encode JSON", func() {
 			jsonInstance, err := NewInstanceHeartbeatFromJSON(instance.ToJSON())
 
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(jsonInstance).Should(Equal(instance))
 		})
 	})
@@ -64,7 +64,7 @@ var _ = Describe("InstanceHeartbeat", func() {
 			It("should, like, totally build from CSV", func() {
 				jsonInstance, err := NewInstanceHeartbeatFromCSV("abc", "xyz-123", "def", []byte(`3,RUNNING,1123.2,dea_abc`))
 
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				Ω(jsonInstance).Should(Equal(instance))
 			})
@@ -75,15 +75,15 @@ var _ = Describe("InstanceHeartbeat", func() {
 				instance, err := NewInstanceHeartbeatFromCSV("abc", "xyz-123", "def", []byte(`3,RUNNING,1123.2`))
 
 				Ω(instance).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 
 				instance, err = NewInstanceHeartbeatFromCSV("abc", "xyz-123", "def", []byte(`oops,RUNNING,1123.2,dea_abc`))
 				Ω(instance).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 
 				instance, err = NewInstanceHeartbeatFromCSV("abc", "xyz-123", "def", []byte(`3,RUNNING,oops,dea_abc`))
 				Ω(instance).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 			})
 		})
 	})
@@ -92,7 +92,7 @@ var _ = Describe("InstanceHeartbeat", func() {
 		It("should, like, totally encode to CSV", func() {
 			jsonInstance, err := NewInstanceHeartbeatFromCSV("abc", "xyz-123", "def", instance.ToCSV())
 
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(jsonInstance).Should(Equal(instance))
 		})
 	})

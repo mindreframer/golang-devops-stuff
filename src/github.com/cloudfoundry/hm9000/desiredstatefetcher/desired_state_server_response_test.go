@@ -28,7 +28,7 @@ var _ = Describe("Desired State Server Response JSON", func() {
 
 		var err error
 		response, err = NewDesiredStateServerResponse([]byte(responseJson))
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 	})
 
 	It("can parse from JSON", func() {
@@ -44,14 +44,14 @@ var _ = Describe("Desired State Server Response JSON", func() {
 	Context("when the JSON can't be parsed", func() {
 		It("should return an error", func() {
 			_, err := NewDesiredStateServerResponse([]byte("{"))
-			Ω(err).Should(HaveOccured())
+			Ω(err).Should(HaveOccurred())
 		})
 	})
 
 	Describe("ToJson", func() {
 		It("should return json that survives the round trip", func() {
 			resurrectedResponse, err := NewDesiredStateServerResponse(response.ToJSON())
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(resurrectedResponse).Should(Equal(response))
 		})
 	})

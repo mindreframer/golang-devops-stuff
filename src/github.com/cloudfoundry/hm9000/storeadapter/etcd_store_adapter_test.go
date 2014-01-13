@@ -27,7 +27,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 
 		adapter = NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(100))
 		err := adapter.Connect()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 	})
 
 	AfterEach(func() {
@@ -37,13 +37,13 @@ var _ = Describe("ETCD Store Adapter", func() {
 	Describe("Get", func() {
 		BeforeEach(func() {
 			err := adapter.Set([]StoreNode{breakfastNode, lunchNode})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		Context("when getting a key", func() {
 			It("should return the appropriate store breakfastNode", func() {
 				value, err := adapter.Get("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(Equal(breakfastNode))
 			})
 		})
@@ -84,10 +84,10 @@ var _ = Describe("ETCD Store Adapter", func() {
 	Describe("Set", func() {
 		It("should be able to set multiple things to the store at once", func() {
 			err := adapter.Set([]StoreNode{breakfastNode, lunchNode})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			menu, err := adapter.ListRecursively("/menu")
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(menu.ChildNodes).Should(HaveLen(2))
 			Ω(menu.ChildNodes).Should(ContainElement(breakfastNode))
 			Ω(menu.ChildNodes).Should(ContainElement(lunchNode))
@@ -96,16 +96,16 @@ var _ = Describe("ETCD Store Adapter", func() {
 		Context("Setting to an existing node", func() {
 			BeforeEach(func() {
 				err := adapter.Set([]StoreNode{breakfastNode, lunchNode})
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("should be able to update existing entries", func() {
 				lunchNode.Value = []byte("steak")
 				err := adapter.Set([]StoreNode{breakfastNode, lunchNode})
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				menu, err := adapter.ListRecursively("/menu")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(menu.ChildNodes).Should(HaveLen(2))
 				Ω(menu.ChildNodes).Should(ContainElement(breakfastNode))
 				Ω(menu.ChildNodes).Should(ContainElement(lunchNode))
@@ -141,13 +141,13 @@ var _ = Describe("ETCD Store Adapter", func() {
 	Describe("List", func() {
 		BeforeEach(func() {
 			err := adapter.Set([]StoreNode{breakfastNode, lunchNode})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		Context("When listing a directory", func() {
 			It("Should list directory contents", func() {
 				value, err := adapter.ListRecursively("/menu")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value.Key).Should(Equal("/menu"))
 				Ω(value.Dir).Should(BeTrue())
 				Ω(value.ChildNodes).Should(HaveLen(2))
@@ -173,13 +173,13 @@ var _ = Describe("ETCD Store Adapter", func() {
 				}
 				err := adapter.Set([]StoreNode{firstCourseDinnerNode, secondCourseDinnerNode})
 
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			Context("when listing the root directory", func() {
 				It("should list the contents recursively", func() {
 					value, err := adapter.ListRecursively("/")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(value.Key).Should(Equal("/"))
 					Ω(value.Dir).Should(BeTrue())
 					Ω(value.ChildNodes).Should(HaveLen(1))
@@ -207,7 +207,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 			Context("when listing another directory", func() {
 				It("should list the contents recursively", func() {
 					menuNode, err := adapter.ListRecursively("/menu")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(menuNode.Key).Should(Equal("/menu"))
 					Ω(menuNode.Value).Should(BeEmpty())
 					Ω(menuNode.Dir).Should(BeTrue())
@@ -237,13 +237,13 @@ var _ = Describe("ETCD Store Adapter", func() {
 						Value: []byte("foo"),
 					},
 				})
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				err = adapter.Delete("/empty_dir/temp")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				value, err := adapter.ListRecursively("/empty_dir")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value.Key).Should(Equal("/empty_dir"))
 				Ω(value.Dir).Should(BeTrue())
 				Ω(value.ChildNodes).Should(HaveLen(0))
@@ -261,7 +261,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 		Context("When listing an entry", func() {
 			It("should return an error", func() {
 				value, err := adapter.ListRecursively("/menu/breakfast")
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 				Ω(err).Should(Equal(ErrorNodeIsNotDirectory))
 				Ω(value).Should(BeZero())
 			})
@@ -287,13 +287,13 @@ var _ = Describe("ETCD Store Adapter", func() {
 	Describe("Delete", func() {
 		BeforeEach(func() {
 			err := adapter.Set([]StoreNode{breakfastNode, lunchNode})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		Context("when deleting existing keys", func() {
 			It("should delete the keys", func() {
 				err := adapter.Delete("/menu/breakfast", "/menu/lunch")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				value, err := adapter.Get("/menu/breakfast")
 				Ω(err).Should(Equal(ErrorKeyNotFound))
@@ -315,7 +315,7 @@ var _ = Describe("ETCD Store Adapter", func() {
 		Context("when deleting a directory", func() {
 			It("deletes the key and its contents", func() {
 				err := adapter.Delete("/menu")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				_, err = adapter.Get("/menu/breakfast")
 				Ω(err).Should(Equal(ErrorKeyNotFound))
@@ -345,10 +345,10 @@ var _ = Describe("ETCD Store Adapter", func() {
 		It("should stay in the store for the duration of its TTL and then disappear", func() {
 			breakfastNode.TTL = 1
 			err := adapter.Set([]StoreNode{breakfastNode})
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			_, err = adapter.Get("/menu/breakfast")
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			Eventually(func() interface{} {
 				_, err = adapter.Get("/menu/breakfast")

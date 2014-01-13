@@ -168,11 +168,11 @@ func (a *appAnalyzer) generatePendingStartsAndStopsForEvacuatingInstances() {
 				continue
 			}
 
-			a.appendStartMessageIfNotDuplicate(startMessage, "An instance is evacuating.  Starting it elsewhere.", map[string]string{})
-
-			if a.app.CrashCountAtIndex(index, a.currentTime).CrashCount >= a.conf.NumberOfCrashesBeforeBackoffBegins {
+			if a.app.CrashCountAtIndex(index, a.currentTime).CrashCount > 0 {
 				addStopMessages("Stopping an unstable evacuating instance.", models.PendingStopMessageReasonEvacuationComplete)
 			}
+
+			a.appendStartMessageIfNotDuplicate(startMessage, "An instance is evacuating.  Starting it elsewhere.", map[string]string{})
 		}
 	}
 }

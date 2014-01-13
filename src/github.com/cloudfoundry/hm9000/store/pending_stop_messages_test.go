@@ -25,10 +25,10 @@ var _ = Describe("Storing PendingStopMessages", func() {
 	BeforeEach(func() {
 		var err error
 		conf, err = config.DefaultConfig()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
 		err = storeAdapter.Connect()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		message1 = models.NewPendingStopMessage(time.Unix(100, 0), 10, 4, "ABC", "123", "XYZ", models.PendingStopMessageReasonInvalid)
 		message2 = models.NewPendingStopMessage(time.Unix(100, 0), 10, 4, "DEF", "456", "ALPHA", models.PendingStopMessageReasonInvalid)
@@ -47,20 +47,20 @@ var _ = Describe("Storing PendingStopMessages", func() {
 				message1,
 				message2,
 			)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		It("stores the passed in stop messages", func() {
-			node, err := storeAdapter.ListRecursively("/v1/stop")
-			Ω(err).ShouldNot(HaveOccured())
+			node, err := storeAdapter.ListRecursively("/hm/v1/stop")
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(node.ChildNodes).Should(HaveLen(2))
 			Ω(node.ChildNodes).Should(ContainElement(storeadapter.StoreNode{
-				Key:   "/v1/stop/" + message1.StoreKey(),
+				Key:   "/hm/v1/stop/" + message1.StoreKey(),
 				Value: message1.ToJSON(),
 				TTL:   0,
 			}))
 			Ω(node.ChildNodes).Should(ContainElement(storeadapter.StoreNode{
-				Key:   "/v1/stop/" + message2.StoreKey(),
+				Key:   "/hm/v1/stop/" + message2.StoreKey(),
 				Value: message2.ToJSON(),
 				TTL:   0,
 			}))
@@ -74,12 +74,12 @@ var _ = Describe("Storing PendingStopMessages", func() {
 					message1,
 					message2,
 				)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("can fetch the stop message", func() {
 				desired, err := store.GetPendingStopMessages()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(desired).Should(HaveLen(2))
 				Ω(desired).Should(ContainElement(message1))
 				Ω(desired).Should(ContainElement(message2))
@@ -90,27 +90,27 @@ var _ = Describe("Storing PendingStopMessages", func() {
 			BeforeEach(func() {
 				hb := message1
 				err := store.SavePendingStopMessages(hb)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				err = store.DeletePendingStopMessages(hb)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 			})
 
 			It("returns an empty array", func() {
 				stop, err := store.GetPendingStopMessages()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(stop).Should(BeEmpty())
 			})
 		})
 
 		Context("When the stop message key is missing", func() {
 			BeforeEach(func() {
-				_, err := storeAdapter.ListRecursively("/v1/stop")
+				_, err := storeAdapter.ListRecursively("/hm/v1/stop")
 				Ω(err).Should(Equal(storeadapter.ErrorKeyNotFound))
 			})
 
 			It("returns an empty array and no error", func() {
 				stop, err := store.GetPendingStopMessages()
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(stop).Should(BeEmpty())
 			})
 		})
@@ -123,7 +123,7 @@ var _ = Describe("Storing PendingStopMessages", func() {
 				message2,
 				message3,
 			)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		It("deletes stop messages (and only cares about the relevant fields)", func() {
@@ -132,10 +132,10 @@ var _ = Describe("Storing PendingStopMessages", func() {
 				models.NewPendingStopMessage(time.Time{}, 0, 0, "", "", message3.InstanceGuid, models.PendingStopMessageReasonInvalid),
 			}
 			err := store.DeletePendingStopMessages(toDelete...)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 
 			desired, err := store.GetPendingStopMessages()
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(desired).Should(HaveLen(1))
 			Ω(desired).Should(ContainElement(message2))
 		})

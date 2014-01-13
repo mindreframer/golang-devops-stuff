@@ -32,14 +32,14 @@ var _ = Describe("Messages", func() {
 					MessageId:     "msg-id",
 				}
 				decodedMessage, err := NewStartMessageFromJSON(message.ToJSON())
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(decodedMessage).Should(Equal(message))
 			})
 
 			It("should error when passed invalid json", func() {
 				message, err := NewStartMessageFromJSON([]byte("∂"))
 				Ω(message).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 			})
 		})
 	})
@@ -75,14 +75,14 @@ var _ = Describe("Messages", func() {
 					MessageId:     "msg-id",
 				}
 				decodedMessage, err := NewStopMessageFromJSON(message.ToJSON())
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(decodedMessage).Should(Equal(message))
 			})
 
 			It("should error when passed invalid json", func() {
 				message, err := NewStopMessageFromJSON([]byte("∂"))
 				Ω(message).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 			})
 		})
 	})

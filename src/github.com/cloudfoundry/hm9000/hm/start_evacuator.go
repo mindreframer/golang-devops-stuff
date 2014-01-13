@@ -10,7 +10,9 @@ func StartEvacuator(l logger.Logger, conf *config.Config) {
 	messageBus := connectToMessageBus(l, conf)
 	store, _ := connectToStore(l, conf)
 
-	evacuator := evacuatorpackage.New(messageBus, store, buildTimeProvider(l), l)
+	acquireLock(l, conf, "evacuator")
+
+	evacuator := evacuatorpackage.New(messageBus, store, buildTimeProvider(l), conf, l)
 
 	evacuator.Listen()
 	l.Info("Listening for DEA Evacuations")

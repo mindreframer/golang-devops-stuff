@@ -45,7 +45,7 @@ var _ = Describe("Heartbeat", func() {
                     ]
                 }`))
 
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				Ω(jsonHeartbeat).Should(Equal(heartbeat))
 			})
@@ -56,7 +56,7 @@ var _ = Describe("Heartbeat", func() {
 				heartbeat, err := NewHeartbeatFromJSON([]byte(`{`))
 
 				Ω(heartbeat).Should(BeZero())
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 			})
 		})
 	})
@@ -65,7 +65,7 @@ var _ = Describe("Heartbeat", func() {
 		It("should, like, totally encode JSON", func() {
 			jsonHeartbeat, err := NewHeartbeatFromJSON(heartbeat.ToJSON())
 
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 			Ω(jsonHeartbeat).Should(Equal(heartbeat))
 		})
 	})

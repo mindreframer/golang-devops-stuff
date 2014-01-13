@@ -22,7 +22,7 @@ var _ = Describe("Metrics", func() {
 	BeforeEach(func() {
 		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
 		err := storeAdapter.Connect()
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		store = NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 	})
@@ -30,30 +30,30 @@ var _ = Describe("Metrics", func() {
 	Describe("Getting and setting a metric", func() {
 		BeforeEach(func() {
 			err := store.SaveMetric("sprockets", 17)
-			Ω(err).ShouldNot(HaveOccured())
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		It("should store the metric under /metrics", func() {
-			_, err := storeAdapter.Get("/v1/metrics/sprockets")
-			Ω(err).ShouldNot(HaveOccured())
+			_, err := storeAdapter.Get("/hm/v1/metrics/sprockets")
+			Ω(err).ShouldNot(HaveOccurred())
 		})
 
 		Context("when the metric is present", func() {
 			It("should return the stored value and no error", func() {
 				value, err := store.GetMetric("sprockets")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(BeNumerically("==", 17))
 			})
 
 			Context("and it is overwritten", func() {
 				BeforeEach(func() {
 					err := store.SaveMetric("sprockets", 23.5)
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 				})
 
 				It("should return the new value", func() {
 					value, err := store.GetMetric("sprockets")
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 					Ω(value).Should(BeNumerically("==", 23.5))
 				})
 			})

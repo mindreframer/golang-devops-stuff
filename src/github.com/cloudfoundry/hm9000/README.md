@@ -4,7 +4,7 @@
 
 HM 9000 is a rewrite of CloudFoundry's Health Manager.  HM 9000 is written in Golang and has a more modular architecture compared to the original ruby implementation.  HM 9000's dependencies are locked down in a separate repo, the [hm-workspace](https://github.com/cloudfoundry/hm-workspace).
 
-As a result there are several Go Packages in this repository, each with a comprehensive set of unit tests.  What follows is a detailed breakdown.
+There are several Go Packages in this repository, each with a comprehensive set of unit tests.  In addition there is an integration test that excercises the interactions between the various componetns.  What follows is a detailed breakdown.
 
 ## Relocation & Status Warning
 
@@ -14,15 +14,17 @@ hm9000 is not yet a complete replacement for health_manager -- we'll update this
 
 ## HM9000's Architecture and High-Availability
 
-HM9000 solves the high-availability problem by relying on a robust high-availability store (Zookeeper or ETCD) distributed, potentially, across multiple nodes.  Individual HM9000 components are built to rely completely on the store for their knowledge of the world.  This removes the need for maintaining in-memory information and allows clarifies the relationship between the various components (all data must flow through the store).
+HM9000 solves the high-availability problem by relying on ETCD, a robust high-availability store distributed across multiple nodes.  Individual HM9000 components are built to rely completely on the store for their knowledge of the world.  This removes the need for maintaining in-memory information and allows clarifies the relationship between the various components (all data must flow through the store).
 
-To avoid the singleton problem, we will allow multiple copies of each HM9000 component across multiple nodes.  These copies will vie for a lock in the high-availability store.  The copy that grabs the lock gets to run and is responsible for maintaining the lock.  Should that copy enter a bad state or die, the lock becomes available allowing another copy to pick up the slack.  Since all state is stored in the store, the backup component should be able to function independently of the failed component.
+To avoid the singleton problem, we will turn on multiple instances of each HM9000 component across multiple nodes.  These instances will vie for a lock in the high-availability store.  The instance that grabs the lock gets to run and is responsible for maintaining the lock.  Should that instance enter a bad state or die, the lock becomes available allowing another instance to pick up the slack.  Since all state is stored in the store, the backup component should be able to function independently of the failed component.
 
 ## Deployment
 
 ### Recovering from Failure
 
-If HM9000 enters a bad state, the simplest solution - typically - is to delete the contents of the data store.  Here's how:
+If HM9000 enters a bad state, the simplest solution - typically - is to delete the contents of the data store.
+
+#### If you're running HM9000 against a single, local, etcd node:
 
     local  $ bosh_ssh hm9000_z1/0 #for example
     hm9000 $ sudo su -
@@ -35,7 +37,29 @@ all the other components should recover gracefully.
 
 The data files in etcdstorage-bad can then be downloaded and analyzed to try to understand what went wrong to put HM9000/etcd in a bad state.  If you don't think this is necessary: just blow away the contents of `/var/vcap/store/etcdstorage`.
 
-## Installing HM9000
+#### If you're running HM9000 against an ETCD cluster:
+
+1. `bosh ssh` into each ETCD node (`bosh vms` is your friend here.  We typically have `etcd_leader_z1/0`, `etcd_z1/0`, and `etcd_z2/0`)
+2. `monit stop etcd` on all the boxes (better to stop them all simultaenously!)
+3. Blow away (or move) ETCDs storage directory.  It's located under `/var/vcap/store`
+4. `monit start etcd` on all the boxes
+5. HM9000 should recover on its own.
+
+### If Clustered ETCD can't handle the load
+
+You can identify this scenario by monitoring the `DesiredStateSyncTimeInMilliseconds` and the `ActualStateListenerStoreUsagePercentage` metrics.  If the `DesiredStateSyncTimeInMilliseconds` exceeds ~5000 (5 seconds)  *and* the `ActualStateListenerStoreUsagePercentage` exceeds 50-70 (this is a percentage - so out of 100) then clustered ETCD *may* be unable to handle the load.
+
+To resolve this, you'll need to pick one of the HM9000 nodes (`hm9000_z1/0` or `hm9000_z2/0`) and make it the solitary HM9000 node and point it at its local ETCD database.  Here's how - let's say we want to keep `hm9000_z1/0` around:
+
+1. `bosh ssh` onto `hm9000_z2/0` and issue a `monit stop all`
+2. `bosh ssh` onto `hm9000_z1/0` and issue a `monit stop all`
+3. Edit `/var/vcap/jobs/hm9000/config/hm9000.json` and set `store_urls` to a single entry: `"store_urls": ["http://127.0.0.1:4001"],`
+4. Now `monit start all` and tail `/var/vcap/sys/log/hm9000/hm9000_listener.stdout.log` you should see heartbeats come in and get succesfully saved to the store.
+5. Eventually, `/var/vcap/packages/hm9000/hm9000 dump --config=/var/vcap/jobs/hm9000/config/hm9000.json` should report that the store is fresh (this is near the top of the output).
+
+
+
+## Installing HM9000 locally
 
 Assuming you have `go` v1.1.* installed:
 
@@ -100,20 +124,19 @@ You *must* specify a config file for all the `hm9000` commands.  You do this wit
 
     hm9000 fetch_desired --config=./local_config.json
 
-will connect to CC, fetch the desired state, put it in the store under `/desired`, then exit.  You can optionally pass `-poll` to fetch desired state periodically.
+will connect to CC, fetch the desired state, put it in the store, then exit.  You can optionally pass `-poll` to fetch desired state periodically.
 
-
-### Listening for actual/running state
+### Listening for actual state
 
     hm9000 listen --config=./local_config.json
 
-will come up, listen to NATS for heartbeats, and put them in the store under `/actual`.
+will come up, listen to NATS for heartbeats, and put them in the store.
 
 ### Analyzing the desired and actual state
 
     hm9000 analyze --config=./local_config.json
 
-will come up, compare the desired/actual state, and submit start and stop messages to the outbox.  You can optionally pass `-poll` to analyze periodically.
+will come up, compare the desired/actual state, and submit start and stop messages to the store.  You can optionally pass `-poll` to analyze periodically.
 
 ### Sending start and stop messages
 
@@ -127,19 +150,31 @@ will come up, evaluate the pending starts and stops and publish them over NATS. 
 
 will come up, register with the [collector](http://github.com/cloudfoundry/collector) and provide a `/varz` end-point with data.
 
-### Dumping the contents of the store
+### Serving API
 
-`etcd` has a very simple [curlable API](http://github.com/coreos/etcd).  For convenience:
+    hm9000 serve_api --config=./local_config.json
+
+will come up and provide response to requests for `app.state` over NATS.
+
+### Evacuator
+
+    hm9000 evacuator --config=./local_config.json
+
+will come up and listen for `droplet.exited` messages and send `start` messages for any evacuating droplets.  The `evacuator` is *not* necessary for deterministic evacuation but is provided for backward compatibility with old DEAs.  There is no harm in running the `evacuator` *during* deterministic evacuation.
+
+### Shredder
+
+    hm9000 shred --config=./local_config.json
+
+The shredder will periodically (once per hour, by default) compact the store - removing any orphaned (empty) directories.  You can optionally pass `-poll` to send messages periodically.
+
+### Dumping the contents of the store
 
     hm9000 dump --config=./local_config.json
 
-will dump the entire contents of the store to stdout.
+will dump the entire contents of the store to stdout.  The output is structured in terms of apps and provides insight into the state of a cloud foundry installation.  If you want a raw dump of the store's contents pass the `--raw` flag.
 
-### Deleting the contents of the store
-
-   hm9000 clear_store --config=./local_config.json
-
-will delete the entire contents of the store.  Useful when testing various scenarios.
+`etcd` has a very simple [curlable API](http://github.com/coreos/etcd), which you can use in lieu of `dump`.
 
 ## HM9000 Config
 
@@ -147,39 +182,19 @@ HM9000 is configured using a JSON file.  Here are the available entries:
 
 - `heartbeat_period_in_seconds`:  Almost all configurable time constants in HM9000's config are specified in terms of this one fundamental unit of time - the time interval between heartbeats in seconds.  This should match the value specified in the DEAs and is typically set to 10 seconds.
 
+
 - `heartbeat_ttl_in_heartbeats`:  Incoming heartbeats are stored in the store with a TTL.  When this TTL expires the instane associated with the hearbeat is considered to have "gone missing".  This TTL is set to 3 heartbeat periods.
 
 - `actual_freshness_ttl_in_heartbeats`:  This constant serves two purposes.  It is the TTL of the actual-state freshness key in the store.  The store's representation of the actual state is only considered fresh if the actual-state freshness key is present.  Moreover, the actual-state is fresh *only if* the actual-state freshness key has been present for *at least* `actual_freshness_ttl_in_heartbeats`.  This avoids the problem of having the first detected heartbeat render the entire actual-state fresh -- we must wait a reasonable period of time to hear from all DEAs before calling the actual-state fresh.  This TTL is set to 3 heartbeat periods
 
 - `grace_period_in_heartbeats`:  A generic grace period used when scheduling messages.  For example, we delay start messages by this grace period to give a missing instance a chance to start up before sending a start message.  The grace period is set to 3 heartbeat periods.
 
-- `desired_state_ttl_in_heartbeats`: The TTL for each entry in the desired state.  Set to 60 heartbeats.
-
 - `desired_freshness_ttl_in_heartbeats`: The TTL of the desired-state freshness.  Set to 12 heartbeats.  The desired-state is considered stale if it has not been updated in 12 heartbeats.
-
-- `desired_state_batch_size`: The batch size when fetching desired state information from the CC.  Set to 500.
-
-- `fetcher_network_timeout_in_seconds`:  Each API call to the CC must succeed within this timeout.  Set to 10 seconds.
-
-- `actual_freshness_key`: The key for the actual freshness in the store.  Set to `"/actual-fresh"`.
-
-- `desired_freshness_key`: The key for the actual freshness in the store.  Set to `"/desired-fresh"`.
-
-- `cc_auth_user`: The user to use when authenticating with the CC desired state API.  Set by BOSH.
-
-- `cc_auth_password`: The password to use when authenticating with the CC desired state API.  Set by BOSH.
-
-- `cc_base_url`: The base url for the CC API.  Set by BOSH.
-
-- `store_urls`: An array of ETCD server URLs to connect to.
 
 - `store_max_concurrent_requests`:  The maximum number of concurrent requests that each component may make to the store.  Set to 30.
 
-- `sender_nats_start_subject`:  The NATS subject for HM9000's start messages.  Set to `"hm9000.start"`.
-
-- `sender_nats_stop_subject`:  The NATS subject for HM9000's stop messages.  Set to `"hm9000.stop"`.
-
 - `sender_message_limit`:  The maximum number of messages the sender should send per invocation.  Set to 30.
+
 
 - `sender_polling_interval_in_heartbeats`:  The time period in heartbeat units between sender invocations when using `hm9000 send --poll`.  Set to 1.
 
@@ -193,17 +208,57 @@ HM9000 is configured using a JSON file.  Here are the available entries:
 
 - `analyzer_timeout_in_heartbeats`:  The timeout in heartbeat units for each analyzer invocation.  If an invocation of the analyzer takes longer than this the `hm9000 analyze --poll` command will fail.  Set to 10.
 
+- `shredder_polling_interval_in_heartbeats`:  The time period in heartbeat units between shredder invocations when using `hm9000 shred --poll`.  Set to 360.
+
+- `shredder_timeout_in_heartbeats`:  The timeout in heartbeat units for each shredder invocation.  If an invocation of the shredder takes longer than this the `hm9000 analyze --poll` command will fail.  Set to 6.
+
 - `number_of_crashes_before_backoff_begins`: When an instance crashes HM9000 immediately restarts it.  If, however, the number of crashes exceeds this number HM9000 will apply an increasing delay to the restart.
 
 - `starting_backoff_delay_in_heartbeats`: The initial delay (in heartbeat units) to apply to the restart message once an instance crashes more than `number_of_crashes_before_backoff_begins` times.
 
 - `maximum_backoff_delay_in_heartbeats`: The restart delay associated with crashes doubles with each crash but is not allowed to exceed this value (in heartbeat units).
 
+
+- `listener_heartbeat_sync_interval_in_milliseconds`: The listener aggregates heartbeats and flushes them to the store periodically with this interval.
+
+- `store_heartbeat_cache_refresh_interval_in_milliseconds`: To improve performance when writing heartbeats, the store maintains a write-through cache of the store contents.  This cache is invalidated and refetched periodically with this interval.
+
+
+- `cc_auth_user`: The user to use when authenticating with the CC desired state API.  Set by BOSH.
+
+- `cc_auth_password`: The password to use when authenticating with the CC desired state API.  Set by BOSH.
+
+- `cc_base_url`: The base url for the CC API.  Set by BOSH.
+
+- `desired_state_batch_size`: The batch size when fetching desired state information from the CC.  Set to 500.
+
+- `fetcher_network_timeout_in_seconds`:  Each API call to the CC must succeed within this timeout.  Set to 10 seconds.
+
+
+- `store_schema_version`: The schema of the store.  HM9000 does not migrate the store, instead, if the store data format/layout changes and is no longer backward compatible the schema version must be bumped.
+
+- `store_type`: One of `"etcd"` or `"ZooKeeper"`
+
+- `store_urls`: An array of ETCD/ZooKeeper server URLs to connect to.
+
+- `actual_freshness_key`: The key for the actual freshness in the store.  Set to `"/actual-fresh"`.
+
+- `desired_freshness_key`: The key for the actual freshness in the store.  Set to `"/desired-fresh"`.
+
+
 - `metrics_server_port`: The port on which to serve /varz metrics.  If set to 0 a random available port will be chosen.
 
 - `metrics_server_user`: The username that must be used to authenticate with /varz.  If set to "" a random username will be generated.
 
 - `metrics_server_password`: The password that must be used to authenticate with /varz.  If set to "" a random password will be generated.
+
+
+- `log_level`: Must be one of `"INFO"` or `"DEBUG"`
+
+
+- `sender_nats_start_subject`:  The NATS subject for HM9000's start messages.  Set to `"hm9000.start"`.
+
+- `sender_nats_stop_subject`:  The NATS subject for HM9000's stop messages.  Set to `"hm9000.stop"`.
 
 - `nats.host`: The NATS host.  Set by BOSH.
 
@@ -231,7 +286,7 @@ The `desiredstatefetcher` requests the desired state from the cloud controller. 
 
 Desired state is stored under `/desired/APP_GUID-APP_VERSION
 
-### analyzer`
+### `analyzer`
 
 The `analyzer` comes up, analyzes the actual and desired state, and puts pending `start` and `stop` messages in the store.  If a `start` or `stop` message is *already* in the store, the analyzer will *not* override it.
 
@@ -253,9 +308,17 @@ The `metricsserver` registers with the CF collector and aggregates and provides 
 
 If either the actual state or desired state are not *fresh* all of these metrics will have the value `-1`.
 
-### WIP:`api`
+### `apiserver`
 
-WIP: The `api` is a simple HTTP server that provides access to information about the actual state.  It uses the high availability store to fulfill these requests.
+The `apiserver` responds to NATS `app.state` messages and allow other CloudFoundry components to obtain information about arbitrary applications.
+
+### `evacuator`
+
+The `evacuator` responds to NATS `droplet.exited` messages.  If an app exists because it is EVACUATING the `evacuator` sends a `start` message over NATS.  The `evacuator` is not necessary during deterministic evacuations but is provided to maintain backward compatibility with older DEAs.
+
+### `shredder`
+
+The `shredder` prunes old/crufty/unnecessary data from the store.  This includes pruning old schema versions of the store.
 
 ## Support Packages
 
@@ -274,6 +337,10 @@ A trivial wrapper around `net/http` that improves testability of http requests.
 #### `logger`
 
 Provides a (sys)logger.  Eventually this will use steno to perform logging.
+
+#### `metricsaccountant`
+
+Supports metrics tracking.  Used by the `metricsserver` and components that post metrics.
 
 #### `timeprovider`
 
@@ -311,12 +378,15 @@ Provides a fake implementation of the `helpers/timeprovider` interface.  Useful 
 
 #### `fakehttpclient`
 
-Provdes a fake implementation of the `helpers/httpclient` interface that allows tests to have fine-grained control over the http request/response lifecycle.
+Provides a fake implementation of the `helpers/httpclient` interface that allows tests to have fine-grained control over the http request/response lifecycle.
 
+#### `fakemetricsaccountant`
 
-#### `fakestore`
+Provides a fake implementation of the `helpers/metricsaccountant` interface that allows test to make assertions on metrics tracking.
 
-Provides a fake in-memory implementation of the `store` to allow for unit tests that do not need to spin up a database.
+#### `fakestoreadapter`
+
+Provides a fake in-memory implementation of the `storeadapter` to allow for unit tests that do not need to spin up a database.
 
 ### Fixtures & Misc.
 
@@ -358,9 +428,6 @@ Provides a collection of custom Gomega matchers.
 
 ### Infrastructure Helpers
 
-#### `messagepublisher`
-
-Provides a simple mechanism to publish actual state related messages to the NATS bus.  Handles JSON encoding.
 
 #### `startstoplistener`
 
@@ -376,18 +443,10 @@ Brings up and manages the lifecycle of a live NATS server.  After bringing the s
 
 #### `storerunner`
 
-Brings up and manages the lifecycle of a live ETCD server cluster.
+Brings up and manages the lifecycle of a live ETCD/ZooKeeper server cluster.
 
 ## The MCAT
 
-The MCAT is comprised of two major integration test suites:
+The MCAT is as HM9000's integration test suite.  It tests HM9000 by providing it with inputs (desired state, actual state heartbeats, and time) and asserting on its outputs (start and stop messages and api/metrics endpoints).
 
-### The `MD` Test Suite
-
-The `MD` test suite excercises the HM 9000 components through a series of integration-level tests.  The individual components are designed to be simple and have comprehensive unit test coverage.  However, it's crucial that we have comprehensive test coverage for the *interactions* between these components.  That's what the `MD` suite is for.
-
-The `MD` suite uses a `simulator` to manage advancing time and run each of the individual HM components.
-
-### The `PHD` Benchmark Suite
-
-The `PHD` suite is a collection of benchmark tests.  This is a slow-running suite that is intended, primarily, to evaluate the performance of the various components (especially the high-availability store) under various loads.
+In addition to the MCAT there is a performance-measuring test suite at [https://github.com/pivotal-cf-experimental/hmperformance](https://github.com/pivotal-cf-experimental/hmperformance).

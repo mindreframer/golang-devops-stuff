@@ -41,7 +41,7 @@ var _ = Describe("DropletExited", func() {
                     }`
 					decoded, err := NewDropletExitedFromJSON([]byte(json))
 
-					Ω(err).ShouldNot(HaveOccured())
+					Ω(err).ShouldNot(HaveOccurred())
 
 					Ω(decoded).Should(Equal(dropletExited))
 				})
@@ -52,7 +52,7 @@ var _ = Describe("DropletExited", func() {
 					desired, err := NewDropletExitedFromJSON([]byte(`{`))
 
 					Ω(desired).Should(BeZero())
-					Ω(err).Should(HaveOccured())
+					Ω(err).Should(HaveOccurred())
 				})
 			})
 		})
@@ -61,7 +61,7 @@ var _ = Describe("DropletExited", func() {
 			It("outputs to JSON", func() {
 				var decoded DropletExited
 				err := json.Unmarshal(dropletExited.ToJSON(), &decoded)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(decoded).Should(Equal(dropletExited))
 			})
 		})

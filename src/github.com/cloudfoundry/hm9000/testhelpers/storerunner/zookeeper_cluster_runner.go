@@ -37,7 +37,7 @@ func (zk *ZookeeperClusterRunner) Start() {
 		cmd.Env = append(os.Environ(), "ZOO_LOG_DIR="+zk.tmpPath(i))
 
 		out, err := cmd.Output()
-		Ω(err).ShouldNot(HaveOccured(), "Make sure zookeeper is compiled and on your $PATH.")
+		Ω(err).ShouldNot(HaveOccurred(), "Make sure zookeeper is compiled and on your $PATH.")
 		Ω(string(out)).Should(ContainSubstring("STARTED"))
 
 		Eventually(func() interface{} {
@@ -53,7 +53,7 @@ func (zk *ZookeeperClusterRunner) Stop() {
 			cmd := exec.Command("zkServer.sh", "stop", zk.configPath(i))
 			out, err := cmd.Output()
 
-			Ω(err).ShouldNot(HaveOccured(), "Zookeeper failed to stop!")
+			Ω(err).ShouldNot(HaveOccurred(), "Zookeeper failed to stop!")
 			Ω(string(out)).Should(ContainSubstring("STOPPED"))
 
 			zk.nukeArtifacts(i)
@@ -81,7 +81,7 @@ func (zk *ZookeeperClusterRunner) DiskUsage() (bytes int64, err error) {
 
 func (zk *ZookeeperClusterRunner) Reset() {
 	client, _, err := zkClient.Connect(zk.NodeURLS(), time.Second)
-	Ω(err).ShouldNot(HaveOccured(), "Failed to connect")
+	Ω(err).ShouldNot(HaveOccurred(), "Failed to connect")
 
 	zk.deleteRecursively(client, "/")
 	client.Close()
@@ -90,7 +90,7 @@ func (zk *ZookeeperClusterRunner) Reset() {
 func (zk *ZookeeperClusterRunner) deleteRecursively(client *zkClient.Conn, key string) {
 	if key != "/zookeeper" {
 		children, _, err := client.Children(key)
-		Ω(err).ShouldNot(HaveOccured(), "Failed to fetch children for '%s'", key)
+		Ω(err).ShouldNot(HaveOccurred(), "Failed to fetch children for '%s'", key)
 
 		for _, child := range children {
 			childPath := key + "/" + child
@@ -104,7 +104,7 @@ func (zk *ZookeeperClusterRunner) deleteRecursively(client *zkClient.Conn, key s
 			err = client.Delete(key, -1)
 		}
 
-		Ω(err).ShouldNot(HaveOccured(), "Failed to delete key '%s'", key)
+		Ω(err).ShouldNot(HaveOccurred(), "Failed to delete key '%s'", key)
 	}
 
 	return
@@ -129,12 +129,12 @@ func (zk *ZookeeperClusterRunner) writeConfig(index int) {
 	}
 
 	err := ioutil.WriteFile(zk.configPath(index), []byte(config), 0700)
-	Ω(err).ShouldNot(HaveOccured())
+	Ω(err).ShouldNot(HaveOccurred())
 }
 
 func (zk *ZookeeperClusterRunner) writeId(index int) {
 	err := ioutil.WriteFile(zk.tmpPathTo("myid", index), []byte(fmt.Sprintf("%d", index+1)), 0700)
-	Ω(err).ShouldNot(HaveOccured())
+	Ω(err).ShouldNot(HaveOccurred())
 }
 
 func (zk *ZookeeperClusterRunner) clientUrl(index int) string {

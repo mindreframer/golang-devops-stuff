@@ -17,9 +17,12 @@ func Send(l logger.Logger, conf *config.Config, poll bool) {
 
 	if poll {
 		l.Info("Starting Sender Daemon...")
+
+		locker := buildLocker(l, conf, "sender")
+
 		err := Daemonize("Sender", func() error {
 			return send(l, conf, messageBus, store)
-		}, conf.SenderPollingInterval(), conf.SenderTimeout(), l)
+		}, conf.SenderPollingInterval(), conf.SenderTimeout(), l, locker)
 		if err != nil {
 			l.Error("Sender Daemon Errored", err)
 		}

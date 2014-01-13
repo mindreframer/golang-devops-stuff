@@ -35,7 +35,7 @@ var _ = Describe("Httpclient", func() {
 		It("should return an appropriate timeout error", func(done Done) {
 			request, _ := http.NewRequest("GET", "http://127.0.0.1:8887/", nil)
 			client.Do(request, func(response *http.Response, err error) {
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 				close(done)
 			})
 		}, 0.1)
@@ -45,7 +45,7 @@ var _ = Describe("Httpclient", func() {
 		It("should return an appropriate timeout error", func() {
 			request, _ := http.NewRequest("GET", "http://127.0.0.1:8889/sleep?time=1", nil)
 			client.Do(request, func(response *http.Response, err error) {
-				Ω(err).Should(HaveOccured())
+				Ω(err).Should(HaveOccurred())
 			})
 		})
 	})
@@ -54,10 +54,10 @@ var _ = Describe("Httpclient", func() {
 		It("should return the correct response", func() {
 			request, _ := http.NewRequest("GET", "http://127.0.0.1:8889/sleep?time=0", nil)
 			client.Do(request, func(response *http.Response, err error) {
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				defer response.Body.Close()
 				body, err := ioutil.ReadAll(response.Body)
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(string(body)).Should(Equal("I'm awake!"))
 			})
 		})

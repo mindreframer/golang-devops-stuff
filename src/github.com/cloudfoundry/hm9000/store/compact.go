@@ -5,10 +5,11 @@ import (
 	"github.com/cloudfoundry/hm9000/storeadapter"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 func (store *RealStore) Compact() error {
-	err := store.deleteOldSchemaVersions()
+	err := store.deleteOldSchemaVersionsAndUnversionedData()
 	if err != nil {
 		return err
 	}
@@ -20,16 +21,19 @@ func (store *RealStore) Compact() error {
 	return nil
 }
 
-func (store *RealStore) deleteOldSchemaVersions() error {
-	everything, err := store.adapter.ListRecursively("/")
+func (store *RealStore) deleteOldSchemaVersionsAndUnversionedData() error {
+	everything, err := store.adapter.ListRecursively("/hm")
 	if err != nil {
 		return err
 	}
 
-	re := regexp.MustCompile(`^/v(\d+)$`)
+	re := regexp.MustCompile(`^/hm/v(\d+)$`)
 
 	keysToDelete := []string{}
 	for _, childNode := range everything.ChildNodes {
+		if strings.HasPrefix(childNode.Key, "/hm/locks") {
+			continue
+		}
 		matches := re.FindStringSubmatch(childNode.Key)
 		if len(matches) == 2 {
 			schemaVersion, err := strconv.Atoi(matches[1])

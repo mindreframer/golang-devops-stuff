@@ -86,6 +86,7 @@ var _ = Describe("Apiserver", func() {
 
 			BeforeEach(func() {
 				app = appfixture.NewAppFixture()
+
 				instanceHeartbeats := []models.InstanceHeartbeat{
 					app.InstanceAtIndex(0).Heartbeat(),
 					app.InstanceAtIndex(1).Heartbeat(),
@@ -136,7 +137,7 @@ var _ = Describe("Apiserver", func() {
 						storeAdapter.GetErrInjector = fakestoreadapter.NewFakeStoreAdapterErrorInjector("desired", fmt.Errorf("No desired state for you!"))
 					})
 
-					It("should 500", func() {
+					It("should return an empty hash", func() {
 						response := makeRequest(validRequestPayload)
 						Ω(response).Should(Equal("{}"))
 					})
@@ -144,7 +145,7 @@ var _ = Describe("Apiserver", func() {
 			})
 
 			Context("when the store is not fresh", func() {
-				It("should return a 404", func() {
+				It("should return an empty hash", func() {
 					response := makeRequest(validRequestPayload)
 					Ω(response).Should(Equal("{}"))
 				})

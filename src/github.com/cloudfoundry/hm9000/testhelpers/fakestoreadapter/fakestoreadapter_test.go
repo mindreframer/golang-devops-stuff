@@ -42,7 +42,7 @@ var _ = Describe("Fakestoreadapter", func() {
 			secondCourseDinnerNode,
 			randomNode,
 		})
-		Ω(err).ShouldNot(HaveOccured())
+		Ω(err).ShouldNot(HaveOccurred())
 
 		adapter.SetErrInjector = NewFakeStoreAdapterErrorInjector("dom$", errors.New("injected set error"))
 		adapter.GetErrInjector = NewFakeStoreAdapterErrorInjector("dom$", errors.New("injected get error"))
@@ -61,7 +61,7 @@ var _ = Describe("Fakestoreadapter", func() {
 				Ω(err).Should(Equal(storeadapter.ErrorNodeIsDirectory))
 
 				value, err := adapter.Get("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(Equal(breakfastNode))
 			})
 		})
@@ -76,7 +76,7 @@ var _ = Describe("Fakestoreadapter", func() {
 				Ω(err).Should(Equal(storeadapter.ErrorNodeIsNotDirectory))
 
 				value, err := adapter.Get("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(Equal(breakfastNode))
 			})
 		})
@@ -88,10 +88,10 @@ var _ = Describe("Fakestoreadapter", func() {
 					Value: []byte("crepes"),
 				}
 				err := adapter.Set([]storeadapter.StoreNode{discerningBreakfastNode})
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				value, err := adapter.Get("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(Equal(discerningBreakfastNode))
 			})
 		})
@@ -108,7 +108,7 @@ var _ = Describe("Fakestoreadapter", func() {
 
 				adapter.GetErrInjector = nil
 				value, err := adapter.Get("/random")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(Equal(randomNode))
 			})
 		})
@@ -118,7 +118,7 @@ var _ = Describe("Fakestoreadapter", func() {
 		Context("when the key is present", func() {
 			It("should return the node", func() {
 				value, err := adapter.Get("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(Equal(breakfastNode))
 			})
 		})
@@ -152,7 +152,7 @@ var _ = Describe("Fakestoreadapter", func() {
 		Context("when listing the root directory", func() {
 			It("should return the tree of nodes", func() {
 				value, err := adapter.ListRecursively("/")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value.Key).Should(Equal("/"))
 				Ω(value.Dir).Should(BeTrue())
 				Ω(value.ChildNodes).Should(HaveLen(2))
@@ -187,7 +187,7 @@ var _ = Describe("Fakestoreadapter", func() {
 		Context("when listing a subdirectory", func() {
 			It("should return the tree of nodes", func() {
 				menuNode, err := adapter.ListRecursively("/menu")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(menuNode.Key).Should(Equal("/menu"))
 				Ω(menuNode.Dir).Should(BeTrue())
 				Ω(menuNode.ChildNodes).Should(HaveLen(3))
@@ -238,7 +238,7 @@ var _ = Describe("Fakestoreadapter", func() {
 		Context("when the key is present", func() {
 			It("should delete the node", func() {
 				err := adapter.Delete("/menu/breakfast", "/menu/lunch")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				_, err = adapter.Get("/menu/breakfast")
 				Ω(err).Should(Equal(storeadapter.ErrorKeyNotFound))
@@ -258,7 +258,7 @@ var _ = Describe("Fakestoreadapter", func() {
 		Context("when the key is a directory", func() {
 			It("should kaboom the directory", func() {
 				err := adapter.Delete("/menu")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 
 				_, err = adapter.Get("/menu")
 				_, err = adapter.Get("/menu")
@@ -272,7 +272,7 @@ var _ = Describe("Fakestoreadapter", func() {
 				Ω(err).Should(Equal(errors.New("injected delete error")))
 
 				value, err := adapter.Get("/menu/breakfast")
-				Ω(err).ShouldNot(HaveOccured())
+				Ω(err).ShouldNot(HaveOccurred())
 				Ω(value).Should(Equal(breakfastNode))
 			})
 		})

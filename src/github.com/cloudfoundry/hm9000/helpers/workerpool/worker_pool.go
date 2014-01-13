@@ -7,8 +7,7 @@ import (
 
 type WorkerPool struct {
 	workerChannels []chan func()
-	index          int
-	indexLock      *sync.Mutex
+	indexProvider  chan chan int
 	timeLock       *sync.Mutex
 	stopped        bool
 
@@ -19,11 +18,12 @@ type WorkerPool struct {
 func NewWorkerPool(poolSize int) (pool *WorkerPool) {
 	pool = &WorkerPool{
 		workerChannels: make([]chan func(), poolSize),
-		indexLock:      &sync.Mutex{},
+		indexProvider:  make(chan chan int, 0),
 		timeLock:       &sync.Mutex{},
 	}
 
 	pool.resetUsageTracking()
+	go pool.mux()
 
 	for i := range pool.workerChannels {
 		pool.workerChannels[i] = make(chan func(), 0)
@@ -33,17 +33,32 @@ func NewWorkerPool(poolSize int) (pool *WorkerPool) {
 	return
 }
 
+func (pool *WorkerPool) mux() {
+	index := 0
+	for {
+		select {
+		case c := <-pool.indexProvider:
+			go func(index int) {
+				c <- index
+			}(index)
+			index = (index + 1) % len(pool.workerChannels)
+		}
+	}
+}
+
+func (pool *WorkerPool) getNextIndex() int {
+	c := make(chan int, 1)
+	pool.indexProvider <- c
+	return <-c
+}
+
 func (pool *WorkerPool) ScheduleWork(work func()) {
 	if pool.stopped {
 		return
 	}
 
 	go func() {
-		pool.indexLock.Lock()
-		index := pool.index
-		pool.index = (pool.index + 1) % len(pool.workerChannels)
-		pool.indexLock.Unlock()
-
+		index := pool.getNextIndex()
 		pool.workerChannels[index] <- work
 	}()
 }

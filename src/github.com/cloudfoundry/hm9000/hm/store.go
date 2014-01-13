@@ -77,7 +77,7 @@ func dumpApp(app *models.App, starts map[string]models.PendingStartMessage, stop
 	} else {
 		fmt.Printf("  Heartbeats:\n")
 		for _, heartbeat := range app.InstanceHeartbeats {
-			fmt.Printf("    [%d %s] %s\n", heartbeat.InstanceIndex, heartbeat.State, heartbeat.InstanceGuid)
+			fmt.Printf("    [%d %s] %s on %s\n", heartbeat.InstanceIndex, heartbeat.State, heartbeat.InstanceGuid, heartbeat.DeaGuid[0:5])
 		}
 	}
 
@@ -147,7 +147,7 @@ func dumpRaw(l logger.Logger, conf *config.Config) {
 
 	entries := sort.StringSlice{}
 
-	node, err := storeAdapter.ListRecursively("/")
+	node, err := storeAdapter.ListRecursively("/hm")
 	if err != nil {
 		panic(err)
 	}
@@ -169,19 +169,6 @@ func dumpRaw(l logger.Logger, conf *config.Config) {
 	for _, entry := range entries {
 		fmt.Printf(entry + "\n")
 	}
-}
-
-func Clear(l logger.Logger, conf *config.Config) {
-	storeAdapter, _ := connectToStoreAdapter(l, conf)
-	l.Info(fmt.Sprintf("Clear - Current timestamp %d\n", time.Now().Unix()))
-
-	node, err := storeAdapter.ListRecursively("/")
-	if err != nil {
-		panic(err)
-	}
-	walk(node, func(node storeadapter.StoreNode) {
-		storeAdapter.Delete(node.Key)
-	})
 }
 
 func walk(node storeadapter.StoreNode, callback func(storeadapter.StoreNode)) {
