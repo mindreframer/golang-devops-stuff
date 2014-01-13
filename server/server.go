@@ -46,14 +46,14 @@ func New(name string, urlStr string, bindAddr string, tlsConf *TLSConfig, tlsInf
 			TLSConfig: &tlsConf.Server,
 			Addr:      bindAddr,
 		},
-		name:       name,
-		store:      store,
-		registry:   registry,
-		url:        urlStr,
-		tlsConf:    tlsConf,
-		tlsInfo:    tlsInfo,
-		peerServer: peerServer,
-		router:     r,
+		name:        name,
+		store:       store,
+		registry:    registry,
+		url:         urlStr,
+		tlsConf:     tlsConf,
+		tlsInfo:     tlsInfo,
+		peerServer:  peerServer,
+		router:      r,
 		corsHandler: cors,
 	}
 
@@ -260,7 +260,7 @@ func (s *Server) Dispatch(c raft.Command, w http.ResponseWriter, req *http.Reque
 
 		var b []byte
 		if strings.HasPrefix(req.URL.Path, "/v1") {
-			b, _ = json.Marshal(result.(*store.Event).Response())
+			b, _ = json.Marshal(result.(*store.Event).Response(0))
 			w.WriteHeader(http.StatusOK)
 		} else {
 			e, _ := result.(*store.Event)
@@ -269,7 +269,7 @@ func (s *Server) Dispatch(c raft.Command, w http.ResponseWriter, req *http.Reque
 			w.Header().Set("Content-Type", "application/json")
 			// etcd index should be the same as the event index
 			// which is also the last modified index of the node
-			w.Header().Add("X-Etcd-Index", fmt.Sprint(e.Index))
+			w.Header().Add("X-Etcd-Index", fmt.Sprint(e.Index()))
 			w.Header().Add("X-Raft-Index", fmt.Sprint(s.CommitIndex()))
 			w.Header().Add("X-Raft-Term", fmt.Sprint(s.Term()))
 
@@ -377,7 +377,7 @@ func (s *Server) SpeedTestHandler(w http.ResponseWriter, req *http.Request) erro
 	for i := 0; i < count; i++ {
 		go func() {
 			for j := 0; j < 10; j++ {
-				c := s.Store().CommandFactory().CreateSetCommand("foo", "bar", time.Unix(0, 0))
+				c := s.Store().CommandFactory().CreateSetCommand("foo", false, "bar", time.Unix(0, 0))
 				s.peerServer.RaftServer().Do(c)
 			}
 			c <- true

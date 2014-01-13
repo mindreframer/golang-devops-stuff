@@ -14,6 +14,7 @@ func init() {
 type DeleteCommand struct {
 	Key       string `json:"key"`
 	Recursive bool   `json:"recursive"`
+	Dir       bool   `json:"dir"`
 }
 
 // The name of the delete command in the log
@@ -22,10 +23,15 @@ func (c *DeleteCommand) CommandName() string {
 }
 
 // Delete the key
-func (c *DeleteCommand) Apply(server raft.Server) (interface{}, error) {
-	s, _ := server.StateMachine().(store.Store)
+func (c *DeleteCommand) Apply(context raft.Context) (interface{}, error) {
+	s, _ := context.Server().StateMachine().(store.Store)
 
-	e, err := s.Delete(c.Key, c.Recursive)
+	if c.Recursive {
+		// recursive implies dir
+		c.Dir = true
+	}
+
+	e, err := s.Delete(c.Key, c.Dir, c.Recursive)
 
 	if err != nil {
 		log.Debug(err)

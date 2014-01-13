@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/coreos/etcd/log"
 	"github.com/BurntSushi/toml"
+	"github.com/coreos/etcd/log"
 )
 
 // The default location for the etcd configuration file.
@@ -67,13 +67,15 @@ type Config struct {
 	ShowVersion      bool
 	Verbose          bool `toml:"verbose" env:"ETCD_VERBOSE"`
 	VeryVerbose      bool `toml:"very_verbose" env:"ETCD_VERY_VERBOSE"`
-
-	Peer struct {
+	VeryVeryVerbose  bool `toml:"very_very_verbose" env:"ETCD_VERY_VERY_VERBOSE"`
+	Peer             struct {
 		Addr     string `toml:"addr" env:"ETCD_PEER_ADDR"`
 		BindAddr string `toml:"bind_addr" env:"ETCD_PEER_BIND_ADDR"`
 		CAFile   string `toml:"ca_file" env:"ETCD_PEER_CA_FILE"`
 		CertFile string `toml:"cert_file" env:"ETCD_PEER_CERT_FILE"`
 		KeyFile  string `toml:"key_file" env:"ETCD_PEER_KEY_FILE"`
+		HeartbeatTimeout int  `toml:"heartbeat_timeout" env:"ETCD_PEER_HEARTBEAT_TIMEOUT"`
+		ElectionTimeout  int  `toml:"election_timeout" env:"ETCD_PEER_ELECTION_TIMEOUT"`
 	}
 }
 
@@ -85,8 +87,10 @@ func NewConfig() *Config {
 	c.MaxClusterSize = 9
 	c.MaxResultBuffer = 1024
 	c.MaxRetryAttempts = 3
-	c.Peer.Addr = "127.0.0.1:7001"
 	c.SnapshotCount = 10000
+	c.Peer.Addr = "127.0.0.1:7001"
+	c.Peer.HeartbeatTimeout = 0
+	c.Peer.ElectionTimeout = 0
 	return c
 }
 
@@ -210,7 +214,8 @@ func (c *Config) LoadFlags(arguments []string) error {
 	f.BoolVar(&c.Force, "force", false, "")
 
 	f.BoolVar(&c.Verbose, "v", c.Verbose, "")
-	f.BoolVar(&c.VeryVerbose, "vv", c.Verbose, "")
+	f.BoolVar(&c.VeryVerbose, "vv", c.VeryVerbose, "")
+	f.BoolVar(&c.VeryVeryVerbose, "vvv", c.VeryVeryVerbose, "")
 
 	f.StringVar(&peers, "peers", "", "")
 	f.StringVar(&c.PeersFile, "peers-file", c.PeersFile, "")
@@ -233,6 +238,9 @@ func (c *Config) LoadFlags(arguments []string) error {
 	f.IntVar(&c.MaxResultBuffer, "max-result-buffer", c.MaxResultBuffer, "")
 	f.IntVar(&c.MaxRetryAttempts, "max-retry-attempts", c.MaxRetryAttempts, "")
 	f.IntVar(&c.MaxClusterSize, "max-cluster-size", c.MaxClusterSize, "")
+	f.IntVar(&c.Peer.HeartbeatTimeout, "peer-heartbeat-timeout", c.Peer.HeartbeatTimeout, "")
+	f.IntVar(&c.Peer.ElectionTimeout, "peer-election-timeout", c.Peer.ElectionTimeout, "")
+
 	f.StringVar(&cors, "cors", "", "")
 
 	f.BoolVar(&c.Snapshot, "snapshot", c.Snapshot, "")
@@ -271,7 +279,7 @@ func (c *Config) LoadFlags(arguments []string) error {
 	// Print deprecation warnings on STDERR.
 	f.Visit(func(f *flag.Flag) {
 		if len(newFlagNameLookup[f.Name]) > 0 {
-			fmt.Fprintf(os.Stderr, "[deprecated] use -%s, not -%s", newFlagNameLookup[f.Name], f.Name)
+			fmt.Fprintf(os.Stderr, "[deprecated] use -%s, not -%s\n", newFlagNameLookup[f.Name], f.Name)
 		}
 	})
 
@@ -410,7 +418,7 @@ func (c *Config) Sanitize() error {
 		c.NameFromHostname()
 	}
 
-	if c.DataDir == "" && c.Name != "" {
+	if c.DataDir == "" && c.Name != "" && !c.ShowVersion && !c.ShowHelp {
 		c.DataDirFromName()
 	}
 

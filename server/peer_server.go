@@ -20,24 +20,33 @@ import (
 	"github.com/gorilla/mux"
 )
 
+const retryInterval = 10
+
+const ThresholdMonitorTimeout = 5 * time.Second
+
 type PeerServer struct {
-	raftServer     raft.Server
-	server         *Server
-	httpServer     *http.Server
-	listener       net.Listener
-	joinIndex      uint64
-	name           string
-	url            string
-	bindAddr       string
-	tlsConf        *TLSConfig
-	tlsInfo        *TLSInfo
-	followersStats *raftFollowersStats
-	serverStats    *raftServerStats
-	registry       *Registry
-	store          store.Store
-	snapConf       *snapshotConf
-	MaxClusterSize int
-	RetryTimes     int
+	raftServer       raft.Server
+	server           *Server
+	httpServer       *http.Server
+	listener         net.Listener
+	joinIndex        uint64
+	name             string
+	url              string
+	bindAddr         string
+	tlsConf          *TLSConfig
+	tlsInfo          *TLSInfo
+	followersStats   *raftFollowersStats
+	serverStats      *raftServerStats
+	registry         *Registry
+	store            store.Store
+	snapConf         *snapshotConf
+	MaxClusterSize   int
+	RetryTimes       int
+	HeartbeatTimeout time.Duration
+	ElectionTimeout  time.Duration
+
+	closeChan            chan bool
+	timeoutThresholdChan chan interface{}
 }
 
 // TODO: find a good policy to do snapshot
@@ -45,12 +54,12 @@ type snapshotConf struct {
 	// Etcd will check if snapshot is need every checkingInterval
 	checkingInterval time.Duration
 
-	// The number of writes when the last snapshot happened
-	lastWrites uint64
+	// The index when the last snapshot happened
+	lastIndex uint64
 
-	// If the incremental number of writes since the last snapshot
-	// exceeds the write Threshold, etcd will do a snapshot
-	writesThr uint64
+	// If the incremental number of index since the last snapshot
+	// exceeds the snapshot Threshold, etcd will do a snapshot
+	snapshotThr uint64
 }
 
 func NewPeerServer(name string, path string, url string, bindAddr string, tlsConf *TLSConfig, tlsInfo *TLSInfo, registry *Registry, store store.Store, snapshotCount int) *PeerServer {
@@ -62,12 +71,12 @@ func NewPeerServer(name string, path string, url string, bindAddr string, tlsCon
 		tlsInfo:  tlsInfo,
 		registry: registry,
 		store:    store,
-		snapConf: &snapshotConf{time.Second * 3, 0, uint64(snapshotCount)},
 		followersStats: &raftFollowersStats{
 			Leader:    name,
 			Followers: make(map[string]*raftFollowerStats),
 		},
 		serverStats: &raftServerStats{
+			Name:      name,
 			StartTime: time.Now(),
 			sendRateQueue: &statsQueue{
 				back: -1,
@@ -76,6 +85,10 @@ func NewPeerServer(name string, path string, url string, bindAddr string, tlsCon
 				back: -1,
 			},
 		},
+		HeartbeatTimeout: defaultHeartbeatTimeout,
+		ElectionTimeout:  defaultElectionTimeout,
+
+		timeoutThresholdChan: make(chan interface{}, 1),
 	}
 
 	// Create transporter for raft
@@ -87,7 +100,21 @@ func NewPeerServer(name string, path string, url string, bindAddr string, tlsCon
 		log.Fatal(err)
 	}
 
+	s.snapConf = &snapshotConf{
+		checkingInterval: time.Second * 3,
+		// this is not accurate, we will update raft to provide an api
+		lastIndex:   raftServer.CommitIndex(),
+		snapshotThr: uint64(snapshotCount),
+	}
+
 	s.raftServer = raftServer
+	s.raftServer.AddEventListener(raft.StateChangeEventType, s.raftEventLogger)
+	s.raftServer.AddEventListener(raft.LeaderChangeEventType, s.raftEventLogger)
+	s.raftServer.AddEventListener(raft.TermChangeEventType, s.raftEventLogger)
+	s.raftServer.AddEventListener(raft.AddPeerEventType, s.raftEventLogger)
+	s.raftServer.AddEventListener(raft.RemovePeerEventType, s.raftEventLogger)
+	s.raftServer.AddEventListener(raft.HeartbeatTimeoutEventType, s.raftEventLogger)
+	s.raftServer.AddEventListener(raft.ElectionTimeoutThresholdEventType, s.raftEventLogger)
 
 	return s
 }
@@ -105,8 +132,8 @@ func (s *PeerServer) ListenAndServe(snapshot bool, cluster []string) error {
 		}
 	}
 
-	s.raftServer.SetElectionTimeout(ElectionTimeout)
-	s.raftServer.SetHeartbeatTimeout(HeartbeatTimeout)
+	s.raftServer.SetElectionTimeout(s.ElectionTimeout)
+	s.raftServer.SetHeartbeatTimeout(s.HeartbeatTimeout)
 
 	s.raftServer.Start()
 
@@ -136,7 +163,10 @@ func (s *PeerServer) ListenAndServe(snapshot bool, cluster []string) error {
 		log.Debugf("%s restart as a follower", s.name)
 	}
 
+	s.closeChan = make(chan bool)
+
 	go s.monitorSync()
+	go s.monitorTimeoutThreshold(s.closeChan)
 
 	// open the snapshot
 	if snapshot {
@@ -194,6 +224,10 @@ func (s *PeerServer) listenAndServeTLS(certFile, keyFile string) error {
 
 // Stops the server.
 func (s *PeerServer) Close() {
+	if s.closeChan != nil {
+		close(s.closeChan)
+		s.closeChan = nil
+	}
 	if s.listener != nil {
 		s.listener.Close()
 		s.listener = nil
@@ -228,8 +262,8 @@ func (s *PeerServer) startAsFollower(cluster []string) {
 		if ok {
 			return
 		}
-		log.Warnf("cannot join to cluster via given peers, retry in %d seconds", RetryInterval)
-		time.Sleep(time.Second * RetryInterval)
+		log.Warnf("cannot join to cluster via given peers, retry in %d seconds", retryInterval)
+		time.Sleep(time.Second * retryInterval)
 	}
 
 	log.Fatalf("Cannot join the cluster via given peers after %x retries", s.RetryTimes)
@@ -395,6 +429,12 @@ func (s *PeerServer) joinByPeer(server raft.Server, peer string, scheme string) 
 func (s *PeerServer) Stats() []byte {
 	s.serverStats.LeaderInfo.Uptime = time.Now().Sub(s.serverStats.LeaderInfo.startTime).String()
 
+	// TODO: register state listener to raft to change this field
+	// rather than compare the state each time Stats() is called.
+	if s.RaftServer().State() == raft.Leader {
+		s.serverStats.LeaderInfo.Name = s.RaftServer().Name()
+	}
+
 	queue := s.serverStats.sendRateQueue
 
 	s.serverStats.SendingPkgRate, s.serverStats.SendingBandwidthRate = queue.Rate()
@@ -416,13 +456,52 @@ func (s *PeerServer) PeerStats() []byte {
 	return nil
 }
 
+// raftEventLogger converts events from the Raft server into log messages.
+func (s *PeerServer) raftEventLogger(event raft.Event) {
+	value := event.Value()
+	prevValue := event.PrevValue()
+	if value == nil {
+		value = "<nil>"
+	}
+	if prevValue == nil {
+		prevValue = "<nil>"
+	}
+
+	switch event.Type() {
+	case raft.StateChangeEventType:
+		log.Infof("%s: state changed from '%v' to '%v'.", s.name, prevValue, value)
+	case raft.TermChangeEventType:
+		log.Infof("%s: term #%v started.", s.name, value)
+	case raft.LeaderChangeEventType:
+		log.Infof("%s: leader changed from '%v' to '%v'.", s.name, prevValue, value)
+	case raft.AddPeerEventType:
+		log.Infof("%s: peer added: '%v'", s.name, value)
+	case raft.RemovePeerEventType:
+		log.Infof("%s: peer removed: '%v'", s.name, value)
+	case raft.HeartbeatTimeoutEventType:
+		var name = "<unknown>"
+		if peer, ok := value.(*raft.Peer); ok {
+			name = peer.Name
+		}
+		log.Infof("%s: warning: heartbeat timed out: '%v'", s.name, name)
+	case raft.ElectionTimeoutThresholdEventType:
+		select {
+		case s.timeoutThresholdChan <- value:
+		default:
+		}
+
+	}
+}
+
 func (s *PeerServer) monitorSnapshot() {
 	for {
 		time.Sleep(s.snapConf.checkingInterval)
-		currentWrites := s.store.TotalTransactions() - s.snapConf.lastWrites
-		if uint64(currentWrites) > s.snapConf.writesThr {
+		currentIndex := s.RaftServer().CommitIndex()
+
+		count := currentIndex - s.snapConf.lastIndex
+		if uint64(count) > s.snapConf.snapshotThr {
 			s.raftServer.TakeSnapshot()
-			s.snapConf.lastWrites = s.store.TotalTransactions()
+			s.snapConf.lastIndex = currentIndex
 		}
 	}
 }
@@ -436,5 +515,20 @@ func (s *PeerServer) monitorSync() {
 				s.raftServer.Do(s.store.CommandFactory().CreateSyncCommand(now))
 			}
 		}
+	}
+}
+
+// monitorTimeoutThreshold groups timeout threshold events together and prints
+// them as a single log line.
+func (s *PeerServer) monitorTimeoutThreshold(closeChan chan bool) {
+	for {
+		select {
+		case value := <-s.timeoutThresholdChan:
+			log.Infof("%s: warning: heartbeat near election timeout: %v", s.name, value)
+		case <-closeChan:
+			return
+		}
+
+		time.Sleep(ThresholdMonitorTimeout)
 	}
 }

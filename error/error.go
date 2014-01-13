@@ -33,6 +33,7 @@ const (
 	EcodeNodeExist      = 105
 	EcodeKeyIsPreserved = 106
 	EcodeRootROnly      = 107
+	EcodeDirNotEmpty    = 108
 
 	EcodeValueRequired      = 200
 	EcodePrevValueRequired  = 201
@@ -51,14 +52,15 @@ func init() {
 	errors = make(map[int]string)
 
 	// command related errors
-	errors[EcodeKeyNotFound] = "Key Not Found"
-	errors[EcodeTestFailed] = "Test Failed" //test and set
-	errors[EcodeNotFile] = "Not A File"
+	errors[EcodeKeyNotFound] = "Key not found"
+	errors[EcodeTestFailed] = "Compare failed" //test and set
+	errors[EcodeNotFile] = "Not a file"
 	errors[EcodeNoMorePeer] = "Reached the max number of peers in the cluster"
-	errors[EcodeNotDir] = "Not A Directory"
-	errors[EcodeNodeExist] = "Already exists" // create
+	errors[EcodeNotDir] = "Not a directory"
+	errors[EcodeNodeExist] = "Key already exists" // create
 	errors[EcodeRootROnly] = "Root is read only"
 	errors[EcodeKeyIsPreserved] = "The prefix of given key is a keyword in etcd"
+	errors[EcodeDirNotEmpty] = "Directory not empty"
 
 	// Post form related errors
 	errors[EcodeValueRequired] = "Value is Required in POST form"
@@ -109,10 +111,19 @@ func (e Error) toJsonString() string {
 
 func (e Error) Write(w http.ResponseWriter) {
 	w.Header().Add("X-Etcd-Index", fmt.Sprint(e.Index))
-	// 3xx is reft internal error
-	if e.ErrorCode/100 == 3 {
-		http.Error(w, e.toJsonString(), http.StatusInternalServerError)
-	} else {
-		http.Error(w, e.toJsonString(), http.StatusBadRequest)
+	// 3xx is raft internal error
+	status := http.StatusBadRequest
+	switch e.ErrorCode {
+	case EcodeKeyNotFound:
+		status = http.StatusNotFound
+	case EcodeNotFile, EcodeDirNotEmpty:
+		status = http.StatusForbidden
+	case EcodeTestFailed, EcodeNodeExist:
+		status = http.StatusPreconditionFailed
+	default:
+		if e.ErrorCode/100 == 3 {
+			status = http.StatusInternalServerError
+		}
 	}
+	http.Error(w, e.toJsonString(), status)
 }
