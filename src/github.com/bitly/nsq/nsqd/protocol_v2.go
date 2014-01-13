@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"net"
 	"sync/atomic"
 	"time"
@@ -89,7 +90,6 @@ func (p *ProtocolV2) IOLoop(conn net.Conn) error {
 	}
 
 	log.Printf("PROTOCOL(V2): [%s] exiting ioloop", client)
-	// TODO: gracefully send clients the close signal
 	conn.Close()
 	close(client.ExitChan)
 	if client.Channel != nil {
@@ -173,6 +173,7 @@ func (p *ProtocolV2) messagePump(client *ClientV2) {
 	// the pathological case of a channel on a low volume topic
 	// with >1 clients having >1 RDY counts
 	var flusherChan <-chan time.Time
+	var sampleRate int32
 
 	// v2 opportunistically buffers data to clients to reduce write system calls
 	// we force flush in two cases:
@@ -183,6 +184,7 @@ func (p *ProtocolV2) messagePump(client *ClientV2) {
 	subEventChan := client.SubEventChan
 	heartbeatUpdateChan := client.HeartbeatUpdateChan
 	outputBufferTimeoutUpdateChan := client.OutputBufferTimeoutUpdateChan
+	sampleRateUpdateChan := client.SampleRateUpdateChan
 	flushed := true
 
 	for {
@@ -245,10 +247,18 @@ func (p *ProtocolV2) messagePump(client *ClientV2) {
 			if err != nil {
 				goto exit
 			}
+		case sampleRate = <-sampleRateUpdateChan:
+			sampleRateUpdateChan = nil
 		case msg, ok := <-clientMsgChan:
 			if !ok {
 				goto exit
 			}
+
+			// if we are sampling, do so here
+			if sampleRate > 0 && rand.Int31n(100) > sampleRate {
+				continue
+			}
+
 			subChannel.StartInFlightTimeout(msg, client.ID)
 			client.SendingMessage()
 			err = p.SendMessage(client, msg, &buf)
@@ -335,6 +345,7 @@ func (p *ProtocolV2) IDENTIFY(client *ClientV2, params [][]byte) ([]byte, error)
 		DeflateLevel    int    `json:"deflate_level"`
 		MaxDeflateLevel int    `json:"max_deflate_level"`
 		Snappy          bool   `json:"snappy"`
+		SampleRate      int32  `json:"sample_rate"`
 	}{
 		MaxRdyCount:     p.context.nsqd.options.maxRdyCount,
 		Version:         util.BINARY_VERSION,
@@ -345,6 +356,7 @@ func (p *ProtocolV2) IDENTIFY(client *ClientV2, params [][]byte) ([]byte, error)
 		DeflateLevel:    deflateLevel,
 		MaxDeflateLevel: p.context.nsqd.options.maxDeflateLevel,
 		Snappy:          snappy,
+		SampleRate:      client.SampleRate,
 	})
 	if err != nil {
 		panic("should never happen")
