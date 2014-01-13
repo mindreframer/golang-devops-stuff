@@ -76,6 +76,21 @@ const (
 	SerfShutdown
 )
 
+func (s SerfState) String() string {
+	switch s {
+	case SerfAlive:
+		return "alive"
+	case SerfLeaving:
+		return "leaving"
+	case SerfLeft:
+		return "left"
+	case SerfShutdown:
+		return "shutdown"
+	default:
+		return "unknown"
+	}
+}
+
 // Member is a single member of the Serf cluster.
 type Member struct {
 	Name   string
@@ -161,7 +176,7 @@ type userEvents struct {
 }
 
 const (
-	UserEventSizeLimit = 128        // Maximum byte size for event name and payload
+	UserEventSizeLimit = 256        // Maximum byte size for event name and payload
 	snapshotSizeLimit  = 128 * 1024 // Maximum 128 KB snapshot
 )
 
@@ -383,7 +398,7 @@ func (s *Serf) broadcastJoin(ltime LamportTime) error {
 
 	// Start broadcasting the update
 	if err := s.broadcast(messageJoinType, &msg, nil); err != nil {
-		s.logger.Printf("[WARN] Failed to broadcast join intent: %v", err)
+		s.logger.Printf("[WARN] serf: Failed to broadcast join intent: %v", err)
 		return err
 	}
 	return nil
@@ -676,7 +691,7 @@ func (s *Serf) handleNodeLeave(n *memberlist.Node) {
 		s.failedMembers = append(s.failedMembers, member)
 	default:
 		// Unknown state that it was in? Just don't do anything
-		s.logger.Printf("[WARN] Bad state when leave: %d", member.Status)
+		s.logger.Printf("[WARN] serf: Bad state when leave: %d", member.Status)
 		return
 	}
 
@@ -730,7 +745,7 @@ func (s *Serf) handleNodeLeaveIntent(leaveMsg *messageLeave) bool {
 	// Refute us leaving if we are in the alive state
 	// Must be done in another goroutine since we have the memberLock
 	if leaveMsg.Node == s.config.NodeName && s.state == SerfAlive {
-		s.logger.Printf("[DEBUG] Refuting an older leave intent")
+		s.logger.Printf("[DEBUG] serf: Refuting an older leave intent")
 		go s.broadcastJoin(s.clock.Time())
 		return false
 	}
@@ -954,10 +969,10 @@ func (s *Serf) checkQueueDepth(name string, queue *memberlist.TransmitLimitedQue
 		case <-time.After(time.Second):
 			numq := queue.NumQueued()
 			if numq >= s.config.QueueDepthWarning {
-				s.logger.Printf("[WARN] %s queue depth: %d", name, numq)
+				s.logger.Printf("[WARN] serf: %s queue depth: %d", name, numq)
 			}
 			if numq > s.config.MaxQueueDepth {
-				s.logger.Printf("[WARN] %s queue depth (%d) exceeds limit (%d), dropping messages!",
+				s.logger.Printf("[WARN] serf: %s queue depth (%d) exceeds limit (%d), dropping messages!",
 					name, numq, s.config.MaxQueueDepth)
 				queue.Prune(s.config.MaxQueueDepth)
 			}
@@ -1009,12 +1024,12 @@ func (s *Serf) handleRejoin(previous []*PreviousNode) {
 			continue
 		}
 
-		s.logger.Printf("[INFO] Attempting re-join to previously known node: %s", prev)
+		s.logger.Printf("[INFO] serf: Attempting re-join to previously known node: %s", prev)
 		_, err := s.memberlist.Join([]string{prev.Addr})
 		if err == nil {
-			s.logger.Printf("[INFO] Re-joined to previously known node: %s", prev)
+			s.logger.Printf("[INFO] serf: Re-joined to previously known node: %s", prev)
 			return
 		}
 	}
-	s.logger.Printf("[WARN] Failed to re-join any previously known node")
+	s.logger.Printf("[WARN] serf: Failed to re-join any previously known node")
 }
