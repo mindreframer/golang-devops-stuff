@@ -50,7 +50,7 @@ health_check_server:
   port: 2345
 
 logging:
-  level: debug2
+  level: debug
 
 network:
   # Use this /30 network as offset for the network pool.

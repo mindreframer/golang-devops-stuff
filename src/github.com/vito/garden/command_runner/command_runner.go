@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"syscall"
 )
 
 type CommandRunner interface {
@@ -13,6 +14,7 @@ type CommandRunner interface {
 	Start(*exec.Cmd) error
 	Wait(*exec.Cmd) error
 	Kill(*exec.Cmd) error
+	Signal(*exec.Cmd, os.Signal) error
 	ServerRoot() string
 }
 
@@ -33,6 +35,14 @@ func New(debug bool) *RealCommandRunner {
 }
 
 func (r *RealCommandRunner) Run(cmd *exec.Cmd) error {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Setpgid: true,
+		}
+	} else {
+		cmd.SysProcAttr.Setpgid = true
+	}
+
 	if r.debug {
 		log.Printf("\x1b[40;36mexecuting: %s\x1b[0m\n", prettyCommand(cmd))
 		r.tee(cmd)
@@ -42,9 +52,9 @@ func (r *RealCommandRunner) Run(cmd *exec.Cmd) error {
 
 	if r.debug {
 		if err != nil {
-			log.Printf("\x1b[40;31mcommand failed: %s\x1b[0m\n", err)
+			log.Printf("\x1b[40;31mcommand failed (%s): %s\x1b[0m\n", prettyCommand(cmd), err)
 		} else {
-			log.Printf("\x1b[40;32mcommand succeeded\x1b[0m\n")
+			log.Printf("\x1b[40;32mcommand succeeded (%s)\x1b[0m\n", prettyCommand(cmd))
 		}
 	}
 
@@ -52,6 +62,14 @@ func (r *RealCommandRunner) Run(cmd *exec.Cmd) error {
 }
 
 func (r *RealCommandRunner) Start(cmd *exec.Cmd) error {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			Setpgid: true,
+		}
+	} else {
+		cmd.SysProcAttr.Setpgid = true
+	}
+
 	if r.debug {
 		log.Printf("\x1b[40;36mspawning: %s\x1b[0m\n", prettyCommand(cmd))
 		r.tee(cmd)
@@ -80,6 +98,14 @@ func (r *RealCommandRunner) Kill(cmd *exec.Cmd) error {
 	}
 
 	return cmd.Process.Kill()
+}
+
+func (r *RealCommandRunner) Signal(cmd *exec.Cmd, signal os.Signal) error {
+	if cmd.Process == nil {
+		return CommandNotRunningError{cmd}
+	}
+
+	return cmd.Process.Signal(signal)
 }
 
 func (r *RealCommandRunner) ServerRoot() string {

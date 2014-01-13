@@ -1,6 +1,10 @@
 language: go
 
 go:
-  - 1.1
+  - 1.2
 
-script: sudo ./bin/test -skip="wshd Suite"
+script: ./bin/test -skip="wshd Suite" -skipMeasurements -skip=Lifecycle
+
+env:
+  global:
+    - secure: NGWQaMGFiZULPSLR9mb2PbSjjbl5osvdKeKp54uX1sn1g70Kz7+SuqRpBVybStodsC3yaGF/7ssxMLZeY59MJZNOskgzyyAVus2FM2VdPBr4qSDDxY8W4F+cPuMNdk5aWLQrSxaYy4tKoszQHJVDopmgbwwqiK1b5qTrsFVkP0g=

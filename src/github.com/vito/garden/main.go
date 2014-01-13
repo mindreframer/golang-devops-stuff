@@ -4,18 +4,23 @@ import (
 	"flag"
 	"log"
 	"net"
+	"os"
+	"os/signal"
 	"path"
+	"runtime"
+	"syscall"
+	"time"
 
 	"github.com/vito/garden/backend"
 	"github.com/vito/garden/backend/fake_backend"
-	"github.com/vito/garden/backend/linux_backend"
-	"github.com/vito/garden/backend/linux_backend/linux_container_pool"
-	"github.com/vito/garden/backend/linux_backend/network_pool"
-	"github.com/vito/garden/backend/linux_backend/port_pool"
-	"github.com/vito/garden/backend/linux_backend/quota_manager"
-	"github.com/vito/garden/backend/linux_backend/uid_pool"
 	"github.com/vito/garden/command_runner"
 	"github.com/vito/garden/command_runner/remote_command_runner"
+	"github.com/vito/garden/linux_backend"
+	"github.com/vito/garden/linux_backend/container_pool"
+	"github.com/vito/garden/linux_backend/network_pool"
+	"github.com/vito/garden/linux_backend/port_pool"
+	"github.com/vito/garden/linux_backend/quota_manager"
+	"github.com/vito/garden/linux_backend/uid_pool"
 	"github.com/vito/garden/server"
 )
 
@@ -23,6 +28,12 @@ var socketFilePath = flag.String(
 	"socket",
 	"/tmp/warden.sock",
 	"where to put the wardern server .sock file",
+)
+
+var snapshotsPath = flag.String(
+	"snapshots",
+	"",
+	"directory in which to store container state to persist through restarts",
 )
 
 var backendName = flag.String(
@@ -67,6 +78,12 @@ var disableQuotas = flag.Bool(
 	"disable disk quotas",
 )
 
+var containerGraceTime = flag.Int(
+	"containerGraceTime",
+	0,
+	"time (in seconds) after which to destroy idle containers",
+)
+
 var debug = flag.Bool(
 	"debug",
 	false,
@@ -75,6 +92,11 @@ var debug = flag.Bool(
 
 func main() {
 	flag.Parse()
+
+	maxProcs := runtime.NumCPU()
+	prevMaxProcs := runtime.GOMAXPROCS(maxProcs)
+
+	log.Println("set GOMAXPROCS to", maxProcs, "was", prevMaxProcs)
 
 	var backend backend.Backend
 
@@ -96,7 +118,7 @@ func main() {
 
 		_, ipNet, err := net.ParseCIDR("10.254.0.0/22")
 		if err != nil {
-			panic(err)
+			log.Fatalln("error parsing CIDR:", err)
 		}
 
 		networkPool := network_pool.New(ipNet)
@@ -120,14 +142,14 @@ func main() {
 
 		quotaManager, err := quota_manager.New(*depotPath, *rootPath, runner)
 		if err != nil {
-			panic(err)
+			log.Fatalln("error creating quota manager:", err)
 		}
 
 		if *disableQuotas {
 			quotaManager.Disable()
 		}
 
-		pool := linux_container_pool.New(
+		pool := container_pool.New(
 			path.Join(*rootPath, "linux"),
 			*depotPath,
 			*rootFSPath,
@@ -138,7 +160,7 @@ func main() {
 			quotaManager,
 		)
 
-		backend = linux_backend.New(pool)
+		backend = linux_backend.New(pool, *snapshotsPath)
 	case "fake":
 		backend = fake_backend.New()
 	}
@@ -152,12 +174,25 @@ func main() {
 
 	log.Println("starting server; listening on", *socketFilePath)
 
-	wardenServer := server.New(*socketFilePath, backend)
+	graceTime := time.Duration(*containerGraceTime) * time.Second
+
+	wardenServer := server.New(*socketFilePath, graceTime, backend)
 
 	err = wardenServer.Start()
 	if err != nil {
 		log.Fatalln("failed to start:", err)
 	}
+
+	signals := make(chan os.Signal, 1)
+
+	go func() {
+		<-signals
+		log.Println("stopping...")
+		wardenServer.Stop()
+		os.Exit(0)
+	}()
+
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 
 	select {}
 }

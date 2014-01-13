@@ -25,7 +25,7 @@ var _ = Describe("Reading response messages over the wire", func() {
 				&echoResponse,
 			)
 
-			Expect(err).ToNot(HaveOccured())
+			Expect(err).ToNot(HaveOccurred())
 
 			Expect(echoResponse.GetMessage()).To(Equal("some message"))
 		})
@@ -42,7 +42,7 @@ var _ = Describe("Reading response messages over the wire", func() {
 			)
 
 			err := message_reader.ReadMessage(bogusPayload, &dummyResponse)
-			Expect(err).To(HaveOccured())
+			Expect(err).To(HaveOccurred())
 		})
 	})
 

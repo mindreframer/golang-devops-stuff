@@ -19,6 +19,7 @@ type RunRequest struct {
 	Privileged       *bool           `protobuf:"varint,3,opt,name=privileged,def=0" json:"privileged,omitempty"`
 	Rlimits          *ResourceLimits `protobuf:"bytes,4,opt,name=rlimits" json:"rlimits,omitempty"`
 	DiscardOutput    *bool           `protobuf:"varint,5,opt,name=discard_output,def=0" json:"discard_output,omitempty"`
+	LogTag           *string         `protobuf:"bytes,6,opt,name=log_tag" json:"log_tag,omitempty"`
 	XXX_unrecognized []byte          `json:"-"`
 }
 
@@ -62,6 +63,13 @@ func (m *RunRequest) GetDiscardOutput() bool {
 		return *m.DiscardOutput
 	}
 	return Default_RunRequest_DiscardOutput
+}
+
+func (m *RunRequest) GetLogTag() string {
+	if m != nil && m.LogTag != nil {
+		return *m.LogTag
+	}
+	return ""
 }
 
 type RunResponse struct {

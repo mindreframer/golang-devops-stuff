@@ -23,7 +23,7 @@ var _ = Describe("Reading request messages over the wire", func() {
 			)
 
 			request, err := message_reader.ReadRequest(payload)
-			Expect(err).ToNot(HaveOccured())
+			Expect(err).ToNot(HaveOccurred())
 			Expect(request).To(Equal(
 				&protocol.EchoRequest{
 					Message: proto.String("some-message"),
@@ -41,7 +41,7 @@ var _ = Describe("Reading request messages over the wire", func() {
 			)
 
 			_, err := message_reader.ReadRequest(bogusPayload)
-			Expect(err).To(HaveOccured())
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })

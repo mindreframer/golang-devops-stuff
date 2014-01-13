@@ -1,7 +1,9 @@
 package command_runner_test
 
 import (
+	"os"
 	"os/exec"
+	"syscall"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -17,7 +19,7 @@ var _ = Describe("Running commands", func() {
 		Expect(cmd.ProcessState).To(BeNil())
 
 		err := runner.Run(cmd)
-		Expect(err).ToNot(HaveOccured())
+		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cmd.ProcessState).ToNot(BeNil())
 	})
@@ -31,8 +33,23 @@ var _ = Describe("Running commands", func() {
 				Args: []string{"-c", "exit 1"},
 			})
 
-			Expect(err).To(HaveOccured())
+			Expect(err).To(HaveOccurred())
 		})
+	})
+
+	It("does not propagate signals to the child", func() {
+		runner := command_runner.New(false)
+
+		cmd := &exec.Cmd{
+			Path: "/bin/bash",
+			Args: []string{"-c", "exit 0"},
+		}
+
+		err := runner.Run(cmd)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cmd.SysProcAttr).ToNot(BeNil())
+		Expect(cmd.SysProcAttr.Setpgid).To(BeTrue())
 	})
 })
 
@@ -47,7 +64,7 @@ var _ = Describe("Starting commands", func() {
 		Expect(err).To(BeNil())
 
 		err = runner.Start(cmd)
-		Expect(err).ToNot(HaveOccured())
+		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cmd.ProcessState).To(BeNil())
 
@@ -56,6 +73,21 @@ var _ = Describe("Starting commands", func() {
 		cmd.Wait()
 
 		Expect(cmd.ProcessState).ToNot(BeNil())
+	})
+
+	It("does not propagate signals to the child", func() {
+		runner := command_runner.New(false)
+
+		cmd := &exec.Cmd{
+			Path: "/bin/bash",
+			Args: []string{"-c", "exit 0"},
+		}
+
+		err := runner.Start(cmd)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cmd.SysProcAttr).ToNot(BeNil())
+		Expect(cmd.SysProcAttr.Setpgid).To(BeTrue())
 	})
 })
 
@@ -67,12 +99,12 @@ var _ = Describe("Waiting on commands", func() {
 		Expect(cmd.ProcessState).To(BeNil())
 
 		err := runner.Start(cmd)
-		Expect(err).ToNot(HaveOccured())
+		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cmd.ProcessState).To(BeNil())
 
 		err = runner.Wait(cmd)
-		Expect(err).ToNot(HaveOccured())
+		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cmd.ProcessState).ToNot(BeNil())
 	})
@@ -82,21 +114,55 @@ var _ = Describe("Killing commands", func() {
 	It("terminates the command's process", func() {
 		runner := command_runner.New(false)
 
-		cmd := &exec.Cmd{Path: "bash", Args: []string{"-c", "read foo"}}
+		cmd := &exec.Cmd{Path: "bash", Args: []string{"-c", "sleep 10"}}
 		Expect(cmd.ProcessState).To(BeNil())
 
 		err := runner.Start(cmd)
-		Expect(err).ToNot(HaveOccured())
+		Expect(err).ToNot(HaveOccurred())
 
 		Expect(cmd.ProcessState).To(BeNil())
 
 		err = runner.Kill(cmd)
-		Expect(err).ToNot(HaveOccured())
+		Expect(err).ToNot(HaveOccurred())
 
 		err = cmd.Wait()
-		Expect(err).To(HaveOccured())
+		Expect(err).To(HaveOccurred())
 
 		Expect(cmd.ProcessState).ToNot(BeNil())
+	})
+
+	Context("when the command is not running", func() {
+		It("returns an error", func() {
+			runner := command_runner.New(false)
+
+			cmd := &exec.Cmd{Path: "bash", Args: []string{"-c", "sleep 10"}}
+			Expect(cmd.ProcessState).To(BeNil())
+
+			err := runner.Kill(cmd)
+			Expect(err).To(HaveOccurred())
+		})
+	})
+})
+
+var _ = Describe("Signalling commands", func() {
+	It("sends the given signal to the process", func() {
+		runner := command_runner.New(false)
+
+		cmd := &exec.Cmd{Path: "bash", Args: []string{"-c", "sleep 10"}}
+		Expect(cmd.ProcessState).To(BeNil())
+
+		err := runner.Start(cmd)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(cmd.ProcessState).To(BeNil())
+
+		err = runner.Signal(cmd, os.Interrupt)
+		Expect(err).ToNot(HaveOccurred())
+
+		err = cmd.Wait()
+		Expect(err).To(HaveOccurred())
+
+		Expect(cmd.ProcessState.Sys().(syscall.WaitStatus).Signal()).To(Equal(os.Interrupt))
 	})
 
 	Context("when the command is not running", func() {
@@ -106,8 +172,8 @@ var _ = Describe("Killing commands", func() {
 			cmd := &exec.Cmd{Path: "bash", Args: []string{"-c", "read foo"}}
 			Expect(cmd.ProcessState).To(BeNil())
 
-			err := runner.Kill(cmd)
-			Expect(err).To(HaveOccured())
+			err := runner.Signal(cmd, os.Interrupt)
+			Expect(err).To(HaveOccurred())
 		})
 	})
 })

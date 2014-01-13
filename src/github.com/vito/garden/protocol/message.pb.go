@@ -32,6 +32,7 @@ const (
 	Message_LimitMemory    Message_Type = 51
 	Message_LimitDisk      Message_Type = 52
 	Message_LimitBandwidth Message_Type = 53
+	Message_LimitCpu       Message_Type = 54
 	Message_Ping           Message_Type = 91
 	Message_List           Message_Type = 92
 	Message_Echo           Message_Type = 93
@@ -54,6 +55,7 @@ var Message_Type_name = map[int32]string{
 	51: "LimitMemory",
 	52: "LimitDisk",
 	53: "LimitBandwidth",
+	54: "LimitCpu",
 	91: "Ping",
 	92: "List",
 	93: "Echo",
@@ -75,6 +77,7 @@ var Message_Type_value = map[string]int32{
 	"LimitMemory":    51,
 	"LimitDisk":      52,
 	"LimitBandwidth": 53,
+	"LimitCpu":       54,
 	"Ping":           91,
 	"List":           92,
 	"Echo":           93,

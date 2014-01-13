@@ -3,48 +3,27 @@
 
 set -e -x
 
-if [ "$TRAVIS" = "true" ]; then
-  source $HOME/.gvm/scripts/gvm
-  gvm install go1.1
-  gvm use go1.1
-
-  export GOPATH=$HOME/gopath:$GOPATH
-fi
-
-if [ -z "$TRAVIS" ]; then
-  ROOTFS_FN=lucid64.dev.tgz
-  ROOTFS_URI=http://cfstacks.s3.amazonaws.com/${ROOTFS_FN}
-  ROOTFS_SHA=b2633b2ab4964f91402bb2d889f2f12449a8b828
-
-  ROOTFS_INSTALL_DIR=${ROOTFS_INSTALL_DIR:-$PWD/.rootfs}
-
-  mkdir -p "$ROOTFS_INSTALL_DIR"
-
-  pushd "$ROOTFS_INSTALL_DIR"
-    echo "${ROOTFS_SHA}  ${ROOTFS_FN}" > checksum
-
-    if [ ! -f ${ROOTFS_FN} ] || ! shasum -s -c checksum; then
-      wget "${ROOTFS_URI}"
-    fi
-
-    mkdir -p ./rootfs
-    tar zxf ${ROOTFS_FN} -C ./rootfs
-  popd
-
-  export GARDEN_TEST_ROOTFS="${ROOTFS_INSTALL_DIR}/rootfs"
-fi
-
-if [ -z "$GOPATH" ]; then
-  export GOPATH=$HOME/go
-fi
-
 FIRST_GOPATH=`echo $GOPATH | cut -d':' -f1`
 
 export PATH=$FIRST_GOPATH/bin:$PATH
 
-go get -v github.com/xoebus/gocart/gocart
+go get -v github.com/vito/gocart
 
-gocart install
+gocart
 go install github.com/onsi/ginkgo/ginkgo
+go install code.google.com/p/go.tools/cmd/cover
+go install github.com/dustin/goveralls
 
-ginkgo -race -r -i --randomizeAllSpecs "$@"
+ginkgo -cover -race -r -i -skipMeasurements -randomizeAllSpecs "$@"
+
+# don't report fakes
+rm -f *fake*.coverprofile
+
+echo mode: set > all.coverprofile
+cat *.coverprofile | grep -v mode: >> all.coverprofile
+
+# don't leak coveralls token
+(
+  set +x
+  goveralls -coverprofile=all.coverprofile $COVERALLS_TOKEN
+)
