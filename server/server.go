@@ -1,3 +1,7 @@
+// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Use of this source code is governed by The MIT License (MIT) that can be
+// found in the LICENSE file.
+
 package server
 
 import (
@@ -44,6 +48,7 @@ func init() {
 	raft.RegisterCommand(&AddServiceCommand{})
 	raft.RegisterCommand(&UpdateTTLCommand{})
 	raft.RegisterCommand(&RemoveServiceCommand{})
+	raft.RegisterCommand(&AddCallbackCommand{})
 
 	expiredCount = metrics.NewCounter()
 	metrics.Register("skydns-expired-entries", expiredCount)
@@ -62,7 +67,6 @@ func init() {
 
 	removeServiceCount = metrics.NewCounter()
 	metrics.Register("skydns-remove-service-requests", removeServiceCount)
-
 }
 
 type Server struct {
@@ -118,6 +122,8 @@ func NewServer(members []string, domain string, dnsAddr string, httpAddr string,
 	s.router.HandleFunc("/skydns/services/{uuid}", s.getServiceHTTPHandler).Methods("GET")
 	s.router.HandleFunc("/skydns/services/{uuid}", s.removeServiceHTTPHandler).Methods("DELETE")
 	s.router.HandleFunc("/skydns/services/{uuid}", s.updateServiceHTTPHandler).Methods("PATCH")
+
+	s.router.HandleFunc("/skydns/callbacks/{uuid}", s.addCallbackHTTPHandler).Methods("PUT")
 
 	// External API Routes
 	// /skydns/services #list all services
@@ -351,16 +357,12 @@ func (s *Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 
 	defer w.WriteMsg(m)
 
-	// happens in dns lib when using default mux \o/
-	//	if len(req.Question) < 1 {
-	//		return
-	//	}
 	q := req.Question[0]
 
 	log.Printf("Received DNS Request for %q from %q", q.Name, w.RemoteAddr())
 
 	if q.Qtype == dns.TypeANY || q.Qtype == dns.TypeSRV {
-		records, err := s.getSRVRecords(q)
+		records, extra, err := s.getSRVRecords(q)
 
 		if err != nil {
 			m.SetRcode(req, dns.RcodeServerFailure)
@@ -369,6 +371,7 @@ func (s *Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		}
 
 		m.Answer = append(m.Answer, records...)
+		m.Extra = append(m.Extra, extra...)
 	}
 
 	if q.Qtype == dns.TypeANY || q.Qtype == dns.TypeA {
@@ -414,7 +417,7 @@ func (s *Server) getARecords(q dns.Question) (records []dns.RR, err error) {
 	return
 }
 
-func (s *Server) getSRVRecords(q dns.Question) (records []dns.RR, err error) {
+func (s *Server) getSRVRecords(q dns.Question) (records []dns.RR, extra []dns.RR, err error) {
 	var weight uint16
 	services := make([]msg.Service, 0)
 
@@ -432,16 +435,36 @@ func (s *Server) getSRVRecords(q dns.Question) (records []dns.RR, err error) {
 
 	for _, serv := range services {
 		// TODO: Dynamically set weight
-		records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL}, Priority: 10, Weight: weight, Port: serv.Port, Target: serv.Host + "."})
+		// a Service may have an IP as its Host"name", in this case
+		// substitute UUID + "." + s.domain+"." an add an A record
+		// with the name and IP in the additional section.
+		// TODO(miek): check if resolvers actually grok this
+		ip := net.ParseIP(serv.Host)
+		switch {
+		case ip == nil:
+			records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL},
+				Priority: 10, Weight: weight, Port: serv.Port, Target: serv.Host + "."})
+			continue
+		case ip.To4() != nil:
+			extra = append(extra, &dns.A{Hdr: dns.RR_Header{Name: serv.UUID + "." + s.domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: serv.TTL}, A: ip.To4()})
+			records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL},
+				Priority: 10, Weight: weight, Port: serv.Port, Target: serv.UUID + "." + s.domain + "."})
+		case ip.To16() != nil:
+			extra = append(extra, &dns.AAAA{Hdr: dns.RR_Header{Name: serv.UUID + "." + s.domain + ".", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: serv.TTL}, AAAA: ip.To16()})
+			records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL},
+				Priority: 10, Weight: weight, Port: serv.Port, Target: serv.UUID + "." + s.domain + "."})
+		default:
+			panic("skydns: internal error")
+		}
 	}
 
 	// Append matching entries in different region than requested with a higher priority
 	labels := dns.SplitDomainName(key)
 
 	pos := len(labels) - 4
-	if len(labels) >= 4 && labels[pos] != "any" && labels[pos] != "all" {
+	if len(labels) >= 4 && labels[pos] != "*" {
 		region := labels[pos]
-		labels[pos] = "any"
+		labels[pos] = "*"
 
 		// TODO: This is pretty much a copy of the above, and should be abstracted
 		additionalServices := make([]msg.Service, len(services))
@@ -463,10 +486,26 @@ func (s *Server) getSRVRecords(q dns.Question) (records []dns.RR, err error) {
 				continue
 			}
 			// TODO: Dynamically set priority and weight
-			records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL}, Priority: 20, Weight: weight, Port: serv.Port, Target: serv.Host + "."})
+			// TODO(miek): same as above: abstract away
+			ip := net.ParseIP(serv.Host)
+			switch {
+			case ip == nil:
+				records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL},
+					Priority: 20, Weight: weight, Port: serv.Port, Target: serv.Host + "."})
+				continue
+			case ip.To4() != nil:
+				extra = append(extra, &dns.A{Hdr: dns.RR_Header{Name: serv.UUID + "." + s.domain + ".", Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: serv.TTL}, A: ip.To4()})
+				records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL},
+					Priority: 20, Weight: weight, Port: serv.Port, Target: serv.UUID + "." + s.domain + "."})
+			case ip.To16() != nil:
+				extra = append(extra, &dns.AAAA{Hdr: dns.RR_Header{Name: serv.UUID + "." + s.domain + ".", Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: serv.TTL}, AAAA: ip.To16()})
+				records = append(records, &dns.SRV{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeSRV, Class: dns.ClassINET, Ttl: serv.TTL},
+					Priority: 20, Weight: weight, Port: serv.Port, Target: serv.UUID + "." + s.domain + "."})
+			default:
+				panic("skydns: internal error")
+			}
 		}
 	}
-
 	return
 }
 
@@ -508,7 +547,7 @@ func (s *Server) redirectToLeader(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-//shared auth method on server.
+// shared auth method on server.
 func (s *Server) authenticate(secret string) (err error) {
 	if s.secret != "" && secret != s.secret {
 		err = errors.New("Forbidden")
@@ -543,6 +582,10 @@ func (s *Server) addServiceHTTPHandler(w http.ResponseWriter, req *http.Request)
 	if err := json.NewDecoder(req.Body).Decode(&serv); err != nil {
 		log.Println("Error: ", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if serv.Host == "" || serv.Port == 0 {
+		http.Error(w, "Host and Port required", http.StatusBadRequest)
 		return
 	}
 
