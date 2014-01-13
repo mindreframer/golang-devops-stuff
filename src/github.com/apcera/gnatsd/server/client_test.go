@@ -282,12 +282,14 @@ func TestClientPubWithQueueSub(t *testing.T) {
 
 	go func() {
 		c.parse(op)
+		for cp := range c.pcd {
+			cp.bw.Flush()
+		}
 		c.nc.Close()
 	}()
 
 	var n1, n2, received int
 	for ; ; received += 1 {
-		time.Sleep(10 * time.Millisecond)
 		l, err := cr.ReadString('\n')
 		if err != nil {
 			break
@@ -329,12 +331,14 @@ func TestClientUnSub(t *testing.T) {
 
 	go func() {
 		c.parse(op)
+		for cp := range c.pcd {
+			cp.bw.Flush()
+		}
 		c.nc.Close()
 	}()
 
 	var received int
 	for ; ; received += 1 {
-		time.Sleep(10 * time.Millisecond)
 		l, err := cr.ReadString('\n')
 		if err != nil {
 			break
@@ -370,12 +374,14 @@ func TestClientUnSubMax(t *testing.T) {
 
 	go func() {
 		c.parse(op)
+		for cp := range c.pcd {
+			cp.bw.Flush()
+		}
 		c.nc.Close()
 	}()
 
 	var received int
 	for ; ; received += 1 {
-		time.Sleep(10 * time.Millisecond)
 		l, err := cr.ReadString('\n')
 		if err != nil {
 			break
@@ -489,5 +495,24 @@ func TestClientMapRemoval(t *testing.T) {
 	s.mu.Unlock()
 	if lsc > 0 {
 		t.Fatal("Client still in server map")
+	}
+}
+
+// This is from bug report #18
+func TestTwoTokenPubMatchSingleTokenSub(t *testing.T) {
+	_, c, cr := setupClient()
+	test := []byte("PUB foo.bar 5\r\nhello\r\nSUB foo 1\r\nPING\r\nPUB foo.bar 5\r\nhello\r\nPING\r\n")
+	go c.parse(test)
+	l, err := cr.ReadString('\n')
+	if err != nil {
+		t.Fatalf("Error receiving info from server: %v\n", err)
+	}
+	if !strings.HasPrefix(l, "PONG\r\n") {
+		t.Fatalf("PONG response incorrect: %q\n", l)
+	}
+	// Expect just a pong, no match should exist here..
+	l, err = cr.ReadString('\n')
+	if !strings.HasPrefix(l, "PONG\r\n") {
+		t.Fatalf("PONG response was expected, got: %q\n", l)
 	}
 }
