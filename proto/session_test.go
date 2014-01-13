@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func fakeStreamFactory(id, related frame.StreamId, priority frame.StreamPriority, finLocal bool, finRemote bool, windowSize uint32, sess session) stream {
+func fakeStreamFactory(id frame.StreamId, priority frame.StreamPriority, streamType frame.StreamType, finLocal bool, finRemote bool, windowSize uint32, sess session) stream {
 	return new(fakeStream)
 }
 
@@ -25,7 +25,7 @@ func (s *fakeStream) SetReadDeadline(time.Time) error         { return nil }
 func (s *fakeStream) SetWriteDeadline(time.Time) error        { return nil }
 func (s *fakeStream) HalfClose([]byte) (int, error)           { return 0, nil }
 func (s *fakeStream) Id() frame.StreamId                      { return 0 }
-func (s *fakeStream) RelatedStreamId() frame.StreamId         { return 0 }
+func (s *fakeStream) StreamType() frame.StreamType            { return 0 }
 func (s *fakeStream) Session() ISession                       { return nil }
 func (s *fakeStream) RemoteAddr() net.Addr                    { return nil }
 func (s *fakeStream) LocalAddr() net.Addr                     { return nil }
@@ -66,7 +66,7 @@ func TestFailWrongClientParity(t *testing.T) {
 	remote.Discard()
 
 	// false for a server session
-	s := NewSession(local, fakeStreamFactory, false)
+	s := NewSession(local, fakeStreamFactory, false, []Extension{})
 
 	// 300 is even, and only servers send even stream ids
 	f := frame.NewWStreamSyn()
@@ -94,7 +94,7 @@ func TestWrongServerParity(t *testing.T) {
 	local, remote := newFakeConnPair()
 
 	// true for a client session
-	s := NewSession(local, fakeStreamFactory, true)
+	s := NewSession(local, fakeStreamFactory, true, []Extension{})
 
 	// don't need the remote output
 	remote.Discard()
@@ -128,7 +128,7 @@ func TestAcceptStream(t *testing.T) {
 	remote.Discard()
 
 	// true for a client session
-	s := NewSession(local, NewStream, true)
+	s := NewSession(local, NewStream, true, []Extension{})
 	defer s.Close()
 
 	f := frame.NewWStreamSyn()
@@ -171,7 +171,7 @@ func TestSynLowId(t *testing.T) {
 	remote.Discard()
 
 	// true for a client session
-	s := NewSession(local, fakeStreamFactory, true)
+	s := NewSession(local, fakeStreamFactory, true, []Extension{})
 
 	// Start a stream
 	f := frame.NewWStreamSyn()
@@ -235,7 +235,30 @@ func TestNetListener(t *testing.T) {
 	t.Parallel()
 
 	_ = func() {
-		s := NewSession(new(fakeConn), NewStream, false)
+		s := NewSession(new(fakeConn), NewStream, false, []Extension{})
 		http.Serve(s.NetListener(), nil)
+	}
+}
+
+func TestNetListenerAccept(t *testing.T) {
+	t.Parallel()
+	local, remote := newFakeConnPair()
+
+	sLocal := NewSession(local, NewStream, false, []Extension{})
+	sRemote := NewSession(remote, NewStream, true, []Extension{})
+
+	go func() {
+		_, err := sRemote.Open()
+		if err != nil {
+			t.Errorf("Failed to open stream: %v", err)
+			return
+		}
+	}()
+
+	l := sLocal.NetListener()
+
+	_, err := l.Accept()
+	if err != nil {
+		t.Fatalf("Failed to accept stream: %v", err)
 	}
 }

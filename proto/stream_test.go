@@ -14,7 +14,7 @@ func TestSendHalfCloseWithZeroWindow(t *testing.T) {
 
 	local, remote := newFakeConnPair()
 
-	s := NewSession(local, NewStream, false)
+	s := NewSession(local, NewStream, false, []Extension{})
 	s.(*Session).defaultWindowSize = 10
 
 	go func() {
@@ -93,7 +93,7 @@ func TestSendHalfCloseWithZeroWindow(t *testing.T) {
 func TestDataAfterRst(t *testing.T) {
 	local, remote := newFakeConnPair()
 
-	_ = NewSession(local, NewStream, false)
+	_ = NewSession(local, NewStream, false, []Extension{})
 	trans := frame.NewBasicTransport(remote)
 
 	// make sure that we get an RST STREAM_CLOSED
@@ -150,7 +150,7 @@ func TestDataAfterRst(t *testing.T) {
 func TestFlowControlError(t *testing.T) {
 	local, remote := newFakeConnPair()
 
-	s := NewSession(local, NewStream, false)
+	s := NewSession(local, NewStream, false, []Extension{})
 	s.(*Session).defaultWindowSize = 10
 	trans := frame.NewBasicTransport(remote)
 
@@ -199,7 +199,7 @@ func TestFlowControlError(t *testing.T) {
 func TestTolerateLateFrameAfterRst(t *testing.T) {
 	local, remote := newFakeConnPair()
 
-	s := NewSession(local, NewStream, false)
+	s := NewSession(local, NewStream, false, []Extension{})
 	trans := frame.NewBasicTransport(remote)
 
 	// make sure that we don't get any error on a late frame
@@ -246,7 +246,7 @@ func TestRemoveAfterHalfClose(t *testing.T) {
 	local, remote := newFakeConnPair()
 	remote.Discard()
 
-	s := NewSession(local, NewStream, false)
+	s := NewSession(local, NewStream, false, []Extension{})
 	trans := frame.NewBasicTransport(remote)
 
 	// open stream

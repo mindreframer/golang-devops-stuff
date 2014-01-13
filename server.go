@@ -3,6 +3,7 @@ package muxado
 import (
 	"crypto/tls"
 	"github.com/inconshreveable/muxado/proto"
+	"github.com/inconshreveable/muxado/proto/ext"
 	"net"
 )
 
@@ -38,7 +39,7 @@ func (l *Listener) Close() error {
 
 // Server returns a muxado server session using conn as the transport.
 func Server(conn net.Conn) Session {
-	return &sessionAdaptor{proto.NewSession(conn, proto.NewStream, false)}
+	return &sessionAdaptor{proto.NewSession(conn, proto.NewStream, false, []proto.Extension{ext.NewDefaultHeartbeat()})}
 }
 
 // Listen binds to a network address and returns a Listener which accepts
@@ -61,4 +62,10 @@ func ListenTLS(network, addr string, tlsConfig *tls.Config) (*Listener, error) {
 	}
 
 	return &Listener{l}, nil
+}
+
+// NewListener creates a new muxado listener which creates new muxado server sessions
+// by accepting connections from the given net.Listener
+func NewListener(l net.Listener) *Listener {
+	return &Listener{l}
 }

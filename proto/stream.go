@@ -18,17 +18,17 @@ var (
 )
 
 type Stream struct {
-	id              frame.StreamId       // stream id (const)
-	relatedStreamId frame.StreamId       // related stream id (const)
-	session         session              // the parent session (const)
-	inBuffer        *buffer.Inbound      // buffer for data coming in from the remote side
-	outBuffer       *buffer.Outbound     // manages size of the outbound window
-	sentRst         uint32               // == 1 only if we sent a reset to close this connection
-	writer          sync.Mutex           // only one writer at a time
-	wdata           *frame.WStreamData   // the frame this stream is currently writing
-	winc            *frame.WStreamWndInc // window increment currently being written
-	readDeadline    time.Time            // deadline for reads (protected by buffer mutex)
-	writeDeadline   time.Time            // deadline for writes (protected by writer mutex)
+	id            frame.StreamId       // stream id (const)
+	streamType    frame.StreamType     // related stream id (const)
+	session       session              // the parent session (const)
+	inBuffer      *buffer.Inbound      // buffer for data coming in from the remote side
+	outBuffer     *buffer.Outbound     // manages size of the outbound window
+	sentRst       uint32               // == 1 only if we sent a reset to close this connection
+	writer        sync.Mutex           // only one writer at a time
+	wdata         *frame.WStreamData   // the frame this stream is currently writing
+	winc          *frame.WStreamWndInc // window increment currently being written
+	readDeadline  time.Time            // deadline for reads (protected by buffer mutex)
+	writeDeadline time.Time            // deadline for writes (protected by writer mutex)
 }
 
 // private interface for Streams to call Sessions
@@ -42,15 +42,15 @@ type session interface {
 ////////////////////////////////
 // public interface
 ////////////////////////////////
-func NewStream(id, related frame.StreamId, priority frame.StreamPriority, finLocal bool, finRemote bool, windowSize uint32, sess session) stream {
+func NewStream(id frame.StreamId, priority frame.StreamPriority, streamType frame.StreamType, finLocal bool, finRemote bool, windowSize uint32, sess session) stream {
 	str := &Stream{
-		id:              id,
-		inBuffer:        buffer.NewInbound(int(windowSize)),
-		outBuffer:       buffer.NewOutbound(int(windowSize)),
-		relatedStreamId: related,
-		session:         sess,
-		wdata:           frame.NewWStreamData(),
-		winc:            frame.NewWStreamWndInc(),
+		id:         id,
+		inBuffer:   buffer.NewInbound(int(windowSize)),
+		outBuffer:  buffer.NewOutbound(int(windowSize)),
+		streamType: streamType,
+		session:    sess,
+		wdata:      frame.NewWStreamData(),
+		winc:       frame.NewWStreamWndInc(),
 	}
 
 	if finLocal {
@@ -124,8 +124,8 @@ func (s *Stream) Id() frame.StreamId {
 	return s.id
 }
 
-func (s *Stream) RelatedStreamId() frame.StreamId {
-	return s.relatedStreamId
+func (s *Stream) StreamType() frame.StreamType {
+	return s.streamType
 }
 
 func (s *Stream) Session() ISession {
