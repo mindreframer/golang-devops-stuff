@@ -6,10 +6,10 @@ import (
 	"fmt"
 	. "launchpad.net/gocheck"
 	"net/http"
+	"time"
 
 	"github.com/cloudfoundry/gorouter/common"
 	"github.com/cloudfoundry/yagnats"
-
 	"github.com/cloudfoundry/gorouter/route"
 )
 
@@ -20,6 +20,7 @@ type TestApp struct {
 	mbusClient yagnats.NATSClient
 	tags       map[string]string
 	mux        *http.ServeMux
+	stopped	   bool
 }
 
 func NewTestApp(urls []route.Uri, rPort uint16, mbusClient yagnats.NATSClient, tags map[string]string) *TestApp {
@@ -55,10 +56,19 @@ func (a *TestApp) Listen() {
 		Addr:    fmt.Sprintf(":%d", a.port),
 		Handler: a.mux,
 	}
-
 	a.Register()
-
 	go server.ListenAndServe()
+}
+
+func (a *TestApp) RegisterRepeatedly(duration time.Duration){
+	a.stopped = false
+	for {
+		if a.stopped {
+			break
+		}
+		a.Register()
+		time.Sleep(duration)
+	}
 }
 
 func (a *TestApp) Register() {
@@ -89,6 +99,7 @@ func (a *TestApp) Unregister() {
 
 	b, _ := json.Marshal(rm)
 	a.mbusClient.Publish("router.unregister", b)
+	a.stopped = true
 }
 
 func (a *TestApp) VerifyAppStatus(status int, c *C) {

@@ -3,7 +3,7 @@ package main
 import (
 	"flag"
 
-	"github.com/cloudfoundry/gorouter"
+	"github.com/cloudfoundry/gorouter/router"
 	"github.com/cloudfoundry/gorouter/config"
 	"github.com/cloudfoundry/gorouter/log"
 )
