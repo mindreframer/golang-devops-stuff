@@ -161,10 +161,13 @@ done < Procfile'''.format(port=port, host=host.split('@')[-1], process=process, 
     log('waiting for container to boot and report ip-address')
     # Allow container to bootup.
     ip = None
-    for _ in xrange(45):
+    for _ in xrange(` + DYNO_IP_RESOLUTION_TIMEOUT_SECONDS + `):
         time.sleep(1)
         try:
             ip = getIp(container)
+
+            if ip:
+                break
         except:
             continue
 
@@ -174,16 +177,28 @@ done < Procfile'''.format(port=port, host=host.split('@')[-1], process=process, 
 
         if process == 'web':
             log('waiting for web-server to finish starting up')
-            try:
-                subprocess.check_call([
-                    '/usr/bin/curl',
-                    '--silent',
-                    '--output', '/dev/null',
-                    '--write-out', '%{http_code} %{url_effective}\n',
-                    '{0}:{1}/'.format(ip, port),
-                ], stderr=sys.stderr, stdout=sys.stdout)
-            except subprocess.CalledProcessError, e:
-                sys.stderr.write('- error: curl http check failed, {0}\n'.format(e))
+            webStarted = False
+            for _ in xrange(` + DYNO_WEB_SERVER_TIMEOUT_SECONDS + `):
+                try:
+                    time.sleep(1)
+
+                    subprocess.check_call([
+                        '/usr/bin/curl',
+                        '--silent',
+                        '--output', '/dev/null',
+                        '--write-out', '%{http_code} %{url_effective}\n',
+                        '{0}:{1}/'.format(ip, port),
+                    ], stderr=sys.stderr, stdout=sys.stdout)
+                    log('web server started successfully')
+                    webStarted = True
+                    break                
+
+                except subprocess.CalledProcessError, e:
+                    sys.stderr.write('- error: curl http check failed, {0}\n'.format(e))
+                    continue                    
+            
+            if webStarted is False:
+                sys.stderr.write('- error: curl http timedout. webserver didnt start')
                 sys.exit(1)
 
     else:

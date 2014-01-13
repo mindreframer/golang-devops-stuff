@@ -52,10 +52,12 @@ const (
 	GIT_DIRECTORY                      = "/git"
 	DEFAULT_NODE_USERNAME              = "ubuntu"
 	VERSION                            = "0.1.4"
-	NODE_SYNC_TIMEOUT_SECONDS          = 180
-	DYNO_START_TIMEOUT_SECONDS         = 120
+	NODE_SYNC_TIMEOUT_SECONDS          = 360
+	DYNO_START_TIMEOUT_SECONDS         = 240
 	LOAD_BALANCER_SYNC_TIMEOUT_SECONDS = 45
-	DEPLOY_TIMEOUT_SECONDS             = 240
+	DYNO_IP_RESOLUTION_TIMEOUT_SECONDS = "120"
+	DYNO_WEB_SERVER_TIMEOUT_SECONDS    = "45"
+	DEPLOY_TIMEOUT_SECONDS             = 480
 	STATUS_MONITOR_INTERVAL_SECONDS    = 15
 	DEFAULT_SSH_PARAMETERS             = "-o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=30" // NB: Notice 30s connect timeout.
 )

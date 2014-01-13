@@ -29,12 +29,16 @@ echo 'info: fetching dependencies'
 dependencies=$(find src -wholename '*.go' -exec awk '{ if ($1 ~ /^import/ && $2 ~ /[(]/) { s=1; next; } if ($1 ~ /[)]/) { s=0; } if (s) print; }' {} \; | grep -v '^[^\.]*$' | tr -d '\t' | tr -d '"' | sed 's/^\. \{1,\}//g' | sort | uniq | grep -v '^[ \t]*\/\/')
 for dependency in $dependencies; do
     echo "info:     retrieving: ${dependency}"
-    if test -n "${forceUpdate}" || ! test -d "${GOPATH}/src/${dependency}"; then
-        go get -u $dependency
-        rc=$?
-        test $rc -ne 0 && echo "error: retrieving dependency ${dependency} exited with non-zero status code ${rc}" && exit $rc
+    if [ "$dependency" == "." ]; then
+        echo 'info:         -> skipping current dir'
     else
-        echo 'info:         -> already exists, skipping'
+        if test -n "${forceUpdate}" || ! test -d "${GOPATH}/src/${dependency}"; then
+            go get -u $dependency
+            rc=$?
+            test $rc -ne 0 && echo "error: retrieving dependency ${dependency} exited with non-zero status code ${rc}" && exit $rc
+        else
+            echo 'info:         -> already exists, skipping'
+        fi
     fi
 done
 
