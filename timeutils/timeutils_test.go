@@ -88,3 +88,17 @@ func (s *TimeUtilsSuite) TestTimes(c *C) {
 	tm := &RealTime{}
 	c.Assert(tm.UtcNow(), NotNil)
 }
+
+func (s *TimeUtilsSuite) TestBackoffTimer(c *C) {
+	bo := NewBackoffTimer(1.0, 30.0)
+	val := bo.Delay
+	bo.Increase()
+	if val > bo.Delay {
+		c.Errorf("delay didn't increase? %f > %f", val, bo.Delay)
+	}
+	val = bo.Delay
+	bo.Reset()
+	if bo.Delay > val {
+		c.Errorf("delay didn't decrease? %f < %f", bo.Delay, val)
+	}
+}

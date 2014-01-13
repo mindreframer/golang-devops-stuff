@@ -13,9 +13,9 @@ import (
 func parseOptions() (*serviceOptions, error) {
 	options := &serviceOptions{}
 
-	flag.Var(&options.controlServers, "c", "HTTP control server url")
+	flag.StringVar(&options.codePath, "js", "", "Js code path")
 	flag.StringVar(&options.backend, "b", "memory", "Backend type e.g. 'cassandra' or 'memory'")
-	flag.StringVar(&options.loadBalancer, "lb", "cassandra", "Loadbalancer algo, e.g. 'random'")
+	flag.StringVar(&options.loadBalancer, "lb", "random", "Loadbalancer algo, e.g. 'random'")
 
 	flag.StringVar(&options.host, "h", "localhost", "Host to bind to")
 	flag.IntVar(&options.httpPort, "p", 8080, "HTTP port to bind to")
@@ -30,6 +30,15 @@ func parseOptions() (*serviceOptions, error) {
 
 	flag.DurationVar(&options.cleanupPeriod, "logcleanup", time.Duration(24)*time.Hour, "How often should we remove unused golang logs (e.g. 24h, 1h, 7h)")
 
+	flag.StringVar(&options.discovery, "discovery", "disabled", "Discovery Backend e.g. 'disabled', 'rackspace://${USERNAME}:${API_KEY}', or 'etcd")
+	flag.Var(&options.etcdEndpoints, "etcd", "Etcd discovery service API endpoints")
+
+	flag.StringVar(&options.sslCertFile, "sslcert", "", "File containing SSL Certificates")
+	flag.StringVar(&options.sslKeyFile, "sslkey", "", "File containing SSL Private Key")
+
+	flag.StringVar(&options.metricsOutput, "metrics", "console", "Comma seperated list of where to send metrics.")
+	flag.StringVar(&options.cpuProfile, "cpuprofile", "", "Run with CPU Profiling enabled.")
+
 	flag.Parse()
 
 	return options, nil
@@ -37,11 +46,18 @@ func parseOptions() (*serviceOptions, error) {
 
 type serviceOptions struct {
 	// Pid path
-	pidPath string
-	// Control servers to bind to
-	controlServers listOptions
-	backend        string
-	loadBalancer   string
+	pidPath       string
+	metricsOutput string
+
+	codePath     string
+	backend      string
+	loadBalancer string
+
+	sslCertFile string
+	sslKeyFile  string
+
+	discovery  string
+	cpuProfile string
 
 	// Host and port to bind to
 	host     string
@@ -52,6 +68,9 @@ type serviceOptions struct {
 	cassandraKeyspace       string
 	cassandraCleanup        bool
 	cassandraCleanupOptions cleanupOptions
+
+	// Discovery service
+	etcdEndpoints listOptions
 
 	// How often should we clean up golang old logs
 	cleanupPeriod time.Duration
