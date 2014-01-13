@@ -20,7 +20,7 @@ func MarshalAttributes(m interface{}) ([]Attribute, error) {
 	builder.buffer = []Attribute{}
 	for _, f := range cachedTypeFields(v.Type()) { // loop on each field
 		fv := fieldByIndex(v, f.index)
-		if !fv.IsValid() || isEmptyValue(fv) {
+		if !fv.IsValid() || isEmptyValueToOmit(fv) {
 			continue
 		}
 
@@ -291,6 +291,18 @@ func numericReflectedValueString(v reflect.Value) (string, error) {
 		return strconv.FormatFloat(f, 'g', -1, v.Type().Bits()), nil
 	}
 	return "", fmt.Errorf("UnsupportedNumericValueError %#v", v.Type())
+}
+
+// In DynamoDB we should omit empty value in some type
+// See http://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_PutItem.html
+func isEmptyValueToOmit(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice, reflect.String, reflect.Interface, reflect.Ptr:
+		// should omit if empty value
+		return isEmptyValue(v)
+	}
+	// otherwise should not omit
+	return false
 }
 
 // ---------------- Below are copied handy functions from http://golang.org/src/pkg/encoding/json/encode.go --------------------------------

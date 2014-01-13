@@ -12,6 +12,9 @@ package s3
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/xml"
 	"fmt"
 	"github.com/crowdmob/goamz/aws"
@@ -157,13 +160,36 @@ func (b *Bucket) Get(path string) (data []byte, err error) {
 	return data, err
 }
 
-// GetReader retrieves an object from an S3 bucket.
+// GetReader retrieves an object from an S3 bucket,
+// returning the body of the HTTP response.
 // It is the caller's responsibility to call Close on rc when
 // finished reading.
 func (b *Bucket) GetReader(path string) (rc io.ReadCloser, err error) {
+	resp, err := b.GetResponse(path)
+	if resp != nil {
+		return resp.Body, err
+	}
+	return nil, err
+}
+
+// GetResponse retrieves an object from an S3 bucket,
+// returning the HTTP response.
+// It is the caller's responsibility to call Close on rc when
+// finished reading
+func (b *Bucket) GetResponse(path string) (resp *http.Response, err error) {
+	return b.GetResponseWithHeaders(path, make(http.Header))
+}
+
+// GetReaderWithHeaders retrieves an object from an S3 bucket
+// Accepts custom headers to be sent as the second parameter
+// returning the body of the HTTP response.
+// It is the caller's responsibility to call Close on rc when
+// finished reading
+func (b *Bucket) GetResponseWithHeaders(path string, headers map[string][]string) (resp *http.Response, err error) {
 	req := &request{
-		bucket: b.Name,
-		path:   path,
+		bucket:  b.Name,
+		path:    path,
+		headers: headers,
 	}
 	err = b.S3.prepare(req)
 	if err != nil {
@@ -177,7 +203,7 @@ func (b *Bucket) GetReader(path string) (rc io.ReadCloser, err error) {
 		if err != nil {
 			return nil, err
 		}
-		return resp.Body, nil
+		return resp, nil
 	}
 	panic("unreachable")
 }
@@ -276,6 +302,49 @@ func (b *Bucket) PutReader(path string, r io.Reader, length int64, contType stri
 		headers: headers,
 		payload: r,
 	}
+	return b.S3.query(req, nil)
+}
+
+type RoutingRule struct {
+	ConditionKeyPrefixEquals     string `xml:"Condition>KeyPrefixEquals"`
+	RedirectReplaceKeyPrefixWith string `xml:"Redirect>ReplaceKeyPrefixWith,omitempty"`
+	RedirectReplaceKeyWith       string `xml:"Redirect>ReplaceKeyWith,omitempty"`
+}
+
+type WebsiteConfiguration struct {
+	XMLName             xml.Name       `xml:"http://s3.amazonaws.com/doc/2006-03-01/ WebsiteConfiguration"`
+	IndexDocumentSuffix string         `xml:"IndexDocument>Suffix"`
+	ErrorDocumentKey    string         `xml:"ErrorDocument>Key"`
+	RoutingRules        *[]RoutingRule `xml:"RoutingRules>RoutingRule,omitempty"`
+}
+
+func (b *Bucket) PutBucketWebsite(configuration WebsiteConfiguration) error {
+
+	doc, err := xml.Marshal(configuration)
+	if err != nil {
+		return err
+	}
+
+	buf := new(bytes.Buffer)
+	buf.WriteString(xml.Header)
+	buf.Write(doc)
+
+	return b.PutBucketSubresource("website", buf, int64(buf.Len()))
+}
+
+func (b *Bucket) PutBucketSubresource(subresource string, r io.Reader, length int64) error {
+	headers := map[string][]string{
+		"Content-Length": {strconv.FormatInt(length, 10)},
+	}
+	req := &request{
+		path:    "/",
+		method:  "PUT",
+		bucket:  b.Name,
+		headers: headers,
+		payload: r,
+		params:  url.Values{subresource: {""}},
+	}
+
 	return b.S3.query(req, nil)
 }
 
@@ -505,11 +574,40 @@ func (b *Bucket) SignedURL(path string, expires time.Time) string {
 	}
 }
 
+// PostFormArgs returns the action and input fields needed to allow anonymous
+// uploads to a bucket within the expiration limit
+func (b *Bucket) PostFormArgs(path string, expires time.Time, redirect string) (action string, fields map[string]string) {
+	conditions := make([]string, 0)
+	fields = map[string]string{
+		"AWSAccessKeyId": b.Auth.AccessKey,
+		"key":            path,
+	}
+
+	conditions = append(conditions, fmt.Sprintf("{\"key\": \"%s\"}", path))
+	conditions = append(conditions, fmt.Sprintf("{\"bucket\": \"%s\"}", b.Name))
+	if redirect != "" {
+		conditions = append(conditions, fmt.Sprintf("{\"success_action_redirect\": \"%s\"}", redirect))
+		fields["success_action_redirect"] = redirect
+	}
+
+	vExpiration := expires.Format("2006-01-02T15:04:05Z")
+	vConditions := strings.Join(conditions, ",")
+	policy := fmt.Sprintf("{\"expiration\": \"%s\", \"conditions\": [%s]}", vExpiration, vConditions)
+	policy64 := base64.StdEncoding.EncodeToString([]byte(policy))
+	fields["policy"] = policy64
+
+	signer := hmac.New(sha1.New, []byte(b.Auth.SecretKey))
+	signer.Write([]byte(policy64))
+	fields["signature"] = base64.StdEncoding.EncodeToString(signer.Sum(nil))
+
+	action = fmt.Sprintf("%s/%s/", b.S3.Region.S3Endpoint, b.Name)
+	return
+}
+
 type request struct {
 	method   string
 	bucket   string
 	path     string
-	signpath string
 	params   url.Values
 	headers  http.Header
 	baseurl  string
@@ -540,6 +638,8 @@ func (s3 *S3) query(req *request, resp interface{}) error {
 
 // prepare sets up req to be delivered to S3.
 func (s3 *S3) prepare(req *request) error {
+	var signpath = req.path
+
 	if !req.prepared {
 		req.prepared = true
 		if req.method == "" {
@@ -559,7 +659,7 @@ func (s3 *S3) prepare(req *request) error {
 		if !strings.HasPrefix(req.path, "/") {
 			req.path = "/" + req.path
 		}
-		req.signpath = req.path
+		signpath = req.path
 		if req.bucket != "" {
 			req.baseurl = s3.Region.S3BucketEndpoint
 			if req.baseurl == "" {
@@ -573,7 +673,7 @@ func (s3 *S3) prepare(req *request) error {
 				}
 				req.baseurl = strings.Replace(req.baseurl, "${bucket}", req.bucket, -1)
 			}
-			req.signpath = "/" + req.bucket + req.signpath
+			signpath = "/" + req.bucket + signpath
 		}
 	}
 
@@ -583,7 +683,7 @@ func (s3 *S3) prepare(req *request) error {
 	if err != nil {
 		return fmt.Errorf("bad S3 endpoint URL %q: %v", req.baseurl, err)
 	}
-	reqSignpathSpaceFix := (&url.URL{Path: req.signpath}).String()
+	reqSignpathSpaceFix := (&url.URL{Path: signpath}).String()
 	req.headers["Host"] = []string{u.Host}
 	req.headers["Date"] = []string{time.Now().In(time.UTC).Format(time.RFC1123)}
 	if s3.Auth.Token() != "" {

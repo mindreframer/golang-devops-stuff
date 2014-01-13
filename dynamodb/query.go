@@ -12,9 +12,24 @@ func (t *Table) Query(attributeComparisons []AttributeComparison) ([]map[string]
 	return runQuery(q, t)
 }
 
+func (t *Table) QueryOnIndex(attributeComparisons []AttributeComparison, indexName string) ([]map[string]*Attribute, error) {
+	q := NewQuery(t)
+	q.AddKeyConditions(attributeComparisons)
+	q.AddIndex(indexName)
+	return runQuery(q, t)
+}
+
 func (t *Table) LimitedQuery(attributeComparisons []AttributeComparison, limit int64) ([]map[string]*Attribute, error) {
 	q := NewQuery(t)
 	q.AddKeyConditions(attributeComparisons)
+	q.AddLimit(limit)
+	return runQuery(q, t)
+}
+
+func (t *Table) LimitedQueryOnIndex(attributeComparisons []AttributeComparison, indexName string, limit int64) ([]map[string]*Attribute, error) {
+	q := NewQuery(t)
+	q.AddKeyConditions(attributeComparisons)
+	q.AddIndex(indexName)
 	q.AddLimit(limit)
 	return runQuery(q, t)
 }

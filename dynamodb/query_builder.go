@@ -2,7 +2,6 @@ package dynamodb
 
 import (
 	"encoding/json"
-	"strconv"
 )
 
 type msi map[string]interface{}
@@ -114,16 +113,24 @@ func (q *Query) AddCreateRequestTable(description TableDescriptionT) {
 	// Todo: Implement LocalSecondayIndexes
 }
 
+func (q *Query) AddDeleteRequestTable(description TableDescriptionT) {
+	b := q.buffer
+	b["TableName"] = description.TableName
+}
+
 func (q *Query) AddKeyConditions(comparisons []AttributeComparison) {
 	q.buffer["KeyConditions"] = buildComparisons(comparisons)
 }
 
 func (q *Query) AddLimit(limit int64) {
-	//TODO: check this ... really add a string containing an int?
-	q.buffer["Limit"] = strconv.FormatInt(limit, 10)
+	q.buffer["Limit"] = limit
 }
 func (q *Query) AddSelect(value string) {
 	q.buffer["Select"] = value
+}
+
+func (q *Query) AddIndex(value string) {
+	q.buffer["IndexName"] = value
 }
 
 /*
@@ -148,8 +155,10 @@ func buildComparisons(comparisons []AttributeComparison) msi {
 		for _, attributeValue := range c.AttributeValueList {
 			avlist = append(avlist, msi{attributeValue.Type: attributeValue.Value})
 		}
-		out[c.AttributeName] = msi{"AttributeValueList": avlist}
-		out["ComparisonOperator"] = c.ComparisonOperator
+		out[c.AttributeName] = msi{
+			"AttributeValueList": avlist,
+			"ComparisonOperator": c.ComparisonOperator,
+		}
 	}
 
 	return out
@@ -163,13 +172,17 @@ func (q *Query) AddItem(attributes []Attribute) {
 func (q *Query) AddUpdates(attributes []Attribute, action string) {
 	updates := msi{}
 	for _, a := range attributes {
-		//UGH!!  (I miss the query operator)
-		updates[a.Name] = msi{
+		au := msi{
 			"Value": msi{
 				a.Type: map[bool]interface{}{true: a.SetValues, false: a.Value}[a.SetType()],
 			},
 			"Action": action,
 		}
+		// Delete 'Value' from AttributeUpdates if Type is not Set
+		if action == "DELETE" && !a.SetType() {
+			delete(au, "Value")
+		}
+		updates[a.Name] = au
 	}
 
 	q.buffer["AttributeUpdates"] = updates
