@@ -79,7 +79,7 @@ func (s *S) TestHead(c *gocheck.C) {
 	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
 
 	c.Assert(err, gocheck.IsNil)
-	c.Assert(resp.ContentLength, gocheck.Equals, int64(-1))
+	c.Assert(resp.ContentLength, gocheck.FitsTypeOf, int64(0))
 	c.Assert(resp, gocheck.FitsTypeOf, &http.Response{})
 }
 

@@ -219,6 +219,17 @@ func (q *Queue) Delete() (resp *DeleteQueueResponse, err error) {
 	return
 }
 
+func (q *Queue) SendMessageWithDelay(MessageBody string, DelaySeconds int64) (resp *SendMessageResponse, err error) {
+	resp = &SendMessageResponse{}
+	params := makeParams("SendMessage")
+
+	params["MessageBody"] = MessageBody
+	params["DelaySeconds"] = strconv.Itoa(int(DelaySeconds))
+
+	err = q.SQS.query(q.Url, params, resp)
+	return
+}
+
 func (q *Queue) SendMessage(MessageBody string) (resp *SendMessageResponse, err error) {
 	resp = &SendMessageResponse{}
 	params := makeParams("SendMessage")

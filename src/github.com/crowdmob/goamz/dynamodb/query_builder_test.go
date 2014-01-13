@@ -4,32 +4,41 @@ import (
 	simplejson "github.com/bitly/go-simplejson"
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/dynamodb"
-	"testing"
+	"launchpad.net/gocheck"
 )
 
-func TestEmptyQuery(t *testing.T) {
+type QueryBuilderSuite struct {
+	server *dynamodb.Server
+}
+
+var _ = gocheck.Suite(&QueryBuilderSuite{})
+
+func (s *QueryBuilderSuite) SetUpSuite(c *gocheck.C) {
+	auth := &aws.Auth{AccessKey: "", SecretKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}
+	s.server = &dynamodb.Server{*auth, aws.USEast}
+}
+
+func (s *QueryBuilderSuite) TestEmptyQuery(c *gocheck.C) {
 	q := dynamodb.NewEmptyQuery()
 	queryString := q.String()
 	expectedString := "{}"
+	c.Check(queryString, gocheck.Equals, expectedString)
 
 	if expectedString != queryString {
-		t.Fatalf("Unexpected Query String : %s\n", queryString)
+		c.Fatalf("Unexpected Query String : %s\n", queryString)
 	}
-
 }
 
-func TestAddWriteRequestItems(t *testing.T) {
-	auth := &aws.Auth{AccessKey: "", SecretKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}
-	server := dynamodb.Server{*auth, aws.USEast}
+func (s *QueryBuilderSuite) TestAddWriteRequestItems(c *gocheck.C) {
 	primary := dynamodb.NewStringAttribute("WidgetFoo", "")
 	secondary := dynamodb.NewNumericAttribute("Created", "")
 	key := dynamodb.PrimaryKey{primary, secondary}
-	table := server.NewTable("FooData", key)
+	table := s.server.NewTable("FooData", key)
 
 	primary2 := dynamodb.NewStringAttribute("TestHashKey", "")
 	secondary2 := dynamodb.NewNumericAttribute("TestRangeKey", "")
 	key2 := dynamodb.PrimaryKey{primary2, secondary2}
-	table2 := server.NewTable("TestTable", key2)
+	table2 := s.server.NewTable("TestTable", key2)
 
 	q := dynamodb.NewEmptyQuery()
 
@@ -63,69 +72,115 @@ func TestAddWriteRequestItems(t *testing.T) {
 
 	q.AddWriteRequestItems(tableItems)
 
-	desiredString := "{\"RequestItems\":{\"FooData\":[{\"PutRequest\":{\"Item\":{\"testing\":{\"N\":\"4\"},\"testingbatch\":{\"N\":\"2111\"},\"testingstrbatch\":{\"S\":\"mystr\"}}}},{\"PutRequest\":{\"Item\":{\"testing\":{\"N\":\"444\"},\"testingbatch\":{\"N\":\"93748249272\"},\"testingstrbatch\":{\"S\":\"myotherstr\"}}}},{\"DeleteRequest\":{\"Key\":{\"TestHashKeyDel\":{\"S\":\"DelKey\"},\"TestRangeKeyDel\":{\"N\":\"7777777\"}}}}],\"TestTable\":[{\"PutRequest\":{\"Item\":{\"TestHashKey\":{\"S\":\"MyKey\"},\"TestRangeKey\":{\"N\":\"0193820384293\"}}}}]}}"
-	queryString := q.String()
-
-	if queryString != desiredString {
-		t.Fatalf("Unexpected Query String : %s\n", queryString)
+	queryJson, err := simplejson.NewJson([]byte(q.String()))
+	if err != nil {
+		c.Fatal(err)
 	}
+
+	expectedJson, err := simplejson.NewJson([]byte(`
+{
+  "RequestItems": {
+    "TestTable": [
+      {
+        "PutRequest": {
+          "Item": {
+            "TestRangeKey": {
+              "N": "0193820384293"
+            },
+            "TestHashKey": {
+              "S": "MyKey"
+            }
+          }
+        }
+      }
+    ],
+    "FooData": [
+      {
+        "PutRequest": {
+          "Item": {
+            "testingstrbatch": {
+              "S": "mystr"
+            },
+            "testingbatch": {
+              "N": "2111"
+            },
+            "testing": {
+              "N": "4"
+            }
+          }
+        }
+      },
+      {
+        "PutRequest": {
+          "Item": {
+            "testingstrbatch": {
+              "S": "myotherstr"
+            },
+            "testingbatch": {
+              "N": "93748249272"
+            },
+            "testing": {
+              "N": "444"
+            }
+          }
+        }
+      },
+      {
+        "DeleteRequest": {
+          "Key": {
+            "TestRangeKeyDel": {
+              "N": "7777777"
+            },
+            "TestHashKeyDel": {
+              "S": "DelKey"
+            }
+          }
+        }
+      }
+    ]
+  }
+}
+	`))
+	if err != nil {
+		c.Fatal(err)
+	}
+	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
 }
 
-func TestGetItemQuery(t *testing.T) {
-	auth := &aws.Auth{AccessKey: "", SecretKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}
-	server := dynamodb.Server{*auth, aws.USEast}
+func (s *QueryBuilderSuite) TestGetItemQuery(c *gocheck.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	key := dynamodb.PrimaryKey{primary, nil}
-	table := server.NewTable("sites", key)
+	table := s.server.NewTable("sites", key)
 
 	q := dynamodb.NewQuery(table)
 	q.AddKey(table, &dynamodb.Key{HashKey: "test"})
 
-	queryString := []byte(q.String())
-
-	json, err := simplejson.NewJson(queryString)
-
+	queryJson, err := simplejson.NewJson([]byte(q.String()))
 	if err != nil {
-		t.Logf("JSON err : %s\n", err)
-		t.Fatalf("Invalid JSON : %s\n", queryString)
+		c.Fatal(err)
 	}
 
-	tableName := json.Get("TableName").MustString()
-
-	if tableName != "sites" {
-		t.Fatalf("Expected tableName to be sites was : %s", tableName)
-	}
-
-	keyMap, err := json.Get("Key").Map()
-
-	if err != nil {
-		t.Fatalf("Expected a Key")
-	}
-
-	hashRangeKey := keyMap["domain"]
-
-	if hashRangeKey == nil {
-		t.Fatalf("Expected a HashKeyElement found : %s", keyMap)
-	}
-
-	if v, ok := hashRangeKey.(map[string]interface{}); ok {
-		if val, ok := v["S"].(string); ok {
-			if val != "test" {
-				t.Fatalf("Expected HashKeyElement to have the value 'test' found : %s", val)
-			}
+	expectedJson, err := simplejson.NewJson([]byte(`
+{
+	"Key": {
+		"domain": {
+			"S": "test"
 		}
-	} else {
-		t.Fatalf("HashRangeKeyt had the wrong type found : %s", hashRangeKey)
+	},
+	"TableName": "sites"
+}
+	`))
+	if err != nil {
+		c.Fatal(err)
 	}
+	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
 }
 
-func TestUpdateQuery(t *testing.T) {
-	auth := &aws.Auth{AccessKey: "", SecretKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}
-	server := dynamodb.Server{*auth, aws.USEast}
+func (s *QueryBuilderSuite) TestUpdateQuery(c *gocheck.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	rangek := dynamodb.NewNumericAttribute("time", "")
 	key := dynamodb.PrimaryKey{primary, rangek}
-	table := server.NewTable("sites", key)
+	table := s.server.NewTable("sites", key)
 
 	countAttribute := dynamodb.NewNumericAttribute("count", "4")
 	attributes := []dynamodb.Attribute{*countAttribute}
@@ -134,47 +189,41 @@ func TestUpdateQuery(t *testing.T) {
 	q.AddKey(table, &dynamodb.Key{HashKey: "test", RangeKey: "1234"})
 	q.AddUpdates(attributes, "ADD")
 
-	queryString := []byte(q.String())
-
-	json, err := simplejson.NewJson(queryString)
-
+	queryJson, err := simplejson.NewJson([]byte(q.String()))
 	if err != nil {
-		t.Logf("JSON err : %s\n", err)
-		t.Fatalf("Invalid JSON : %s\n", queryString)
+		c.Fatal(err)
 	}
-
-	tableName := json.Get("TableName").MustString()
-
-	if tableName != "sites" {
-		t.Fatalf("Expected tableName to be sites was : %s", tableName)
-	}
-
-	keyMap, err := json.Get("Key").Map()
-
+	expectedJson, err := simplejson.NewJson([]byte(`
+{
+	"AttributeUpdates": {
+		"count": {
+			"Action": "ADD",
+			"Value": {
+				"N": "4"
+			}
+		}
+	},
+	"Key": {
+		"domain": {
+			"S": "test"
+		},
+		"time": {
+			"N": "1234"
+		}
+	},
+	"TableName": "sites"
+}
+	`))
 	if err != nil {
-		t.Fatalf("Expected a Key")
+		c.Fatal(err)
 	}
-
-	hashRangeKey := keyMap["domain"]
-
-	if hashRangeKey == nil {
-		t.Fatalf("Expected a HashKeyElement found : %s", keyMap)
-	}
-
-	rangeKey := keyMap["time"]
-
-	if rangeKey == nil {
-		t.Fatalf("Expected a RangeKeyElement found : %s", keyMap)
-	}
-
+	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
 }
 
-func TestAddUpdates(t *testing.T) {
-	auth := &aws.Auth{AccessKey: "", SecretKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}
-	server := dynamodb.Server{*auth, aws.USEast}
+func (s *QueryBuilderSuite) TestAddUpdates(c *gocheck.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	key := dynamodb.PrimaryKey{primary, nil}
-	table := server.NewTable("sites", key)
+	table := s.server.NewTable("sites", key)
 
 	q := dynamodb.NewQuery(table)
 	q.AddKey(table, &dynamodb.Key{HashKey: "test"})
@@ -182,49 +231,77 @@ func TestAddUpdates(t *testing.T) {
 	attr := dynamodb.NewStringSetAttribute("StringSet", []string{"str", "str2"})
 
 	q.AddUpdates([]dynamodb.Attribute{*attr}, "ADD")
-	queryString := []byte(q.String())
 
-	json, err := simplejson.NewJson(queryString)
-
+	queryJson, err := simplejson.NewJson([]byte(q.String()))
 	if err != nil {
-		t.Logf("JSON err : %s\n", err)
-		t.Fatalf("Invalid JSON : %s\n", queryString)
+		c.Fatal(err)
 	}
-
-	attributeUpdates := json.Get("AttributeUpdates")
-	if _, err := attributeUpdates.Map(); err != nil {
-		t.Fatalf("Expected a AttributeUpdates found")
-	}
-
-	attributesModified := attributeUpdates.Get("StringSet")
-	if _, err := attributesModified.Map(); err != nil {
-		t.Fatalf("Expected a StringSet found : %s", err)
-	}
-
-	action := attributesModified.Get("Action")
-	if v, err := action.String(); err != nil {
-		t.Fatalf("Expected a action to be string : %s", err)
-	} else if v != "ADD" {
-		t.Fatalf("Expected a action to be ADD : %s", v)
-	}
-
-	value := attributesModified.Get("Value")
-	if _, err := value.Map(); err != nil {
-		t.Fatalf("Expected a Value found : %s", err)
-	}
-
-	string_set := value.Get("SS")
-	string_set_ary, err := string_set.StringArray()
-	if err != nil {
-		t.Fatalf("Expected a string set found : %s", err)
-	}
-	if len(string_set_ary) != 2 {
-		t.Fatalf("Expected a string set length to be 2 was : %d", len(string_set_ary))
-	}
-
-	for _, v := range string_set_ary {
-		if v != "str" && v != "str2" {
-			t.Fatalf("Expected a string to be str OR str2 was : %s", v)
+	expectedJson, err := simplejson.NewJson([]byte(`
+{
+	"AttributeUpdates": {
+		"StringSet": {
+			"Action": "ADD",
+			"Value": {
+				"SS": ["str", "str2"]
+			}
 		}
+	},
+	"Key": {
+		"domain": {
+			"S": "test"
+		}
+	},
+	"TableName": "sites"
+}
+	`))
+	if err != nil {
+		c.Fatal(err)
 	}
+	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+}
+
+func (s *QueryBuilderSuite) TestAddKeyConditions(c *gocheck.C) {
+	primary := dynamodb.NewStringAttribute("domain", "")
+	key := dynamodb.PrimaryKey{primary, nil}
+	table := s.server.NewTable("sites", key)
+
+	q := dynamodb.NewQuery(table)
+	acs := []dynamodb.AttributeComparison{
+		*dynamodb.NewStringAttributeComparison("domain", "EQ", "example.com"),
+		*dynamodb.NewStringAttributeComparison("path", "EQ", "/"),
+	}
+	q.AddKeyConditions(acs)
+	queryJson, err := simplejson.NewJson([]byte(q.String()))
+
+	if err != nil {
+		c.Fatal(err)
+	}
+
+	expectedJson, err := simplejson.NewJson([]byte(`
+{
+  "KeyConditions": {
+    "domain": {
+      "AttributeValueList": [
+        {
+          "S": "example.com"
+        }
+      ],
+      "ComparisonOperator": "EQ"
+    },
+    "path": {
+      "AttributeValueList": [
+        {
+          "S": "/"
+        }
+      ],
+      "ComparisonOperator": "EQ"
+    }
+  },
+  "TableName": "sites"
+}
+	`))
+	if err != nil {
+		c.Fatal(err)
+	}
+	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
 }
