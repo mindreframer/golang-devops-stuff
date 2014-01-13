@@ -58,6 +58,10 @@ Optional parameters:
   configuration to be uploaded to the remote machine. Hiera data directories
   must be uploaded using the file provisioner separately.
 
+* `manifest_dir` (string) - The path to a local directory with manifests
+  to be uploaded to the remote machine. This is useful if your main
+  manifest file uses imports.
+
 * `module_paths` (array of strings) - This is an array of paths to module
   directories on your local filesystem. These will be uploaded to the remote
   machine. By default, this is empty.
@@ -82,7 +86,9 @@ for readability) to execute Puppet:
 {{.FacterVars}}{{if .Sudo}} sudo -E {{end}}puppet apply \
   --verbose \
   --modulepath='{{.ModulePath}}' \
-  {{if .HasHieraConfigPath}}--hiera_config='{{.HieraConfigPath}}' {{end}} \
+  {{if ne .HieraConfigPath ""}}--hiera_config='{{.HieraConfigPath}}' {{end}} \
+  {{if ne .ManifestDir ""}}--manifestdir='{{.ManifestDir}}' {{end}} \
+  --detailed-exitcodes \
   {{.ManifestFile}}
 ```
 
@@ -92,7 +98,6 @@ can contain various template variables, defined below:
 
 * `FacterVars` - Shell-friendly string of environmental variables used
   to set custom facts configured for this provisioner.
-* `HasHieraConfigPath` - Boolean true if there is a hiera config path set.
 * `HieraConfigPath` - The path to a hiera configuration file.
 * `ManifestFile` - The path on the remote machine to the manifest file
   for Puppet to use.

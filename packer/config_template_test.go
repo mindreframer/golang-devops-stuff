@@ -2,10 +2,23 @@ package packer
 
 import (
 	"math"
+	"os"
 	"strconv"
 	"testing"
 	"time"
 )
+
+func TestConfigTemplateProcess_env(t *testing.T) {
+	tpl, err := NewConfigTemplate()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	_, err = tpl.Process(`{{env "foo"}}`, nil)
+	if err == nil {
+		t.Fatal("should error")
+	}
+}
 
 func TestConfigTemplateProcess_isotime(t *testing.T) {
 	tpl, err := NewConfigTemplate()
@@ -29,6 +42,27 @@ func TestConfigTemplateProcess_isotime(t *testing.T) {
 	}
 }
 
+func TestConfigTemplateProcess_pwd(t *testing.T) {
+	tpl, err := NewConfigTemplate()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	pwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	result, err := tpl.Process(`{{pwd}}`, nil)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if result != pwd {
+		t.Fatalf("err: %s", result)
+	}
+}
+
 func TestConfigTemplateProcess_timestamp(t *testing.T) {
 	tpl, err := NewConfigTemplate()
 	if err != nil {
@@ -48,6 +82,17 @@ func TestConfigTemplateProcess_timestamp(t *testing.T) {
 	currentTime := time.Now().UTC().Unix()
 	if math.Abs(float64(currentTime-val)) > 10 {
 		t.Fatalf("val: %d (current: %d)", val, currentTime)
+	}
+
+	time.Sleep(2 * time.Second)
+
+	result2, err := tpl.Process(`{{timestamp}}`, nil)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if result != result2 {
+		t.Fatalf("bad: %#v %#v", result, result2)
 	}
 }
 

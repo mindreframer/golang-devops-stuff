@@ -24,10 +24,13 @@ const defaultConfig = `
 		"amazon-instance": "packer-builder-amazon-instance",
 		"digitalocean": "packer-builder-digitalocean",
 		"docker": "packer-builder-docker",
+		"googlecompute": "packer-builder-googlecompute",
 		"openstack": "packer-builder-openstack",
 		"qemu": "packer-builder-qemu",
-		"virtualbox": "packer-builder-virtualbox",
-		"vmware": "packer-builder-vmware"
+		"virtualbox-iso": "packer-builder-virtualbox-iso",
+		"virtualbox-ovf": "packer-builder-virtualbox-ovf",
+		"vmware-iso": "packer-builder-vmware-iso",
+		"vmware-vmx": "packer-builder-vmware-vmx"
 	},
 
 	"commands": {

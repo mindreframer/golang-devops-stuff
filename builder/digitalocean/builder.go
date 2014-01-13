@@ -30,10 +30,11 @@ type config struct {
 	SizeID   uint   `mapstructure:"size_id"`
 	ImageID  uint   `mapstructure:"image_id"`
 
-	SnapshotName string `mapstructure:"snapshot_name"`
-	DropletName  string `mapstructure:"droplet_name"`
-	SSHUsername  string `mapstructure:"ssh_username"`
-	SSHPort      uint   `mapstructure:"ssh_port"`
+	PrivateNetworking bool   `mapstructure:"private_networking"`
+	SnapshotName      string `mapstructure:"snapshot_name"`
+	DropletName       string `mapstructure:"droplet_name"`
+	SSHUsername       string `mapstructure:"ssh_username"`
+	SSHPort           uint   `mapstructure:"ssh_port"`
 
 	RawSSHTimeout   string `mapstructure:"ssh_timeout"`
 	RawStateTimeout string `mapstructure:"state_timeout"`
@@ -88,8 +89,8 @@ func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 	}
 
 	if b.config.ImageID == 0 {
-		// Default to base image "Ubuntu 12.04 x64 Server (id: 284203)"
-		b.config.ImageID = 284203
+		// Default to base image "Ubuntu 12.04.3 x64 Server (id: 1505447)"
+		b.config.ImageID = 1505447
 	}
 
 	if b.config.SnapshotName == "" {

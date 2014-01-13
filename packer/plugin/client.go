@@ -10,7 +10,6 @@ import (
 	"io/ioutil"
 	"log"
 	"net"
-	"net/rpc"
 	"os"
 	"os/exec"
 	"strings"
@@ -35,7 +34,7 @@ type Client struct {
 	exited      bool
 	doneLogging chan struct{}
 	l           sync.Mutex
-	address     string
+	address     net.Addr
 }
 
 // ClientConfig is the configuration used to initialize a new
@@ -130,56 +129,56 @@ func (c *Client) Exited() bool {
 // Returns a builder implementation that is communicating over this
 // client. If the client hasn't been started, this will start it.
 func (c *Client) Builder() (packer.Builder, error) {
-	client, err := c.rpcClient()
+	client, err := c.packrpcClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &cmdBuilder{packrpc.Builder(client), c}, nil
+	return &cmdBuilder{client.Builder(), c}, nil
 }
 
 // Returns a command implementation that is communicating over this
 // client. If the client hasn't been started, this will start it.
 func (c *Client) Command() (packer.Command, error) {
-	client, err := c.rpcClient()
+	client, err := c.packrpcClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &cmdCommand{packrpc.Command(client), c}, nil
+	return &cmdCommand{client.Command(), c}, nil
 }
 
 // Returns a hook implementation that is communicating over this
 // client. If the client hasn't been started, this will start it.
 func (c *Client) Hook() (packer.Hook, error) {
-	client, err := c.rpcClient()
+	client, err := c.packrpcClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &cmdHook{packrpc.Hook(client), c}, nil
+	return &cmdHook{client.Hook(), c}, nil
 }
 
 // Returns a post-processor implementation that is communicating over
 // this client. If the client hasn't been started, this will start it.
 func (c *Client) PostProcessor() (packer.PostProcessor, error) {
-	client, err := c.rpcClient()
+	client, err := c.packrpcClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &cmdPostProcessor{packrpc.PostProcessor(client), c}, nil
+	return &cmdPostProcessor{client.PostProcessor(), c}, nil
 }
 
 // Returns a provisioner implementation that is communicating over this
 // client. If the client hasn't been started, this will start it.
 func (c *Client) Provisioner() (packer.Provisioner, error) {
-	client, err := c.rpcClient()
+	client, err := c.packrpcClient()
 	if err != nil {
 		return nil, err
 	}
 
-	return &cmdProvisioner{packrpc.Provisioner(client), c}, nil
+	return &cmdProvisioner{client.Provisioner(), c}, nil
 }
 
 // End the executing subprocess (if it is running) and perform any cleanup
@@ -207,11 +206,11 @@ func (c *Client) Kill() {
 // This method is safe to call multiple times. Subsequent calls have no effect.
 // Once a client has been started once, it cannot be started again, even if
 // it was killed.
-func (c *Client) Start() (address string, err error) {
+func (c *Client) Start() (addr net.Addr, err error) {
 	c.l.Lock()
 	defer c.l.Unlock()
 
-	if c.address != "" {
+	if c.address != nil {
 		return c.address, nil
 	}
 
@@ -321,8 +320,8 @@ func (c *Client) Start() (address string, err error) {
 		// Trim the line and split by "|" in order to get the parts of
 		// the output.
 		line := strings.TrimSpace(string(lineBytes))
-		parts := strings.SplitN(line, "|", 2)
-		if len(parts) < 2 {
+		parts := strings.SplitN(line, "|", 3)
+		if len(parts) < 3 {
 			err = fmt.Errorf("Unrecognized remote plugin message: %s", line)
 			return
 		}
@@ -334,10 +333,17 @@ func (c *Client) Start() (address string, err error) {
 			return
 		}
 
-		c.address = parts[1]
-		address = c.address
+		switch parts[1] {
+		case "tcp":
+			addr, err = net.ResolveTCPAddr("tcp", parts[2])
+		case "unix":
+			addr, err = net.ResolveUnixAddr("unix", parts[2])
+		default:
+			err = fmt.Errorf("Unknown address type: %s", parts[1])
+		}
 	}
 
+	c.address = addr
 	return
 }
 
@@ -361,20 +367,27 @@ func (c *Client) logStderr(r io.Reader) {
 	close(c.doneLogging)
 }
 
-func (c *Client) rpcClient() (*rpc.Client, error) {
-	address, err := c.Start()
+func (c *Client) packrpcClient() (*packrpc.Client, error) {
+	addr, err := c.Start()
 	if err != nil {
 		return nil, err
 	}
 
-	conn, err := net.Dial("tcp", address)
+	conn, err := net.Dial(addr.Network(), addr.String())
 	if err != nil {
 		return nil, err
 	}
 
-	// Make sure to set keep alive so that the connection doesn't die
-	tcpConn := conn.(*net.TCPConn)
-	tcpConn.SetKeepAlive(true)
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		// Make sure to set keep alive so that the connection doesn't die
+		tcpConn.SetKeepAlive(true)
+	}
 
-	return rpc.NewClient(tcpConn), nil
+	client, err := packrpc.NewClient(conn)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	return client, nil
 }
