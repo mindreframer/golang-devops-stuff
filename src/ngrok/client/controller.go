@@ -122,7 +122,7 @@ func (ctl *Controller) doShutdown() {
 	wg.Wait()
 }
 
-func (ctl *Controller) addView(v mvc.View) {
+func (ctl *Controller) AddView(v mvc.View) {
 	ctl.views = append(ctl.views, v)
 }
 
@@ -130,38 +130,54 @@ func (ctl *Controller) GetWebInspectAddr() string {
 	return ctl.config.InspectAddr
 }
 
+func (ctl *Controller) SetupModel(config *Configuration) *ClientModel {
+	model := newClientModel(config, ctl)
+	ctl.model = model
+	return model
+}
+
+func (ctl *Controller) GetModel() *ClientModel {
+	return ctl.model.(*ClientModel)
+}
+
 func (ctl *Controller) Run(config *Configuration) {
 	// Save the configuration
 	ctl.config = config
 
+	var model *ClientModel
+
+	if ctl.model == nil {
+		model = ctl.SetupModel(config)
+	} else {
+		model = ctl.model.(*ClientModel)
+	}
+
 	// init the model
-	model := newClientModel(config, ctl)
-	ctl.model = model
 	var state mvc.State = model
 
 	// init web ui
 	var webView *web.WebView
 	if config.InspectAddr != "disabled" {
 		webView = web.NewWebView(ctl, config.InspectAddr)
-		ctl.addView(webView)
+		ctl.AddView(webView)
 	}
 
 	// init term ui
 	var termView *term.TermView
 	if config.LogTo != "stdout" {
 		termView = term.NewTermView(ctl)
-		ctl.addView(termView)
+		ctl.AddView(termView)
 	}
 
 	for _, protocol := range model.GetProtocols() {
 		switch p := protocol.(type) {
 		case *proto.Http:
 			if termView != nil {
-				ctl.addView(termView.NewHttpView(p))
+				ctl.AddView(termView.NewHttpView(p))
 			}
 
 			if webView != nil {
-				ctl.addView(webView.NewHttpView(p))
+				ctl.AddView(webView.NewHttpView(p))
 			}
 		default:
 		}
