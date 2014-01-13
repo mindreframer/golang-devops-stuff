@@ -7,11 +7,11 @@ socketmaster(1) -- Zero downtime restart for your apps
 
 ## DESCRIPTION
 
-socketmaster is a generic solution to the restart problem ; you want to restart
-your app but not loose any active connection nor refuse new connections.
+socketmaster is a generic solution to the restart problem: you want to restart
+your app but neither lose any active connection nor refuse new connections.
 
 socketmaster opens the socket you want to listen on and passes it onto your
-program. Because socketmaster is simple enough is doesn't need to be restarted
+program. Because socketmaster is simple enough it doesn't need to be restarted
 and can keep your file-descriptor indefinitely open.
 
   * `-command`=PATH:
@@ -49,7 +49,7 @@ On SIGHUP:
 
 Your server is responsible for:
 
- * open the socket passed on fd 3
+ * opening the socket passed on fd 3
  * not crashing
  * gracefully shutdown on SIGHUP (close the listener, wait for the child
    connections to close)
@@ -57,8 +57,8 @@ Your server is responsible for:
 ## ENVIRONMENT
 
   * `EINHORN_FDS`:
-    This variable is set by socketmaster and passed onto the childs. It's
-    value is always 3 and meant for einhorn compatiblity.
+    This variable is set by socketmaster and passed onto the children. Its
+    value is always 3 and meant for einhorn compatibility.
 
 ## SIGNALS
 
@@ -75,11 +75,13 @@ SIGINT, SIGTERM and SIGQUIT are forwarded to the child processes.
   is a cross-platform C library to work with file-descriptors.
   * [portlisten](http://www.mail-archive.com/kragen-hacks@canonical.org/msg00002.html)
   another approach to port sharing trough UNIX sockets.
+  * [systemd](http://freedesktop.org/wiki/Software/systemd/) is an init system / process manager who supports socket activation and delegation.
+  * [circus](http://circus.readthedocs.org/en/latest/) is a process manager with socket delegation.
 
 ## BUGS & CODE
 
-Bug reports and other contributions are welcome !
-The project's source and issue tracker lies on
+Bug reports and other contributions are welcome!
+The project's source and issue tracker is located at
 <https://github.com/zimbatm/socketmaster/>
 
 ## COPYRIGHT
