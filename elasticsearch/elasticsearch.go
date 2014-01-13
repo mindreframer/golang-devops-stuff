@@ -21,7 +21,7 @@ type ESPlugin struct {
 	ApiPort string
 	Host    string
 	Index   string
-	indexor *core.BulkIndexor
+	indexor *core.BulkIndexer
 	done    chan bool
 }
 
@@ -80,7 +80,7 @@ func (p *ESPlugin) Init(URI string) {
 	api.Domain = p.Host
 	api.Port = p.ApiPort
 
-	p.indexor = core.NewBulkIndexorErrors(50, 60)
+	p.indexor = core.NewBulkIndexerErrors(50, 60)
 	p.done = make(chan bool)
 	p.indexor.Run(p.done)
 

@@ -22,11 +22,16 @@ func TestHTTPOutput(t *testing.T) {
 	input := NewTestInput()
 
 	headers := HTTPHeaders{HTTPHeader{"User-Agent", "Gor"}}
-	output := NewHTTPOutput("127.0.0.1:50003", headers, "")
+	methods := HTTPMethods{"GET", "PUT", "POST"}
+	output := NewHTTPOutput("127.0.0.1:50003", headers, methods, "")
 
 	startHTTP("127.0.0.1:50003", func(req *http.Request) {
 		if req.Header.Get("User-Agent") != "Gor" {
 			t.Error("Wrong header")
+		}
+
+		if req.Method == "OPTIONS" {
+			t.Error("Wrong method")
 		}
 
 		wg.Done()
@@ -39,8 +44,9 @@ func TestHTTPOutput(t *testing.T) {
 
 	for i := 0; i < 100; i++ {
 		wg.Add(2)
-		input.EmitGET()
 		input.EmitPOST()
+		input.EmitOPTIONS()
+		input.EmitGET()
 	}
 
 	wg.Wait()

@@ -92,6 +92,16 @@ gor --input-raw :80 --output-http "http://staging.server" \
     --output-http-header "Enable-Feature-X: true"
 ```
 
+## Filtering HTTP methods
+
+Requests not matching a specified whitelist can be filtered out. For example to strip non-nullipotent requests:
+
+```
+gor --input-raw :80 --output-http "http://staging.server" \
+    --output-http-method GET \
+    --output-http-method OPTIONS
+```
+
 ### Basic Auth
 
 If your development or staging environment is protected by Basic Authentication then those credentials can be injected in during the replay:
