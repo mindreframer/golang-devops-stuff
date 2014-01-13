@@ -1,18 +1,20 @@
 package store
 
 const (
-	Get            = "get"
-	Create         = "create"
-	Set            = "set"
-	Update         = "update"
-	Delete         = "delete"
-	CompareAndSwap = "compareAndSwap"
-	Expire         = "expire"
+	Get              = "get"
+	Create           = "create"
+	Set              = "set"
+	Update           = "update"
+	Delete           = "delete"
+	CompareAndSwap   = "compareAndSwap"
+	CompareAndDelete = "compareAndDelete"
+	Expire           = "expire"
 )
 
 type Event struct {
-	Action string      `json:"action"`
-	Node   *NodeExtern `json:"node,omitempty"`
+	Action   string      `json:"action"`
+	Node     *NodeExtern `json:"node,omitempty"`
+	PrevNode *NodeExtern `json:"prevNode,omitempty"`
 }
 
 func newEvent(action string, key string, modifiedIndex, createdIndex uint64) *Event {
@@ -33,7 +35,7 @@ func (e *Event) IsCreated() bool {
 		return true
 	}
 
-	if e.Action == Set && e.Node.PrevValue == "" {
+	if e.Action == Set && e.PrevNode == nil {
 		return true
 	}
 
@@ -45,16 +47,20 @@ func (e *Event) Index() uint64 {
 }
 
 // Converts an event object into a response object.
-func (event *Event) Response() interface{} {
+func (event *Event) Response(currentIndex uint64) interface{} {
 	if !event.Node.Dir {
 		response := &Response{
 			Action:     event.Action,
 			Key:        event.Node.Key,
 			Value:      event.Node.Value,
-			PrevValue:  event.Node.PrevValue,
+			PrevValue:  event.PrevNode.Value,
 			Index:      event.Node.ModifiedIndex,
 			TTL:        event.Node.TTL,
 			Expiration: event.Node.Expiration,
+		}
+
+		if currentIndex != 0 {
+			response.Index = currentIndex
 		}
 
 		if response.Action == Set {
@@ -78,6 +84,10 @@ func (event *Event) Response() interface{} {
 				Value:  node.Value,
 				Dir:    node.Dir,
 				Index:  node.ModifiedIndex,
+			}
+
+			if currentIndex != 0 {
+				responses[i].Index = currentIndex
 			}
 		}
 		return responses

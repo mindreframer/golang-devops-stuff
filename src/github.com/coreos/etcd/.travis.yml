@@ -1,8 +1,13 @@
 language: go
-go: 1.1
+go: 1.2
 
 install:
  - echo "Skip install"
 
 script:
  - ./test.sh
+
+# temporarily fix Travis
+env:
+  global:
+      - TRAVIS_BUILD_DIR=/home/travis/build/coreos/etcd

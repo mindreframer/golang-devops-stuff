@@ -2,6 +2,7 @@ package v2
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 // Ensures that a value can be retrieve for a given key.
 //
+//   $ curl localhost:4001/v2/keys/foo/bar -> fail
 //   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=XXX
 //   $ curl localhost:4001/v2/keys/foo/bar
 //
@@ -20,9 +22,15 @@ func TestV2GetKey(t *testing.T) {
 	tests.RunServer(func(s *server.Server) {
 		v := url.Values{}
 		v.Set("value", "XXX")
-		resp, _ := tests.PutForm(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo/bar"), v)
+		fullURL := fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo/bar")
+		resp, _ := tests.Get(fullURL)
+		assert.Equal(t, resp.StatusCode, http.StatusNotFound)
+
+		resp, _ = tests.PutForm(fullURL, v)
 		tests.ReadBody(resp)
-		resp, _ = tests.Get(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo/bar"))
+
+		resp, _ = tests.Get(fullURL)
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
 		body := tests.ReadBodyJSON(resp)
 		assert.Equal(t, body["action"], "get", "")
 		node := body["node"].(map[string]interface{})
@@ -51,6 +59,7 @@ func TestV2GetKeyRecursively(t *testing.T) {
 		tests.ReadBody(resp)
 
 		resp, _ = tests.Get(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo?recursive=true"))
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
 		body := tests.ReadBodyJSON(resp)
 		assert.Equal(t, body["action"], "get", "")
 		node := body["node"].(map[string]interface{})
@@ -171,5 +180,53 @@ func TestV2WatchKeyWithIndex(t *testing.T) {
 		assert.Equal(t, node["key"], "/foo/bar", "")
 		assert.Equal(t, node["value"], "YYY", "")
 		assert.Equal(t, node["modifiedIndex"], 3, "")
+	})
+}
+
+// Ensures that a watcher can wait for a value to be set after a given index.
+//
+//   $ curl localhost:4001/v2/keys/keyindir/bar?wait=true
+//   $ curl -X PUT localhost:4001/v2/keys/keyindir -d dir=true -d ttl=1
+//   $ curl -X PUT localhost:4001/v2/keys/keyindir/bar -d value=YYY
+//
+func TestV2WatchKeyInDir(t *testing.T) {
+	tests.RunServer(func(s *server.Server) {
+		var body map[string]interface{}
+		c := make(chan bool)
+
+		// Set a value (before given index).
+		v := url.Values{}
+		v.Set("dir", "true")
+		v.Set("ttl", "1")
+		resp, _ := tests.PutForm(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/keyindir"), v)
+		tests.ReadBody(resp)
+
+		// Set a value (before given index).
+		v = url.Values{}
+		v.Set("value", "XXX")
+		resp, _ = tests.PutForm(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/keyindir/bar"), v)
+		tests.ReadBody(resp)
+
+		go func() {
+			resp, _ := tests.Get(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/keyindir/bar?wait=true"))
+			body = tests.ReadBodyJSON(resp)
+			c <- true
+		}()
+
+		// wait for expiration, we do have a up to 500 millisecond delay
+		time.Sleep(2000 * time.Millisecond)
+
+		select {
+		case <-c:
+
+		default:
+			t.Fatal("cannot get watch result")
+		}
+
+		assert.NotNil(t, body, "")
+		assert.Equal(t, body["action"], "expire", "")
+
+		node := body["node"].(map[string]interface{})
+		assert.Equal(t, node["key"], "/keyindir", "")
 	})
 }
