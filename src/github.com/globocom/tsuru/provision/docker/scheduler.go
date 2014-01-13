@@ -33,7 +33,7 @@ const schedulerCollection = "docker_scheduler"
 type node struct {
 	ID      string `bson:"_id"`
 	Address string
-	Team    string
+	Teams   []string
 }
 
 type segregatedScheduler struct{}
@@ -55,15 +55,13 @@ func (s segregatedScheduler) Schedule(cfg *docker.Config) (string, *docker.Conta
 	if err != nil {
 		return s.fallback(cfg)
 	}
-	if len(app.Teams) == 1 {
-		var nodes []node
-		err = conn.Collection(schedulerCollection).Find(bson.M{"team": app.Teams[0]}).All(&nodes)
-		if err != nil || len(nodes) < 1 {
-			return s.fallback(cfg)
-		}
-		return s.handle(cfg, nodes)
+	var nodes []node
+	query := bson.M{"teams": bson.M{"$in": app.Teams}}
+	err = conn.Collection(schedulerCollection).Find(query).All(&nodes)
+	if err != nil || len(nodes) < 1 {
+		return s.fallback(cfg)
 	}
-	return s.fallback(cfg)
+	return s.handle(cfg, nodes)
 }
 
 func (s segregatedScheduler) fallback(cfg *docker.Config) (string, *docker.Container, error) {
@@ -73,7 +71,7 @@ func (s segregatedScheduler) fallback(cfg *docker.Config) (string, *docker.Conta
 	}
 	defer conn.Close()
 	var nodes []node
-	err = conn.Collection(schedulerCollection).Find(bson.M{"team": ""}).All(&nodes)
+	err = conn.Collection(schedulerCollection).Find(bson.M{"teams": bson.M{"$size": 0}}).All(&nodes)
 	if err != nil || len(nodes) < 1 {
 		return "", nil, errNoFallback
 	}
@@ -108,16 +106,30 @@ func (segregatedScheduler) Nodes() ([]cluster.Node, error) {
 	return result, nil
 }
 
-// AddNodeToScheduler adds a new node to the scheduler, registering for use in
+func (segregatedScheduler) GetNode(id string) (node, error) {
+	conn, err := db.Conn()
+	if err != nil {
+		return node{}, err
+	}
+	defer conn.Close()
+	var n node
+	err = conn.Collection(schedulerCollection).FindId(id).One(&n)
+	if err == mgo.ErrNotFound {
+		return node{}, errNodeNotFound
+	}
+	return n, nil
+}
+
+// Register adds a new node to the scheduler, registering for use in
 // the given team. The team parameter is optional, when set to "", the node
 // will be used as a fallback node.
-func addNodeToScheduler(n cluster.Node, team string) error {
+func (segregatedScheduler) Register(params map[string]string) error {
 	conn, err := db.Conn()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	node := node{ID: n.ID, Address: n.Address, Team: team}
+	node := node{ID: params["ID"], Address: params["address"], Teams: []string{params["team"]}}
 	err = conn.Collection(schedulerCollection).Insert(node)
 	if mgo.IsDup(err) {
 		return errNodeAlreadyRegister
@@ -125,15 +137,15 @@ func addNodeToScheduler(n cluster.Node, team string) error {
 	return err
 }
 
-// RemoveNodeFromScheduler removes a node from the scheduler.
-func removeNodeFromScheduler(n cluster.Node) error {
+// Unregister removes a node from the scheduler.
+func (segregatedScheduler) Unregister(params map[string]string) error {
 	conn, err := db.Conn()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	err = conn.Collection(schedulerCollection).RemoveId(n.ID)
-	if err != nil && err.Error() == "not found" {
+	err = conn.Collection(schedulerCollection).RemoveId(params["ID"])
+	if err == mgo.ErrNotFound {
 		return errNodeNotFound
 	}
 	return err
@@ -170,7 +182,8 @@ func (addNodeToSchedulerCmd) Run(ctx *cmd.Context, client *cmd.Client) error {
 	if len(ctx.Args) > 2 {
 		team = ctx.Args[2]
 	}
-	err := addNodeToScheduler(nd, team)
+	var scheduler segregatedScheduler
+	err := scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": team})
 	if err != nil {
 		return err
 	}
@@ -190,8 +203,8 @@ func (removeNodeFromSchedulerCmd) Info() *cmd.Info {
 }
 
 func (removeNodeFromSchedulerCmd) Run(ctx *cmd.Context, client *cmd.Client) error {
-	nd := cluster.Node{ID: ctx.Args[0]}
-	err := removeNodeFromScheduler(nd)
+	var scheduler segregatedScheduler
+	err := scheduler.Unregister(map[string]string{"ID": ctx.Args[0]})
 	if err != nil {
 		return err
 	}
@@ -216,7 +229,7 @@ func (listNodesInTheSchedulerCmd) Run(ctx *cmd.Context, client *cmd.Client) erro
 		return err
 	}
 	for _, n := range nodes {
-		t.AddRow(cmd.Row([]string{n.ID, n.Address, n.Team}))
+		t.AddRow(cmd.Row([]string{n.ID, n.Address, strings.Join(n.Teams, ", ")}))
 	}
 	t.Sort()
 	ctx.Stdout.Write(t.Bytes())

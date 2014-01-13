@@ -12,6 +12,7 @@ import (
 	dtesting "github.com/fsouza/go-dockerclient/testing"
 	"github.com/globocom/config"
 	"github.com/globocom/docker-cluster/cluster"
+	"github.com/globocom/tsuru/app"
 	"github.com/globocom/tsuru/db"
 	etesting "github.com/globocom/tsuru/exec/testing"
 	ftesting "github.com/globocom/tsuru/fs/testing"
@@ -30,7 +31,7 @@ import (
 )
 
 func (s *S) TestContainerGetAddress(c *gocheck.C) {
-	container := container{ID: "id123", Port: "8888/tcp", HostAddr: "10.10.10.10", HostPort: "49153"}
+	container := container{ID: "id123", Port: "8888", HostAddr: "10.10.10.10", HostPort: "49153"}
 	address := container.getAddress()
 	expected := "http://10.10.10.10:49153"
 	c.Assert(address, gocheck.Equals, expected)
@@ -40,9 +41,7 @@ func (s *S) TestNewContainer(c *gocheck.C) {
 	oldClusterNodes := clusterNodes
 	clusterNodes = map[string]string{"server": s.server.URL()}
 	defer func() { clusterNodes = oldClusterNodes }()
-	err := newImage("tsuru/python", s.server.URL())
-	c.Assert(err, gocheck.IsNil)
-	app := testing.NewFakeApp("app-name", "python", 1)
+	app := testing.NewFakeApp("app-name", "brainfuck", 1)
 	rtesting.FakeRouter.AddBackend(app.GetName())
 	defer rtesting.FakeRouter.RemoveBackend(app.GetName())
 	cont, err := newContainer(app, getImage(app), []string{"docker", "run"})
@@ -157,6 +156,15 @@ func (s *S) TestGetPortUndefined(c *gocheck.C) {
 	c.Assert(err, gocheck.NotNil)
 }
 
+func (s *S) TestGetPortInteger(c *gocheck.C) {
+	old, _ := config.Get("docker:run-cmd:port")
+	defer config.Set("docker:run-cmd:port", old)
+	config.Set("docker:run-cmd:port", 8888)
+	port, err := getPort()
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(port, gocheck.Equals, "8888")
+}
+
 func (s *S) TestContainerSetStatus(c *gocheck.C) {
 	container := container{ID: "something-300"}
 	coll := collection()
@@ -205,7 +213,7 @@ func (s *S) newContainer(opts *newContainerOpts) (*container, error) {
 		ID:       "id",
 		IP:       "10.10.10.10",
 		HostPort: "3333",
-		Port:     "8888/tcp",
+		Port:     "8888",
 		HostAddr: "127.0.0.1",
 	}
 	rtesting.FakeRouter.AddBackend(container.AppName)
@@ -219,7 +227,7 @@ func (s *S) newContainer(opts *newContainerOpts) (*container, error) {
 		return nil, err
 	}
 	ports := make(map[docker.Port]struct{})
-	ports[docker.Port(port)] = struct{}{}
+	ports[docker.Port(fmt.Sprintf("%s/tcp", port))] = struct{}{}
 	config := docker.Config{
 		Image:        "tsuru/python",
 		Cmd:          []string{"ps"},
@@ -366,12 +374,12 @@ func (s *S) TestContainerNetworkInfoNotFound(c *gocheck.C) {
 	defer func() {
 		dCluster = oldCluster
 	}()
-	container := container{ID: "c-01", Port: "8888/tcp"}
+	container := container{ID: "c-01", Port: "8888"}
 	ip, port, err := container.networkInfo()
 	c.Assert(ip, gocheck.Equals, "")
 	c.Assert(port, gocheck.Equals, "")
 	c.Assert(err, gocheck.NotNil)
-	c.Assert(err.Error(), gocheck.Equals, "Container port 8888/tcp is not mapped to any host port")
+	c.Assert(err.Error(), gocheck.Equals, "Container port 8888 is not mapped to any host port")
 }
 
 func (s *S) TestContainerSSH(c *gocheck.C) {
@@ -464,6 +472,40 @@ func (s *S) TestGetImageFromAppPlatform(c *gocheck.C) {
 	c.Assert(img, gocheck.Equals, fmt.Sprintf("%s/python", repoNamespace))
 }
 
+func (s *S) TestGetImageAppWith20Deploys(c *gocheck.C) {
+	var request http.Request
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		request = *r
+	}))
+	defer server.Close()
+	u, _ := url.Parse(server.URL)
+	imageRepo := u.Host + "/tsuru/python"
+	err := newImage(imageRepo, s.server.URL())
+	c.Assert(err, gocheck.IsNil)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	units := []app.Unit{{Name: "4fa6e0f0c678"}, {Name: "e90e34656806"}}
+	app := &app.App{Name: "app1", Platform: "python", Deploys: 20, Units: units}
+	err = conn.Apps().Insert(app)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Apps().Remove(bson.M{"name": "app1"})
+	cont := container{ID: "bleble", Type: "python", AppName: "app1", Image: imageRepo}
+	coll := collection()
+	err = coll.Insert(cont)
+	c.Assert(err, gocheck.IsNil)
+	defer coll.Close()
+	c.Assert(err, gocheck.IsNil)
+	defer coll.RemoveAll(bson.M{"_id": "bleble"})
+	img := getImage(app)
+	repoNamespace, err := config.GetString("docker:repository-namespace")
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(img, gocheck.Equals, fmt.Sprintf("%s/python", repoNamespace))
+	c.Assert(request.Method, gocheck.Equals, "DELETE")
+	path := "/v1/repositories/tsuru/python/tags"
+	c.Assert(request.URL.Path, gocheck.Equals, path)
+}
+
 func (s *S) TestGetImageFromDatabase(c *gocheck.C) {
 	cont := container{ID: "bleble", Type: "python", AppName: "myapp", Image: "someimageid"}
 	coll := collection()
@@ -516,7 +558,6 @@ func (s *S) TestRemoveImageCallsRegistry(c *gocheck.C) {
 	var request http.Request
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		request = *r
-		w.Write([]byte("true"))
 	}))
 	defer server.Close()
 	u, _ := url.Parse(server.URL)
@@ -532,8 +573,7 @@ func (s *S) TestRemoveImageCallsRegistry(c *gocheck.C) {
 
 func (s *S) TestContainerDeploy(c *gocheck.C) {
 	h := &testing.TestHandler{}
-	t := &testing.T{}
-	gandalfServer := t.StartGandalfTestServer(h)
+	gandalfServer := testing.StartGandalfTestServer(h)
 	defer gandalfServer.Close()
 	go s.stopContainers(1)
 	err := newImage("tsuru/python", s.server.URL())
@@ -548,8 +588,7 @@ func (s *S) TestContainerDeploy(c *gocheck.C) {
 
 func (s *S) TestBuild(c *gocheck.C) {
 	h := &testing.TestHandler{}
-	t := &testing.T{}
-	gandalfServer := t.StartGandalfTestServer(h)
+	gandalfServer := testing.StartGandalfTestServer(h)
 	defer gandalfServer.Close()
 	go s.stopContainers(1)
 	err := newImage("tsuru/python", s.server.URL())
@@ -628,23 +667,160 @@ func (s *S) TestContainerLogs(c *gocheck.C) {
 	c.Assert(buff.String(), gocheck.Not(gocheck.Equals), "")
 }
 
+func (s *S) TestGetHostAddr(c *gocheck.C) {
+	cmutex.Lock()
+	old := clusterNodes
+	clusterNodes = map[string]string{
+		"server0":  "http://localhost:8081",
+		"server20": "http://localhost:3234",
+		"server21": "http://10.10.10.10:4243",
+	}
+	cmutex.Unlock()
+	defer func() {
+		cmutex.Lock()
+		clusterNodes = old
+		cmutex.Unlock()
+	}()
+	var tests = []struct {
+		input    string
+		expected string
+	}{
+		{"server0", "localhost"},
+		{"server20", "localhost"},
+		{"server21", "10.10.10.10"},
+		{"server33", ""},
+	}
+	for _, t := range tests {
+		c.Check(getHostAddr(t.input), gocheck.Equals, t.expected)
+	}
+}
+
+func (s *S) TestGetHostAddrWithSegregatedScheduler(c *gocheck.C) {
+	config.Set("docker:segregate", true)
+	defer config.Unset("docker:segregate")
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	coll := conn.Collection(schedulerCollection)
+	err = coll.Insert(
+		node{ID: "server0", Address: "http://remotehost:8080", Teams: []string{"tsuru"}},
+		node{ID: "server20", Address: "http://remotehost:8081", Teams: []string{"tsuru"}},
+		node{ID: "server21", Address: "http://10.10.10.1:8082", Teams: []string{"tsuru"}},
+	)
+	c.Assert(err, gocheck.IsNil)
+	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
+	cmutex.Lock()
+	old := clusterNodes
+	clusterNodes = map[string]string{
+		"server0":  "http://localhost:8081",
+		"server20": "http://localhost:3234",
+		"server21": "http://10.10.10.10:4243",
+		"server33": "http://10.10.10.11:4243",
+	}
+	cmutex.Unlock()
+	defer func() {
+		cmutex.Lock()
+		clusterNodes = old
+		cmutex.Unlock()
+	}()
+	var tests = []struct {
+		input    string
+		expected string
+	}{
+		{"server0", "remotehost"},
+		{"server20", "remotehost"},
+		{"server21", "10.10.10.1"},
+		{"server33", ""},
+	}
+	for _, t := range tests {
+		c.Check(getHostAddr(t.input), gocheck.Equals, t.expected)
+	}
+}
+
 func (s *S) TestDockerCluster(c *gocheck.C) {
 	config.Set("docker:servers", []string{"http://localhost:4243", "http://10.10.10.10:4243"})
+	defer config.Unset("docker:servers")
 	expected, _ := cluster.New(nil,
 		cluster.Node{ID: "server0", Address: "http://localhost:4243"},
 		cluster.Node{ID: "server1", Address: "http://10.10.10.10:4243"},
 	)
 	oldDockerCluster := dCluster
-	cmutext.Lock()
+	cmutex.Lock()
 	dCluster = nil
-	cmutext.Unlock()
+	cmutex.Unlock()
 	defer func() {
-		cmutext.Lock()
-		defer cmutext.Unlock()
+		cmutex.Lock()
+		defer cmutex.Unlock()
 		dCluster = oldDockerCluster
 	}()
 	cluster := dockerCluster()
 	c.Assert(cluster, gocheck.DeepEquals, expected)
+}
+
+func (s *S) TestDockerClusterSegregated(c *gocheck.C) {
+	config.Set("docker:segregate", true)
+	defer config.Unset("docker:segregate")
+	expected, _ := cluster.New(segScheduler)
+	oldDockerCluster := dCluster
+	cmutex.Lock()
+	dCluster = nil
+	cmutex.Unlock()
+	defer func() {
+		cmutex.Lock()
+		defer cmutex.Unlock()
+		dCluster = oldDockerCluster
+	}()
+	cluster := dockerCluster()
+	c.Assert(cluster, gocheck.DeepEquals, expected)
+}
+
+func (s *S) TestGetDockerServersShouldSearchFromConfig(c *gocheck.C) {
+	config.Set("docker:servers", []string{"http://server01.com:4243", "http://server02.com:4243"})
+	defer config.Unset("docker:servers")
+	servers := getDockerServers()
+	expected := []cluster.Node{
+		{ID: "server0", Address: "http://server01.com:4243"},
+		{ID: "server1", Address: "http://server02.com:4243"},
+	}
+	c.Assert(servers, gocheck.DeepEquals, expected)
+}
+
+func (s *S) TestGetDockerServerShouldSearchFromDatabase(c *gocheck.C) {
+	config.Set("docker:segregate", true)
+	defer config.Unset("docker:segregate")
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	err = conn.Collection(schedulerCollection).Insert(bson.M{"_id": "server01", "address": "http://server01.com:4243"})
+	c.Assert(err, gocheck.IsNil)
+	err = conn.Collection(schedulerCollection).Insert(bson.M{"_id": "server02", "address": "http://server02.com:4243"})
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Collection(schedulerCollection).RemoveAll(nil)
+	servers := getDockerServers()
+	expected := []cluster.Node{
+		{ID: "server01", Address: "http://server01.com:4243"},
+		{ID: "server02", Address: "http://server02.com:4243"},
+	}
+	c.Assert(servers, gocheck.DeepEquals, expected)
+}
+
+func (s *S) TestGetDockerServerShouldMergeServersFromConfWithDatabase(c *gocheck.C) {
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	err = conn.Collection(schedulerCollection).Insert(bson.M{"_id": "server1", "address": "http://server1.com:4243"})
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Collection(schedulerCollection).RemoveAll(nil)
+	config.Set("docker:servers", []string{"http://server0.com:4243"})
+	defer config.Unset("docker:servers")
+	config.Set("docker:segregate", true)
+	defer config.Unset("docker:segregate")
+	servers := getDockerServers()
+	expected := []cluster.Node{
+		{ID: "server0", Address: "http://server0.com:4243"},
+		{ID: "server1", Address: "http://server1.com:4243"},
+	}
+	c.Assert(servers, gocheck.DeepEquals, expected)
 }
 
 func (s *S) TestReplicateImage(c *gocheck.C) {
@@ -660,13 +836,13 @@ func (s *S) TestReplicateImage(c *gocheck.C) {
 	defer server.Stop()
 	config.Set("docker:registry", "localhost:3030")
 	defer config.Unset("docker:registry")
-	cmutext.Lock()
+	cmutex.Lock()
 	oldDockerCluster := dCluster
 	dCluster, _ = cluster.New(nil, cluster.Node{ID: "server0", Address: server.URL()})
-	cmutext.Unlock()
+	cmutex.Unlock()
 	defer func() {
-		cmutext.Lock()
-		defer cmutext.Unlock()
+		cmutex.Lock()
+		defer cmutex.Unlock()
 		dCluster = oldDockerCluster
 	}()
 	var buf bytes.Buffer
@@ -695,13 +871,13 @@ func (s *S) TestReplicateImageWithoutRegistryInTheImageName(c *gocheck.C) {
 	defer server.Stop()
 	config.Set("docker:registry", "localhost:3030")
 	defer config.Unset("docker:registry")
-	cmutext.Lock()
+	cmutex.Lock()
 	oldDockerCluster := dCluster
 	dCluster, _ = cluster.New(nil, cluster.Node{ID: "server0", Address: server.URL()})
-	cmutext.Unlock()
+	cmutex.Unlock()
 	defer func() {
-		cmutext.Lock()
-		defer cmutext.Unlock()
+		cmutex.Lock()
+		defer cmutex.Unlock()
 		dCluster = oldDockerCluster
 	}()
 	var buf bytes.Buffer
@@ -724,13 +900,13 @@ func (s *S) TestReplicateImageNoRegistry(c *gocheck.C) {
 	})
 	c.Assert(err, gocheck.IsNil)
 	defer server.Stop()
-	cmutext.Lock()
+	cmutex.Lock()
 	oldDockerCluster := dCluster
 	dCluster, _ = cluster.New(nil, cluster.Node{ID: "server0", Address: server.URL()})
-	cmutext.Unlock()
+	cmutex.Unlock()
 	defer func() {
-		cmutext.Lock()
-		defer cmutext.Unlock()
+		cmutex.Lock()
+		defer cmutex.Unlock()
 		dCluster = oldDockerCluster
 	}()
 	err = replicateImage("tsuru/python")
@@ -749,4 +925,72 @@ func (s *S) TestBuildImageNameWithRegistry(c *gocheck.C) {
 	repository := assembleImageName("raising")
 	expected := "localhost:3030/" + s.repoNamespace + "/raising"
 	c.Assert(repository, gocheck.Equals, expected)
+}
+
+func (s *S) TestContainerStart(c *gocheck.C) {
+	cont, err := s.newContainer(nil)
+	c.Assert(err, gocheck.IsNil)
+	defer s.removeTestContainer(cont)
+	client, err := dockerClient.NewClient(s.server.URL())
+	c.Assert(err, gocheck.IsNil)
+	dockerContainer, err := client.InspectContainer(cont.ID)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(dockerContainer.State.Running, gocheck.Equals, false)
+	err = cont.start()
+	c.Assert(err, gocheck.IsNil)
+	dockerContainer, err = client.InspectContainer(cont.ID)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(dockerContainer.State.Running, gocheck.Equals, true)
+}
+
+func (s *S) TestContainerStartWithoutPort(c *gocheck.C) {
+	cont, err := s.newContainer(nil)
+	c.Assert(err, gocheck.IsNil)
+	defer s.removeTestContainer(cont)
+	oldUser, _ := config.Get("docker:run-cmd:port")
+	defer config.Set("docker:run-cmd:port", oldUser)
+	config.Unset("docker:run-cmd:port")
+	err = cont.start()
+	c.Assert(err, gocheck.NotNil)
+}
+
+func (s *S) TestContainerStartStartedUnits(c *gocheck.C) {
+	cont, err := s.newContainer(nil)
+	c.Assert(err, gocheck.IsNil)
+	defer s.removeTestContainer(cont)
+	err = cont.start()
+	c.Assert(err, gocheck.IsNil)
+	err = cont.start()
+	c.Assert(err, gocheck.NotNil)
+}
+
+func (s *S) TestUsePlatformImage(c *gocheck.C) {
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	units := []app.Unit{{Name: "4fa6e0f0c678"}, {Name: "e90e34656806"}}
+	app1 := &app.App{Name: "app1", Platform: "python", Deploys: 40, Units: units}
+	err = conn.Apps().Insert(app1)
+	c.Assert(err, gocheck.IsNil)
+	ok := usePlatformImage(app1)
+	c.Assert(ok, gocheck.Equals, true)
+	defer conn.Apps().Remove(bson.M{"name": "app1"})
+	app2 := &app.App{Name: "app2", Platform: "python", Deploys: 20, Units: units}
+	err = conn.Apps().Insert(app2)
+	c.Assert(err, gocheck.IsNil)
+	ok = usePlatformImage(app2)
+	c.Assert(ok, gocheck.Equals, true)
+	defer conn.Apps().Remove(bson.M{"name": "app2"})
+	app3 := &app.App{Name: "app3", Platform: "python", Deploys: 0, Units: units}
+	err = conn.Apps().Insert(app3)
+	c.Assert(err, gocheck.IsNil)
+	ok = usePlatformImage(app3)
+	c.Assert(ok, gocheck.Equals, false)
+	defer conn.Apps().Remove(bson.M{"name": "app3"})
+	app4 := &app.App{Name: "app4", Platform: "python", Deploys: 19, Units: units}
+	err = conn.Apps().Insert(app4)
+	c.Assert(err, gocheck.IsNil)
+	ok = usePlatformImage(app4)
+	c.Assert(ok, gocheck.Equals, false)
+	defer conn.Apps().Remove(bson.M{"name": "app4"})
 }
