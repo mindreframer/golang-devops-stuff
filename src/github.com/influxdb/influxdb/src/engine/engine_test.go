@@ -25,11 +25,12 @@ type EngineSuite struct{}
 var _ = Suite(&EngineSuite{})
 
 type MockCoordinator struct {
+	coordinator.Coordinator
 	returnedError error
 	series        []*protocol.Series
 }
 
-func (self *MockCoordinator) DistributeQuery(user common.User, database string, query *parser.Query, yield func(*protocol.Series) error) error {
+func (self *MockCoordinator) DistributeQuery(user common.User, database string, query *parser.SelectQuery, localOnly bool, yield func(*protocol.Series) error) error {
 	if self.returnedError != nil {
 		return self.returnedError
 	}
@@ -40,30 +41,6 @@ func (self *MockCoordinator) DistributeQuery(user common.User, database string, 
 		}
 	}
 	return nil
-}
-
-func (self *MockCoordinator) WriteSeriesData(user common.User, database string, series *protocol.Series) error {
-	return nil
-}
-
-func (self *MockCoordinator) CreateDatabase(user common.User, db string, rf uint8) error {
-	return nil
-}
-
-func (self *MockCoordinator) DropDatabase(user common.User, db string) error {
-	return nil
-}
-
-func (self *MockCoordinator) ListDatabases(user common.User) ([]*coordinator.Database, error) {
-	return nil, nil
-}
-
-func (self *MockCoordinator) ReplicateWrite(request *protocol.Request) error {
-	return nil
-}
-
-func (self *MockCoordinator) ReplayReplication(request *protocol.Request, replicationFactor *uint8, owningServerId *uint32, lastSeenSequenceNumber *uint64) {
-	return
 }
 
 func createEngine(c *C, seriesString string) EngineI {
@@ -84,7 +61,7 @@ func createEngine(c *C, seriesString string) EngineI {
 // expectedSeries must be a json array, e.g. time series must by
 // enclosed in '[' and ']'
 func runQueryRunError(engine EngineI, query string, c *C, expectedErr error) {
-	err := engine.RunQuery(nil, "", query, func(series *protocol.Series) error { return nil })
+	err := engine.RunQuery(nil, "", query, false, func(series *protocol.Series) error { return nil })
 
 	c.Assert(err, DeepEquals, expectedErr)
 }
@@ -113,7 +90,7 @@ func runQueryExtended(engine EngineI, query string, c *C, appendPoints bool, exp
 
 func runQueryWithoutChecking(engine EngineI, query string, c *C, appendPoints bool) []*protocol.Series {
 	var result []*protocol.Series
-	err := engine.RunQuery(nil, "", query, func(series *protocol.Series) error {
+	err := engine.RunQuery(nil, "", query, false, func(series *protocol.Series) error {
 		if appendPoints && result != nil {
 			result[0].Points = append(result[0].Points, series.Points...)
 		} else {
@@ -166,7 +143,7 @@ func (self *EngineSuite) TestBasicQueryError(c *C) {
 	// the query only returns the raw data
 	engine := createEngine(c, "[]")
 	engine.(*QueryEngine).coordinator.(*MockCoordinator).returnedError = fmt.Errorf("some error")
-	err := engine.RunQuery(nil, "", "select * from foo", func(series *protocol.Series) error {
+	err := engine.RunQuery(nil, "", "select * from foo", false, func(series *protocol.Series) error {
 		return nil
 	})
 
@@ -991,6 +968,202 @@ func (self *EngineSuite) TestCountDistinct(c *C) {
       "fields": ["count"]
     }
   ]`)
+}
+
+func (self *EngineSuite) TestEmptyGroups(c *C) {
+	engine := createEngine(c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 5 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 7 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 2 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 6 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 6 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 5 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 }
+      ],
+      "name": "foo",
+      "fields": ["column_one"]
+    }
+  ]`)
+
+	for _, query := range []string{
+		"select count(column_one) from foo where time > 1381346701s and time < 1381346872s group by time(1m) fill(0) order asc",
+		"select count(column_one) from foo group by time(1m) fill(0) order asc",
+	} {
+		runQuery(engine, query, c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 7 }], "timestamp": 1381346700000000},
+        { "values": [{ "int64_value": 0 }], "timestamp": 1381346760000000},
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346820000000}
+      ],
+      "name": "foo",
+      "fields": ["count"]
+    }
+  ]`)
+	}
+}
+
+func (self *EngineSuite) TestEmptyGroupsWithNonZeroDefault(c *C) {
+	engine := createEngine(c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 5 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 7 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 2 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 6 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 6 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 5 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 }
+      ],
+      "name": "foo",
+      "fields": ["column_one"]
+    }
+  ]`)
+
+	for _, query := range []string{
+		"select count(column_one) from foo where time > 1381346701s and time < 1381346872s group by time(1m) fill(10) order asc",
+		"select count(column_one) from foo group by time(1m) fill(10) order asc",
+	} {
+		runQuery(engine, query, c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 7 }], "timestamp": 1381346700000000},
+        { "values": [{ "int64_value": 10}], "timestamp": 1381346760000000},
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346820000000}
+      ],
+      "name": "foo",
+      "fields": ["count"]
+    }
+  ]`)
+	}
+}
+
+func (self *EngineSuite) TestEmptyGroupsWithoutTime(c *C) {
+	engine := createEngine(c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 }
+      ],
+      "name": "foo",
+      "fields": ["column_one"]
+    }
+  ]`)
+
+	for _, query := range []string{
+		"select count(column_one) from foo where time > 1381346701s and time < 1381346872s group by column_one fill(0) order asc",
+		"select count(column_one) from foo group by column_one fill(0) order asc",
+	} {
+		runQuery(engine, query, c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 5}, { "int64_value": 1 }], "timestamp": 1381346871000000},
+        { "values": [{ "int64_value": 6}, { "int64_value": 3 }], "timestamp": 1381346871000000}
+      ],
+      "name": "foo",
+      "fields": ["count", "column_one"]
+    }
+  ]`)
+	}
+}
+func (self *EngineSuite) TestEmptyGroupsWithMultipleColumns(c *C) {
+	engine := createEngine(c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 }
+      ],
+      "name": "foo",
+      "fields": ["column_one"]
+    }
+  ]`)
+
+	for _, query := range []string{
+		"select count(column_one) from foo where time > 1381346701s and time < 1381346872s group by time(1m), column_one fill(0) order asc",
+		"select count(column_one) from foo group by time(1m), column_one fill(0) order asc",
+	} {
+		runQuery(engine, query, c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 2}, { "int64_value": 1 }], "timestamp": 1381346700000000},
+        { "values": [{ "int64_value": 5}, { "int64_value": 3 }], "timestamp": 1381346700000000},
+        { "values": [{ "int64_value": 0}, { "int64_value": 1 }], "timestamp": 1381346760000000},
+        { "values": [{ "int64_value": 0}, { "int64_value": 3 }], "timestamp": 1381346760000000},
+        { "values": [{ "int64_value": 3}, { "int64_value": 1 }], "timestamp": 1381346820000000},
+        { "values": [{ "int64_value": 1}, { "int64_value": 3 }], "timestamp": 1381346820000000}
+      ],
+      "name": "foo",
+      "fields": ["count", "column_one"]
+    }
+  ]`)
+	}
+}
+
+func (self *EngineSuite) TestEmptyGroupsDescending(c *C) {
+	engine := createEngine(c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 3 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 5 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 7 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 2 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 6 }], "timestamp": 1381346701000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 6 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 5 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346871000000, "sequence_number": 1 },
+        { "values": [{ "int64_value": 1 }], "timestamp": 1381346871000000, "sequence_number": 1 }
+      ],
+      "name": "foo",
+      "fields": ["column_one"]
+    }
+  ]`)
+
+	for _, query := range []string{
+		"select count(column_one) from foo where time > 1381346701s and time < 1381346872s group by time(1m) fill(0)",
+		"select count(column_one) from foo group by time(1m) fill(0)",
+	} {
+		runQuery(engine, query, c, `[
+    {
+      "points": [
+        { "values": [{ "int64_value": 4 }], "timestamp": 1381346820000000},
+        { "values": [{ "int64_value": 0 }], "timestamp": 1381346760000000},
+        { "values": [{ "int64_value": 7 }], "timestamp": 1381346700000000}
+      ],
+      "name": "foo",
+      "fields": ["count"]
+    }
+  ]`)
+	}
 }
 
 func (self *EngineSuite) TestMedianQueryWithGroupByTime(c *C) {

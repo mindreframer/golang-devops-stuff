@@ -1,12 +1,51 @@
 package configuration
 
 import (
+	log "code.google.com/p/log4go"
 	"encoding/json"
 	"fmt"
+	"github.com/BurntSushi/toml"
 	"io/ioutil"
-	"log"
 	"os"
 )
+
+type AdminConfig struct {
+	Port   int
+	Assets string
+}
+
+type ApiConfig struct {
+	Port int
+}
+
+type RaftConfig struct {
+	Port int
+	Dir  string
+}
+
+type StorageConfig struct {
+	Dir string
+}
+
+type ClusterConfig struct {
+	SeedServers  []string `toml:"seed-servers"`
+	ProtobufPort int      `toml:"protobuf_port"`
+}
+
+type LoggingConfig struct {
+	File  string
+	Level string
+}
+
+type TomlConfiguration struct {
+	Admin    AdminConfig
+	Api      ApiConfig
+	Raft     RaftConfig
+	Storage  StorageConfig
+	Cluster  ClusterConfig
+	Logging  LoggingConfig
+	Hostname string
+}
 
 type Configuration struct {
 	AdminHttpPort  int
@@ -18,25 +57,63 @@ type Configuration struct {
 	RaftDir        string
 	ProtobufPort   int
 	Hostname       string
+	LogFile        string
+	LogLevel       string
 }
 
 func LoadConfiguration(fileName string) *Configuration {
-	log.Println("Loading Config from " + fileName)
+	config, err := parseTomlConfiguration(fileName)
+	if err != nil {
+		log.Error("Couldn't parse configuration file: " + fileName)
+		panic(err)
+	}
+	return config
+}
+
+func parseTomlConfiguration(filename string) (*Configuration, error) {
+	body, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+	tomlConfiguration := &TomlConfiguration{}
+	_, err = toml.Decode(string(body), tomlConfiguration)
+	if err != nil {
+		return nil, err
+	}
+
+	config := &Configuration{
+		AdminHttpPort:  tomlConfiguration.Admin.Port,
+		AdminAssetsDir: tomlConfiguration.Admin.Assets,
+		ApiHttpPort:    tomlConfiguration.Api.Port,
+		RaftServerPort: tomlConfiguration.Raft.Port,
+		RaftDir:        tomlConfiguration.Raft.Dir,
+		ProtobufPort:   tomlConfiguration.Cluster.ProtobufPort,
+		SeedServers:    tomlConfiguration.Cluster.SeedServers,
+		DataDir:        tomlConfiguration.Storage.Dir,
+		LogFile:        tomlConfiguration.Logging.File,
+		LogLevel:       tomlConfiguration.Logging.Level,
+		Hostname:       tomlConfiguration.Hostname,
+	}
+
+	return config, nil
+}
+
+func parseJsonConfiguration(fileName string) (*Configuration, error) {
+	log.Info("Loading Config from " + fileName)
 	config := &Configuration{}
 
 	data, err := ioutil.ReadFile(fileName)
 	if err == nil {
 		err = json.Unmarshal(data, config)
 		if err != nil {
-			log.Println("Couldn't parse configuration file: " + fileName)
-			panic(err)
+			return nil, err
 		}
 	} else {
-		log.Println("Couldn't load configuration file: " + fileName)
+		log.Error("Couldn't load configuration file: " + fileName)
 		panic(err)
 	}
 
-	return config
+	return config, nil
 }
 
 func (self *Configuration) AdminHttpPortString() string {

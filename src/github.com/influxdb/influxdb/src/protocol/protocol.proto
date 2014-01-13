@@ -19,6 +19,11 @@ message Series {
   repeated string fields = 3;
 }
 
+message QueryResponseChunk {
+  optional Series series = 1;
+  optional bool done = 2;
+}
+
 message Request {
   enum Type {
     QUERY = 1;
@@ -27,6 +32,12 @@ message Request {
     REPLICATION_DELETE = 4;
     PROXY_DELETE = 5;
     REPLICATION_REPLAY = 6;
+    LIST_SERIES = 7;
+    SEQUENCE_NUMBER = 8;
+    PROXY_DROP_DATABASE = 9;
+    REPLICATION_DROP_DATABASE = 10;
+    PROXY_DROP_SERIES = 11;
+    REPLICATION_DROP_SERIES = 12;
   }
   required uint32 id = 1;
   required Type type = 2;
@@ -62,9 +73,12 @@ message Response {
     END_STREAM = 3;
     REPLICATION_REPLAY = 4;
     REPLICATION_REPLAY_END = 5;
+    LIST_SERIES = 6;
+    SEQUENCE_NUMBER = 7;
   }
   enum ErrorCode {
     REQUEST_TOO_LARGE = 1;
+    INTERNAL_ERROR = 2;
   }
   required Type type = 1;
   required uint32 request_id = 2;

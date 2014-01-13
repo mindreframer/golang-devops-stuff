@@ -16,6 +16,7 @@ import (
 	"protocol"
 	"regexp"
 	"strings"
+	"time"
 )
 
 var VALID_TABLE_NAMES *regexp.Regexp
@@ -79,6 +80,7 @@ func (self *HttpServer) Serve(listener net.Listener) {
 
 	// Write points to the given database
 	self.registerEndpoint(p, "post", "/db/:db/series", self.writePoints)
+	self.registerEndpoint(p, "del", "/db/:db/series/:series", self.dropSeries)
 	self.registerEndpoint(p, "get", "/db", self.listDatabases)
 	self.registerEndpoint(p, "post", "/db", self.createDatabase)
 	self.registerEndpoint(p, "del", "/db/:name", self.dropDatabase)
@@ -96,8 +98,9 @@ func (self *HttpServer) Serve(listener net.Listener) {
 	self.registerEndpoint(p, "post", "/db/:db/users", self.createDbUser)
 	self.registerEndpoint(p, "del", "/db/:db/users/:user", self.deleteDbUser)
 	self.registerEndpoint(p, "post", "/db/:db/users/:user", self.updateDbUser)
-	self.registerEndpoint(p, "post", "/db/:db/admins/:user", self.setDbAdmin)
-	self.registerEndpoint(p, "del", "/db/:db/admins/:user", self.unsetDbAdmin)
+
+	// healthcheck
+	self.registerEndpoint(p, "get", "/ping", self.ping)
 
 	// fetch current list of available interfaces
 	self.registerEndpoint(p, "get", "/interfaces", self.listInterfaces)
@@ -113,7 +116,11 @@ func (self *HttpServer) Close() {
 		log.Info("Closing http server")
 		self.conn.Close()
 		log.Info("Waiting for all requests to finish before killing the process")
-		<-self.shutdown
+		select {
+		case <-time.After(time.Second * 5):
+			log.Error("There seems to be a hanging request. Closing anyway")
+		case <-self.shutdown:
+		}
 	}
 }
 
@@ -206,7 +213,7 @@ func (self *HttpServer) query(w libhttp.ResponseWriter, r *libhttp.Request) {
 	query := r.URL.Query().Get("q")
 	db := r.URL.Query().Get(":db")
 
-	statusCode, body := self.tryAsDbUser(w, r, func(user common.User) (int, interface{}) {
+	self.tryAsDbUserAndClusterAdmin(w, r, func(user common.User) (int, interface{}) {
 
 		precision, err := TimePrecisionFromString(r.URL.Query().Get("time_precision"))
 		if err != nil {
@@ -219,7 +226,8 @@ func (self *HttpServer) query(w libhttp.ResponseWriter, r *libhttp.Request) {
 		} else {
 			writer = &AllPointsWriter{map[string]*protocol.Series{}, w, precision}
 		}
-		err = self.engine.RunQuery(user, db, query, writer.yield)
+		forceLocal := r.URL.Query().Get("force_local") == "true"
+		err = self.engine.RunQuery(user, db, query, forceLocal, writer.yield)
 		if err != nil {
 			return errorToStatusCode(err), err.Error()
 		}
@@ -227,27 +235,27 @@ func (self *HttpServer) query(w libhttp.ResponseWriter, r *libhttp.Request) {
 		writer.done()
 		return libhttp.StatusOK, nil
 	})
-
-	if statusCode != libhttp.StatusOK {
-		w.WriteHeader(statusCode)
-		w.Write(body)
-	}
 }
 
-func removeTimestampFieldDefinition(fields []string) []string {
-	timestampIdx := -1
+func removeField(fields []string, name string) []string {
+	index := -1
 	for idx, field := range fields {
-		if field == "time" {
-			timestampIdx = idx
+		if field == name {
+			index = idx
 			break
 		}
 	}
 
-	if timestampIdx == -1 {
+	if index == -1 {
 		return fields
 	}
 
-	return append(fields[:timestampIdx], fields[timestampIdx+1:]...)
+	return append(fields[:index], fields[index+1:]...)
+}
+
+func removeTimestampFieldDefinition(fields []string) []string {
+	fields = removeField(fields, "time")
+	return removeField(fields, "sequence_number")
 }
 
 func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*protocol.Series, error) {
@@ -259,6 +267,7 @@ func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*pr
 	for _, point := range s.Points {
 		values := []*protocol.FieldValue{}
 		var timestamp *int64
+		var sequence *uint64
 
 		for idx, field := range s.Columns {
 			value := point[idx]
@@ -281,6 +290,17 @@ func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*pr
 				}
 			}
 
+			if field == "sequence_number" {
+				switch value.(type) {
+				case float64:
+					_sequenceNumber := uint64(value.(float64))
+					sequence = &_sequenceNumber
+					continue
+				default:
+					return nil, fmt.Errorf("sequence_number field must be float but is %T (%v)", value, value)
+				}
+			}
+
 			switch v := value.(type) {
 			case string:
 				values = append(values, &protocol.FieldValue{StringValue: &v})
@@ -300,8 +320,9 @@ func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*pr
 			}
 		}
 		points = append(points, &protocol.Point{
-			Values:    values,
-			Timestamp: timestamp,
+			Values:         values,
+			Timestamp:      timestamp,
+			SequenceNumber: sequence,
 		})
 	}
 
@@ -332,7 +353,7 @@ func (self *HttpServer) writePoints(w libhttp.ResponseWriter, r *libhttp.Request
 		w.Write([]byte(err.Error()))
 	}
 
-	statusCode, body := self.tryAsDbUser(w, r, func(user common.User) (int, interface{}) {
+	self.tryAsDbUserAndClusterAdmin(w, r, func(user common.User) (int, interface{}) {
 		series, err := ioutil.ReadAll(r.Body)
 		if err != nil {
 			return libhttp.StatusInternalServerError, err.Error()
@@ -362,11 +383,6 @@ func (self *HttpServer) writePoints(w libhttp.ResponseWriter, r *libhttp.Request
 		}
 		return libhttp.StatusOK, nil
 	})
-
-	w.WriteHeader(statusCode)
-	if len(body) > 0 {
-		w.Write(body)
-	}
 }
 
 type createDatabaseRequest struct {
@@ -397,8 +413,10 @@ func (self *HttpServer) createDatabase(w libhttp.ResponseWriter, r *libhttp.Requ
 		}
 		err = self.coordinator.CreateDatabase(user, createRequest.Name, createRequest.ReplicationFactor)
 		if err != nil {
+			log.Error("Cannot create database %s. Error: %s", createRequest.Name, err)
 			return errorToStatusCode(err), err.Error()
 		}
+		log.Debug("Created database %s with replication factor %d", createRequest.Name, createRequest.ReplicationFactor)
 		return libhttp.StatusCreated, nil
 	})
 }
@@ -407,6 +425,19 @@ func (self *HttpServer) dropDatabase(w libhttp.ResponseWriter, r *libhttp.Reques
 	self.tryAsClusterAdmin(w, r, func(user common.User) (int, interface{}) {
 		name := r.URL.Query().Get(":name")
 		err := self.coordinator.DropDatabase(user, name)
+		if err != nil {
+			return errorToStatusCode(err), err.Error()
+		}
+		return libhttp.StatusNoContent, nil
+	})
+}
+
+func (self *HttpServer) dropSeries(w libhttp.ResponseWriter, r *libhttp.Request) {
+	db := r.URL.Query().Get(":db")
+	series := r.URL.Query().Get(":series")
+
+	self.tryAsDbUserAndClusterAdmin(w, r, func(user common.User) (int, interface{}) {
+		err := self.coordinator.DropSeries(user, db, series)
 		if err != nil {
 			return errorToStatusCode(err), err.Error()
 		}
@@ -580,9 +611,10 @@ func (self *HttpServer) tryAsClusterAdmin(w libhttp.ResponseWriter, r *libhttp.R
 type NewUser struct {
 	Name     string `json:"name"`
 	Password string `json:"password"`
+	IsAdmin  bool   `json:"isAdmin"`
 }
 
-type UpdateUser struct {
+type UpdateClusterAdminUser struct {
 	Password string `json:"password"`
 }
 
@@ -657,13 +689,13 @@ func (self *HttpServer) updateClusterAdmin(w libhttp.ResponseWriter, r *libhttp.
 		return
 	}
 
-	updateUser := &UpdateUser{}
-	json.Unmarshal(body, updateUser)
+	updateClusterAdminUser := &UpdateClusterAdminUser{}
+	json.Unmarshal(body, updateClusterAdminUser)
 
 	newUser := r.URL.Query().Get(":user")
 
 	self.tryAsClusterAdmin(w, r, func(u common.User) (int, interface{}) {
-		if err := self.userManager.ChangeClusterAdminPassword(u, newUser, updateUser.Password); err != nil {
+		if err := self.userManager.ChangeClusterAdminPassword(u, newUser, updateClusterAdminUser.Password); err != nil {
 			return errorToStatusCode(err), err.Error()
 		}
 		return libhttp.StatusOK, nil
@@ -710,8 +742,10 @@ func (self *HttpServer) tryAsDbUser(w libhttp.ResponseWriter, r *libhttp.Request
 }
 
 func (self *HttpServer) tryAsDbUserAndClusterAdmin(w libhttp.ResponseWriter, r *libhttp.Request, yield func(common.User) (int, interface{})) {
+	log.Debug("Trying to auth as a db user")
 	statusCode, body := self.tryAsDbUser(w, r, yield)
 	if statusCode == libhttp.StatusUnauthorized {
+		log.Debug("Authenticating as a db user failed with %s (%d)", string(body), statusCode)
 		// tryAsDbUser will set this header, since we're retrying
 		// we should delete the header and let tryAsClusterAdmin
 		// set it properly
@@ -765,11 +799,24 @@ func (self *HttpServer) createDbUser(w libhttp.ResponseWriter, r *libhttp.Reques
 	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
 		username := newUser.Name
 		if err := self.userManager.CreateDbUser(u, db, username); err != nil {
+			log.Error("Cannot create user: %s", err)
 			return errorToStatusCode(err), err.Error()
 		}
+		log.Debug("Created user %s", username)
 		if err := self.userManager.ChangeDbUserPassword(u, db, username, newUser.Password); err != nil {
-			return libhttp.StatusUnauthorized, err.Error()
+			log.Error("Cannot change user password: %s", err)
+			// there is probably something wrong if we could create
+			// the user but not change the password. so return
+			// 500
+			return libhttp.StatusInternalServerError, err.Error()
 		}
+		if newUser.IsAdmin {
+			err = self.userManager.SetDbAdmin(u, db, newUser.Name, true)
+			if err != nil {
+				return libhttp.StatusInternalServerError, err.Error()
+			}
+		}
+		log.Debug("Successfully changed %s password", username)
 		return libhttp.StatusOK, nil
 	})
 }
@@ -831,24 +878,9 @@ func (self *HttpServer) updateDbUser(w libhttp.ResponseWriter, r *libhttp.Reques
 	})
 }
 
-func (self *HttpServer) setDbAdmin(w libhttp.ResponseWriter, r *libhttp.Request) {
-	self.commonSetDbAdmin(w, r, true)
-}
-
-func (self *HttpServer) unsetDbAdmin(w libhttp.ResponseWriter, r *libhttp.Request) {
-	self.commonSetDbAdmin(w, r, false)
-}
-
-func (self *HttpServer) commonSetDbAdmin(w libhttp.ResponseWriter, r *libhttp.Request, isAdmin bool) {
-	newUser := r.URL.Query().Get(":user")
-	db := r.URL.Query().Get(":db")
-
-	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
-		if err := self.userManager.SetDbAdmin(u, db, newUser, isAdmin); err != nil {
-			return errorToStatusCode(err), err.Error()
-		}
-		return libhttp.StatusOK, nil
-	})
+func (self *HttpServer) ping(w libhttp.ResponseWriter, r *libhttp.Request) {
+	w.WriteHeader(libhttp.StatusOK)
+	w.Write([]byte("{\"status\":\"ok\"}"))
 }
 
 func (self *HttpServer) listInterfaces(w libhttp.ResponseWriter, r *libhttp.Request) {

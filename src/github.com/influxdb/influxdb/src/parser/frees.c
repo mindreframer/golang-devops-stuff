@@ -44,6 +44,16 @@ free_value_array(value_array *array)
 }
 
 void
+free_groupby_clause(groupby_clause *g)
+{
+  free_value_array(g->elems);
+  if (g->fill_function) {
+    free_value(g->fill_function);
+  }
+  free(g);
+}
+
+void
 free_value(value *value)
 {
   free(value->name);
@@ -71,12 +81,8 @@ free_error (error *error)
 }
 
 void
-close_query (query *q)
+free_select_query (select_query *q)
 {
-   if (q->error) {
-    free_error(q->error);
-   }
-
   if (q->c) {
     // free the columns
     free_value_array(q->c);
@@ -87,11 +93,42 @@ close_query (query *q)
   }
 
   if (q->group_by) {
-    free_value_array(q->group_by);
+    free_groupby_clause(q->group_by);
   }
 
   if (q->from_clause) {
     // free the from clause
     free_from_clause(q->from_clause);
+  }
+}
+
+void
+free_delete_query (delete_query *q)
+{
+  if (q->where_condition) {
+    free_condition(q->where_condition);
+  }
+
+  if (q->from_clause) {
+    // free the from clause
+    free_from_clause(q->from_clause);
+  }
+}
+
+void
+close_query (query *q)
+{
+   if (q->error) {
+    free_error(q->error);
+   }
+
+  if (q->select_query) {
+    free_select_query(q->select_query);
+    free(q->select_query);
+  }
+
+  if (q->delete_query) {
+    free_delete_query(q->delete_query);
+    free(q->delete_query);
   }
 }

@@ -20,24 +20,26 @@ endif
 export GOARCH
 export CGO_ENABLED
 
-.PHONY: all valgrind parser package package_init build
+.PHONY: all valgrind parser package package_init build binary_package
 
 all: | parser valgrind build test integration_test
 
 parser:
 	$(MAKE) -C src/parser
 
-valgrind:
-	$(MAKE) -C src/parser valgrind
-
 GOPATH := $(shell pwd)
 export GOPATH
 uname_S = $(shell sh -c "uname -s 2>/dev/null || echo not")
 
+valgrind:
+ifeq ($(uname_S),Linux)
+	$(MAKE) -C src/parser valgrind
+endif
+
 # packages
 packages = admin api/http common configuration \
   checkers coordinator datastore engine parser \
-  protocol server
+  protocol
 
 # snappy variables
 snappy_version = 1.1.0
@@ -100,6 +102,8 @@ github.com/fitstar/falcore/filter \
 github.com/gorilla/mux \
 github.com/goraft/raft \
 github.com/influxdb/go-cache \
+github.com/BurntSushi/toml \
+github.com/influxdb/influxdb-go \
 $(proto_dependency)
 
 dependencies_paths := $(addprefix src/,$(dependencies))
@@ -126,9 +130,11 @@ build: | dependencies protobuf parser
 # TODO: build all packages, otherwise we won't know
 # if there's an error
 	$(GO) build daemon
+	$(GO) build benchmark
 
 clean:
 	rm -f daemon
+	rm -f benchmakr
 	rm -rf pkg/
 	rm -rf packages/
 	rm -rf src/$(levigo_dependency)
@@ -185,9 +191,8 @@ endif
 $(admin_dir)/build:
 	rm -rf $(admin_dir)
 	rvm 1.9.3 do rvm gemset create influxdb
-	rvm 1.9.3@influxdb do bundle install
 	git clone https://github.com/influxdb/influxdb-admin.git $(admin_dir)
-	rvm 1.9.3@influxdb do bash -c "pushd $(admin_dir); middleman build; popd"
+	rvm 1.9.3@influxdb do bash -c "pushd $(admin_dir); bundle install; middleman build; popd"
 
 $(rpm_package): $(admin_dir)/build build
 	rm -rf out_rpm
@@ -207,6 +212,7 @@ $(source_package): dependencies
 	rm -rf src/$(levigo_dependency)
 	$(GO) get -d $(levigo_dependency)
 	rm -f daemon
+	rm -f benchmark
 	git ls-files --others | egrep -v 'github|launchpad|code.google' > /tmp/influxdb.ignored
 	echo "pkg/*" >> /tmp/influxdb.ignored
 	echo "packages/*" >> /tmp/influxdb.ignored
@@ -224,30 +230,24 @@ $(source_package): dependencies
 	rm -rf src/$(levigo_dependency)
 	rm -rf admin
 
-sample_config = ' \
-{ \
-  "AdminHttpPort":  8083, \
-  "AdminAssetsDir": "/opt/influxdb/current/admin", \
-  "ApiHttpPort":    8086, \
-  "RaftServerPort": 8090, \
-  "SeedServers":    [], \
-  "DataDir":        "/opt/influxdb/shared/data/db", \
-  "RaftDir":        "/opt/influxdb/shared/data/raft" \
-} \
-'
-
-$(binary_package): $(admin_dir)/build build
+$(binary_package): $(admin_dir)/build build packages
 	rm -rf build
 	mkdir build
 	mv daemon build/influxdb
+	mv benchmark build/influxdb-benchmark
+	cp src/benchmark/benchmark_config.sample.toml build/benchmark_config.toml
 	mkdir build/admin
 	cp -R $(admin_dir)/build/* build/admin/
 	cp -R scripts/ build/
+	cp config.toml.sample build/config.toml
+	sed -i 's/.\/admin/\/opt\/influxdb\/current\/admin/g' build/config.toml
+	sed -i 's/influxdb.log/\/opt\/influxdb\/shared\/log.txt/g' build/config.toml
+	sed -i 's/\/tmp\/influxdb\/development\/db/\/opt\/influxdb\/shared\/data\/db/g' build/config.toml
+	sed -i 's/\/tmp\/influxdb\/development\/raft/\/opt\/influxdb\/shared\/data\/raft/g' build/config.toml
 	rm -f build/scripts/post_install.sh.bak
-	@echo $(sample_config) > build/config.json
-	sed -i.bak 's/,/,\n/g' build/config.json
-	rm build/config.json.bak
 	tar -czf $(binary_package) build/*
+
+binary_package: $(binary_package)
 
 packages:
 	mkdir $@
