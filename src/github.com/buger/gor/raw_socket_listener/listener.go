@@ -100,12 +100,12 @@ func (t *Listener) isIncomingDataPacket(buf []byte) bool {
 
 	// Because RAW_SOCKET can't be bound to port, we have to control it by ourself
 	if int(dest_port) == t.port {
-		// Check TCPPacket code for more description
-		flags := binary.BigEndian.Uint16(buf[12:14]) & 0x1FF
+		// Get the 'data offset' (size of the TCP header in 32-bit words)
+		dataOffset := (buf[12] & 0xF0) >> 4
 
 		// We need only packets with data inside
-		// TCP PSH flag indicate that packet have data inside
-		if (flags & TCP_PSH) != 0 {
+		// Check that the buffer is larger than the size of the TCP header
+		if len(buf) > int(dataOffset*4) {
 			// We should create new buffer because go slices is pointers. So buffer data shoud be immutable.
 			return true
 		}

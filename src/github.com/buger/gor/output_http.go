@@ -42,11 +42,12 @@ type HTTPOutput struct {
 	limit   int
 
 	headers HTTPHeaders
+	methods HTTPMethods
 
 	elasticSearch *es.ESPlugin
 }
 
-func NewHTTPOutput(options string, headers HTTPHeaders, elasticSearchAddr string) io.Writer {
+func NewHTTPOutput(options string, headers HTTPHeaders, methods HTTPMethods, elasticSearchAddr string) io.Writer {
 	o := new(HTTPOutput)
 
 	optionsArr := strings.Split(options, "|")
@@ -58,6 +59,7 @@ func NewHTTPOutput(options string, headers HTTPHeaders, elasticSearchAddr string
 
 	o.address = address
 	o.headers = headers
+	o.methods = methods
 
 	if elasticSearchAddr != "" {
 		o.elasticSearch = new(es.ESPlugin)
@@ -76,7 +78,10 @@ func NewHTTPOutput(options string, headers HTTPHeaders, elasticSearchAddr string
 }
 
 func (o *HTTPOutput) Write(data []byte) (n int, err error) {
-	go o.sendRequest(data)
+	buf := make([]byte, len(data))
+	copy(buf, data)
+
+	go o.sendRequest(buf)
 
 	return len(data), nil
 }
@@ -86,6 +91,10 @@ func (o *HTTPOutput) sendRequest(data []byte) {
 
 	if err != nil {
 		log.Println("Can not parse request", string(data), err)
+		return
+	}
+
+	if len(o.methods) > 0 && !o.methods.Contains(request.Method) {
 		return
 	}
 
