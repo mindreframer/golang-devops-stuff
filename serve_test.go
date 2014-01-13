@@ -74,6 +74,10 @@ func (s *ServeSuite) TestServing(c *C) {
 	r = exchange(c, "www.test.example.com.", dns.TypeA)
 	c.Check(r.Answer[0].(*dns.CNAME).Target, Equals, "geo.bitnames.com.")
 
+	//SPF
+	r = exchange(c, "test.example.com.", dns.TypeSPF)
+	c.Check(r.Answer[0].(*dns.SPF).Txt[0], Equals, "v=spf1 ~all")
+
 	// MX
 	r = exchange(c, "test.example.com.", dns.TypeMX)
 	c.Check(r.Answer[0].(*dns.MX).Mx, Equals, "mx.example.net.")
@@ -96,6 +100,22 @@ func (s *ServeSuite) TestServingMixedCase(c *C) {
 	ip := r.Answer[0].(*dns.A).A
 	c.Check(ip.String(), Equals, "192.168.1.2")
 	c.Check(r.Answer[0].Header().Name, Equals, n)
+
+}
+
+func (s *ServeSuite) TestCname(c *C) {
+	// Cname, two possible results
+
+	results := make(map[string]int)
+
+	for i := 0; i < 10; i++ {
+		r := exchange(c, "www.se.test.example.com.", dns.TypeA)
+		target := r.Answer[0].(*dns.CNAME).Target
+		results[target]++
+	}
+
+	// Two possible results from this cname
+	c.Check(results, HasLen, 2)
 
 }
 
