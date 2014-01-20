@@ -1,0 +1,8 @@
+{
+  "Listen": ":8000",
+  "Username": "gollector",
+  "Password": "gollector",
+  "Facility": "daemon",
+  "LogLevel": "info",
+  "PollInterval": 5
+}

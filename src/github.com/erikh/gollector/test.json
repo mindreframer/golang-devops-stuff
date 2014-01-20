@@ -1,0 +1,48 @@
+{
+  "Listen": ":8000",
+  "Username": "gollector",
+  "Password": "gollector",
+  "Facility": "daemon",
+  "LogLevel": "info",
+  "PollInterval": 5,
+  "Plugins": {
+    "record_example": {
+      "Type": "record",
+      "Params": "record_example"
+    },
+    "tha load": {
+      "Type": "load_average",
+      "Params": null
+    },
+    "mem_usage": {
+      "Params": null
+    },
+    "cpu_usage": {
+      "Params": null
+    },
+    "echo hi": {
+      "Type": "command",
+      "Params": [ "echo", "{\"hi\": 1}" ]
+    },
+    "echo hello": {
+      "Type": "command",
+      "Params": [ "echo", "{\"hello\": 1}" ]
+    },
+    "eth0 usage": {
+      "Type": "net_usage",
+      "Params": "eth0"
+    },
+    "sda usage": {
+      "Type": "io_usage",
+      "Params": "sda"
+    },
+    "dm-0 usage": {
+      "Type": "io_usage",
+      "Params": "dm-0"
+    },
+    "/ usage": {
+      "Type": "fs_usage",
+      "Params": "/"
+    }
+  }
+}
