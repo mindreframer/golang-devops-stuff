@@ -111,11 +111,15 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     dotcloud/docker:
       Docker - the open-source application container engine
-       4,903 commits, last change: 2013-12-04 18:32:19, 7,794 stars, 1,031 forks
+       5,351 commits, last change: 2014-01-02 16:46:50, 8,658 stars, 1,230 forks
 
     efficient/epaxos:
 
        24 commits, last change: 2013-11-21 14:56:58, 130 stars, 8 forks
+
+    erikh/gollector:
+      json-based metrics collector
+       148 commits, last change: 2014-01-13 20:06:15, 52 stars, 5 forks
 
     errplane/errplane-go:
       Go library for metrics for Errplane
@@ -139,7 +143,7 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     globocom/tsuru:
       Open source Platform as a Service.
-       6,226 commits, last change: 2013-12-04 16:07:16, 739 stars, 62 forks
+       6,389 commits, last change: 2013-12-19 19:43:37, 757 stars, 64 forks
 
     golang/groupcache:
       groupcache is a caching and cache-filling library, intended as a replacement for memcached in many cases.
