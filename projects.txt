@@ -34,6 +34,7 @@ https://github.com/influxdb/influxdb.git
 https://github.com/joewalnes/websocketd.git
 https://github.com/jondot/groundcontrol.git
 https://github.com/jordansissel/lumberjack.git
+https://github.com/jyap808/jaeger.git
 https://github.com/mailgun/vulcan.git
 https://github.com/mindreframer/emtail.git
 https://github.com/mitchellh/packer.git
@@ -54,4 +55,3 @@ https://github.com/vito/garden.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/jyap808/jaeger.git
