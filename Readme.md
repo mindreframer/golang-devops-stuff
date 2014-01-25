@@ -105,6 +105,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       A highly-available key value store for shared configuration and service discovery
        1,343 commits, last change: 2014-01-20 09:28:38, 2,160 stars, 178 forks
 
+    crosbymichael/skydock:
+      Service discovery via DNS for docker
+       32 commits, last change: 2014-01-21 22:23:14, 63 stars, 5 forks
+
     crowdmob/goamz:
       Fork of the GOAMZ version developed within Canonical with additional functionality with DynamoDB
        439 commits, last change: 2014-01-16 11:13:52, 97 stars, 53 forks
