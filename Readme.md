@@ -181,6 +181,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       An experiment to cut logs in preparation for processing elsewhere.
        534 commits, last change: 2014-01-10 14:55:12, 347 stars, 87 forks
 
+    jyap808/jaeger:
+      Jaeger is a JSON encoded GPG encrypted key value store. It is useful for generating and keeping configuration files secure. Jaeger is written in Go.
+       32 commits, last change: 2014-01-23 16:23:58, 5 stars, 2 forks
+
     mailgun/vulcan:
       Programmatic HTTP rate limiting proxy for JSON based APIs.
        221 commits, last change: 2013-12-27 15:28:29, 160 stars, 5 forks
