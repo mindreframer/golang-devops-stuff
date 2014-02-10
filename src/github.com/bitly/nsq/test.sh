@@ -1,15 +1,10 @@
 #!/bin/bash
 set -e
 
-if go version | grep -q -v "go1.0"; then
-    # godep doesn't build for go1 so dont use it
-    export GOPATH=$(godep path):$GOPATH
-fi
-
 # build and run nsqlookupd
 echo "building and starting nsqlookupd"
-go build -o nsqlookupd/nsqlookupd ./nsqlookupd
-nsqlookupd/nsqlookupd >/dev/null 2>&1 &
+go build -o apps/nsqlookupd/nsqlookupd ./apps/nsqlookupd/
+apps/nsqlookupd/nsqlookupd >/dev/null 2>&1 &
 LOOKUPD_PID=$!
 
 # build and run nsqd configured to use our lookupd above
