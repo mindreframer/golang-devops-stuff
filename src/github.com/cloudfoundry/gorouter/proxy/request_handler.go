@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -162,6 +163,7 @@ func (h *RequestHandler) copyToResponse(src io.ReadCloser) (int64, error) {
 func (h *RequestHandler) setupRequest(endpoint *route.Endpoint) {
 	h.setRequestURL(endpoint.CanonicalAddr())
 	h.setRequestXForwardedFor()
+	h.setRequestXRequestStart()
 }
 
 func (h *RequestHandler) setRequestURL(addr string) {
@@ -179,6 +181,12 @@ func (h *RequestHandler) setRequestXForwardedFor() {
 		// append
 		xForwardFor := append(h.request.Header["X-Forwarded-For"], host)
 		h.request.Header.Set("X-Forwarded-For", strings.Join(xForwardFor, ", "))
+	}
+}
+
+func (h *RequestHandler) setRequestXRequestStart() {
+	if _, ok := h.request.Header[http.CanonicalHeaderKey("X-Request-Start")]; !ok {
+		h.request.Header.Set("X-Request-Start", strconv.FormatInt(time.Now().UnixNano()/1e6, 10))
 	}
 }
 
