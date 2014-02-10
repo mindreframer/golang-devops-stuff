@@ -38,6 +38,7 @@ type Server struct {
 }
 
 //dbUrl:"mongodb://adnaan:pass@localhost:27017/hamster"
+//db.addUser( { user: "adnaan",pwd: "pass",roles: [ "readWrite" ] } )
 //serverUrl:fmt.Sprintf("%s:%d", address, port)
 //creates a new server, setups logging etc.
 func NewServer() *Server {
