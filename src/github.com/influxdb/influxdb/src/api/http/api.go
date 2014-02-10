@@ -4,6 +4,7 @@ import (
 	log "code.google.com/p/log4go"
 	"common"
 	"coordinator"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"engine"
@@ -15,6 +16,7 @@ import (
 	"path/filepath"
 	"protocol"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -31,7 +33,10 @@ func init() {
 
 type HttpServer struct {
 	conn           net.Listener
+	sslConn        net.Listener
 	httpPort       string
+	httpSslPort    string
+	httpSslCert    string
 	adminAssetsDir string
 	engine         engine.EngineI
 	coordinator    coordinator.Coordinator
@@ -46,16 +51,32 @@ func NewHttpServer(httpPort string, adminAssetsDir string, theEngine engine.Engi
 	self.engine = theEngine
 	self.coordinator = theCoordinator
 	self.userManager = userManager
-	self.shutdown = make(chan bool)
+	self.shutdown = make(chan bool, 2)
 	return self
 }
 
-func (self *HttpServer) ListenAndServe() {
-	conn, err := net.Listen("tcp", self.httpPort)
-	if err != nil {
-		log.Error("Listen: ", err)
+func (self *HttpServer) EnableSsl(addr, certPath string) {
+	if addr == "" || certPath == "" {
+		// don't enable ssl unless both the address and the certificate
+		// path aren't empty
+		log.Info("Ssl will be disabled since the ssl port or certificate path weren't set")
+		return
 	}
-	self.Serve(conn)
+
+	self.httpSslPort = addr
+	self.httpSslCert = certPath
+	return
+}
+
+func (self *HttpServer) ListenAndServe() {
+	var err error
+	if self.httpPort != "" {
+		self.conn, err = net.Listen("tcp", self.httpPort)
+		if err != nil {
+			log.Error("Listen: ", err)
+		}
+	}
+	self.Serve(self.conn)
 }
 
 func (self *HttpServer) registerEndpoint(p *pat.PatternServeMux, method string, pattern string, f libhttp.HandlerFunc) {
@@ -71,6 +92,8 @@ func (self *HttpServer) registerEndpoint(p *pat.PatternServeMux, method string, 
 }
 
 func (self *HttpServer) Serve(listener net.Listener) {
+	defer func() { self.shutdown <- true }()
+
 	self.conn = listener
 	p := pat.New()
 
@@ -99,16 +122,56 @@ func (self *HttpServer) Serve(listener net.Listener) {
 	self.registerEndpoint(p, "del", "/db/:db/users/:user", self.deleteDbUser)
 	self.registerEndpoint(p, "post", "/db/:db/users/:user", self.updateDbUser)
 
+	// continuous queries management interface
+	self.registerEndpoint(p, "get", "/db/:db/continuous_queries", self.listDbContinuousQueries)
+	self.registerEndpoint(p, "post", "/db/:db/continuous_queries", self.createDbContinuousQueries)
+	self.registerEndpoint(p, "del", "/db/:db/continuous_queries/:id", self.deleteDbContinuousQueries)
+
 	// healthcheck
 	self.registerEndpoint(p, "get", "/ping", self.ping)
+
+	// force a raft log compaction
+	self.registerEndpoint(p, "post", "/raft/force_compaction", self.forceRaftCompaction)
 
 	// fetch current list of available interfaces
 	self.registerEndpoint(p, "get", "/interfaces", self.listInterfaces)
 
+	go self.startSsl(p)
+
+	if listener == nil {
+		return
+	}
+
 	if err := libhttp.Serve(listener, p); err != nil && !strings.Contains(err.Error(), "closed network") {
 		panic(err)
 	}
-	self.shutdown <- true
+}
+
+func (self *HttpServer) startSsl(p *pat.PatternServeMux) {
+	defer func() { self.shutdown <- true }()
+
+	// return if the ssl port or cert weren't set
+	if self.httpSslPort == "" || self.httpSslCert == "" {
+		return
+	}
+
+	log.Info("Starting SSL api on port %s using certificate in %s", self.httpSslPort, self.httpSslCert)
+
+	cert, err := tls.LoadX509KeyPair(self.httpSslCert, self.httpSslCert)
+	if err != nil {
+		panic(err)
+	}
+
+	self.sslConn, err = tls.Listen("tcp", self.httpSslPort, &tls.Config{
+		Certificates: []tls.Certificate{cert},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	if err := libhttp.Serve(self.sslConn, p); err != nil && !strings.Contains(err.Error(), "closed network") {
+		panic(err)
+	}
 }
 
 func (self *HttpServer) Close() {
@@ -116,10 +179,12 @@ func (self *HttpServer) Close() {
 		log.Info("Closing http server")
 		self.conn.Close()
 		log.Info("Waiting for all requests to finish before killing the process")
-		select {
-		case <-time.After(time.Second * 5):
-			log.Error("There seems to be a hanging request. Closing anyway")
-		case <-self.shutdown:
+		for i := 0; i < 2; i++ {
+			select {
+			case <-time.After(time.Second * 5):
+				log.Error("There seems to be a hanging request. Closing anyway")
+			case <-self.shutdown:
+			}
 		}
 	}
 }
@@ -190,6 +255,8 @@ const (
 	SecondPrecision
 )
 
+var TRUE = true
+
 func TimePrecisionFromString(s string) (TimePrecision, error) {
 	switch s {
 	case "u":
@@ -203,6 +270,13 @@ func TimePrecisionFromString(s string) (TimePrecision, error) {
 	}
 
 	return 0, fmt.Errorf("Unknown time precision %s", s)
+}
+
+func (self *HttpServer) forceRaftCompaction(w libhttp.ResponseWriter, r *libhttp.Request) {
+	self.tryAsClusterAdmin(w, r, func(user common.User) (int, interface{}) {
+		self.coordinator.ForceCompaction(user)
+		return libhttp.StatusOK, "OK"
+	})
 }
 
 func (self *HttpServer) sendCrossOriginHeader(w libhttp.ResponseWriter, r *libhttp.Request) {
@@ -233,7 +307,7 @@ func (self *HttpServer) query(w libhttp.ResponseWriter, r *libhttp.Request) {
 		}
 
 		writer.done()
-		return libhttp.StatusOK, nil
+		return -1, nil
 	})
 }
 
@@ -313,7 +387,7 @@ func convertToDataStoreSeries(s *SerializedSeries, precision TimePrecision) (*pr
 			case bool:
 				values = append(values, &protocol.FieldValue{BoolValue: &v})
 			case nil:
-				values = append(values, nil)
+				values = append(values, &protocol.FieldValue{IsNull: &TRUE})
 			default:
 				// if we reached this line then the dynamic type didn't match
 				return nil, fmt.Errorf("Unknown type %T", value)
@@ -351,6 +425,7 @@ func (self *HttpServer) writePoints(w libhttp.ResponseWriter, r *libhttp.Request
 	if err != nil {
 		w.WriteHeader(libhttp.StatusBadRequest)
 		w.Write([]byte(err.Error()))
+		return
 	}
 
 	self.tryAsDbUserAndClusterAdmin(w, r, func(user common.User) (int, interface{}) {
@@ -499,11 +574,7 @@ func serializeSeries(memSeries map[string]*protocol.Series, precision TimePrecis
 				rowValues = append(rowValues, *row.SequenceNumber)
 			}
 			for _, value := range row.Values {
-				if value != nil {
-					rowValues = append(rowValues, value.GetValue())
-				} else {
-					rowValues = append(rowValues, nil)
-				}
+				rowValues = append(rowValues, value.GetValue())
 			}
 			points = append(points, rowValues)
 		}
@@ -620,6 +691,10 @@ type UpdateClusterAdminUser struct {
 
 type User struct {
 	Name string `json:"username"`
+}
+
+type NewContinuousQuery struct {
+	Query string `json:"query"`
 }
 
 func (self *HttpServer) listClusterAdmins(w libhttp.ResponseWriter, r *libhttp.Request) {
@@ -754,7 +829,9 @@ func (self *HttpServer) tryAsDbUserAndClusterAdmin(w libhttp.ResponseWriter, r *
 		return
 	}
 
-	w.WriteHeader(statusCode)
+	if statusCode > 0 {
+		w.WriteHeader(statusCode)
+	}
 	if len(body) > 0 {
 		w.Write(body)
 	}
@@ -905,4 +982,49 @@ func (self *HttpServer) listInterfaces(w libhttp.ResponseWriter, r *libhttp.Requ
 	if len(body) > 0 {
 		w.Write(body)
 	}
+}
+
+func (self *HttpServer) listDbContinuousQueries(w libhttp.ResponseWriter, r *libhttp.Request) {
+	db := r.URL.Query().Get(":db")
+
+	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
+		queries, err := self.coordinator.ListContinuousQueries(u, db)
+		if err != nil {
+			return errorToStatusCode(err), err.Error()
+		}
+
+		return libhttp.StatusOK, queries
+	})
+}
+
+func (self *HttpServer) createDbContinuousQueries(w libhttp.ResponseWriter, r *libhttp.Request) {
+	db := r.URL.Query().Get(":db")
+
+	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
+		var values interface{}
+		body, err := ioutil.ReadAll(r.Body)
+		if err != nil {
+			return libhttp.StatusInternalServerError, err.Error()
+		}
+		json.Unmarshal(body, &values)
+		query := values.(map[string]interface{})["query"].(string)
+		fmt.Println(query)
+
+		if err := self.coordinator.CreateContinuousQuery(u, db, query); err != nil {
+			return errorToStatusCode(err), err.Error()
+		}
+		return libhttp.StatusOK, nil
+	})
+}
+
+func (self *HttpServer) deleteDbContinuousQueries(w libhttp.ResponseWriter, r *libhttp.Request) {
+	db := r.URL.Query().Get(":db")
+	id, _ := strconv.ParseInt(r.URL.Query().Get(":id"), 10, 64)
+
+	self.tryAsDbUserAndClusterAdmin(w, r, func(u common.User) (int, interface{}) {
+		if err := self.coordinator.DeleteContinuousQuery(u, db, uint32(id)); err != nil {
+			return errorToStatusCode(err), err.Error()
+		}
+		return libhttp.StatusOK, nil
+	})
 }

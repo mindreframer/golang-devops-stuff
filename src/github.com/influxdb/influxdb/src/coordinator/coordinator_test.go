@@ -13,6 +13,7 @@ import (
 	"os"
 	"protocol"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -97,12 +98,18 @@ func startAndVerifyCluster(count int, c *C) []*RaftServer {
 	return servers
 }
 
-func clean(servers ...*RaftServer) {
+func cleanWithoutDeleting(servers ...*RaftServer) {
 	for _, server := range servers {
 		server.Close()
-		os.RemoveAll(server.path)
 	}
 	http.DefaultTransport.(*http.Transport).CloseIdleConnections()
+}
+
+func clean(servers ...*RaftServer) {
+	cleanWithoutDeleting(servers...)
+	for _, server := range servers {
+		os.RemoveAll(server.path)
+	}
 }
 
 func newConfigAndServer(c *C) *RaftServer {
@@ -142,7 +149,7 @@ func (self *CoordinatorSuite) TestCanRecover(c *C) {
 
 	server.CreateDatabase("db1", uint8(1))
 	assertConfigContains(server.port, "db1", true, c)
-	server.Close()
+	cleanWithoutDeleting(server)
 	time.Sleep(SERVER_STARTUP_TIME)
 	server = newConfigAndServer(c)
 	// reset the path and port to the previous server and remove the
@@ -152,7 +159,58 @@ func (self *CoordinatorSuite) TestCanRecover(c *C) {
 	server.port = port
 	defer clean(server)
 	server.ListenAndServe()
+	time.Sleep(time.Second)
 	assertConfigContains(server.port, "db1", true, c)
+}
+
+func (self *CoordinatorSuite) TestCanSnapshot(c *C) {
+	server := startAndVerifyCluster(1, c)[0]
+	// defer clean(server)
+
+	path, port, name := server.path, server.port, server.name
+
+	for i := 0; i < 1000; i++ {
+		dbname := fmt.Sprintf("db%d", i)
+		server.CreateDatabase(dbname, uint8(1))
+		assertConfigContains(server.port, dbname, true, c)
+	}
+	size, err := GetFileSize(server.raftServer.LogPath())
+	c.Assert(err, IsNil)
+	server.ForceLogCompaction()
+	newSize, err := GetFileSize(server.raftServer.LogPath())
+	c.Assert(err, IsNil)
+	c.Assert(newSize < size, Equals, true)
+	fmt.Printf("size of %s shrinked from %d to %d\n", server.raftServer.LogPath(), size, newSize)
+	cleanWithoutDeleting(server)
+	time.Sleep(SERVER_STARTUP_TIME)
+	server = newConfigAndServer(c)
+	// reset the path and port to the previous server and remove the
+	// path that was created by newConfigAndServer
+	os.RemoveAll(server.path)
+	server.path = path
+	server.port = port
+	server.name = name
+	// defer clean(server)
+	err = server.ListenAndServe()
+	c.Assert(err, IsNil)
+	time.Sleep(SERVER_STARTUP_TIME)
+	for i := 0; i < 1000; i++ {
+		dbname := fmt.Sprintf("db%d", i)
+		assertConfigContains(server.port, dbname, true, c)
+	}
+
+	// make another server join the cluster
+	server2 := newConfigAndServer(c)
+	defer clean(server2)
+	l, err := net.Listen("tcp4", ":0")
+	c.Assert(err, IsNil)
+	server2.config.SeedServers = []string{fmt.Sprintf("http://localhost:%d", server.port)}
+	server2.Serve(l)
+	time.Sleep(SERVER_STARTUP_TIME)
+	for i := 0; i < 1000; i++ {
+		dbname := fmt.Sprintf("db%d", i)
+		assertConfigContains(server2.port, dbname, true, c)
+	}
 }
 
 func (self *CoordinatorSuite) TestCanCreateCoordinatorsAndReplicate(c *C) {
@@ -297,7 +355,8 @@ func (self *CoordinatorSuite) TestAdminOperations(c *C) {
 	// can get other cluster admin
 	admins, err := coordinator.ListClusterAdmins(root)
 	c.Assert(err, IsNil)
-	c.Assert(admins, DeepEquals, []string{"root", "another_cluster_admin"})
+	sort.Strings(admins)
+	c.Assert(admins, DeepEquals, []string{"another_cluster_admin", "root"})
 
 	// can create db users
 	c.Assert(coordinator.CreateDbUser(root, "db1", "db_user"), IsNil)
@@ -322,6 +381,62 @@ func (self *CoordinatorSuite) TestAdminOperations(c *C) {
 	// can delete cluster admins and db users
 	c.Assert(coordinator.DeleteDbUser(root, "db1", "db_user"), IsNil)
 	c.Assert(coordinator.DeleteClusterAdminUser(root, "another_cluster_admin"), IsNil)
+}
+
+func (self *CoordinatorSuite) TestContinuousQueryOperations(c *C) {
+	servers := startAndVerifyCluster(3, c)
+	defer clean(servers...)
+
+	coordinator := NewCoordinatorImpl(nil, servers[0], servers[0].clusterConfig)
+
+	time.Sleep(REPLICATION_LAG)
+
+	// create users
+	root, _ := coordinator.AuthenticateClusterAdmin("root", "root")
+
+	coordinator.CreateDbUser(root, "db1", "db_admin")
+	coordinator.ChangeDbUserPassword(root, "db1", "db_admin", "db_pass")
+	coordinator.SetDbAdmin(root, "db1", "db_admin", true)
+	dbAdmin, _ := coordinator.AuthenticateDbUser("db1", "db_admin", "db_pass")
+
+	coordinator.CreateDbUser(root, "db1", "db_user")
+	coordinator.ChangeDbUserPassword(root, "db1", "db_user", "db_pass")
+	dbUser, _ := coordinator.AuthenticateDbUser("db1", "db_user", "db_pass")
+
+	allowedUsers := []*User{&root, &dbAdmin}
+	disallowedUsers := []*User{&dbUser}
+
+	// cluster admins and db admins should be able to do everything
+	for _, user := range allowedUsers {
+		results, err := coordinator.ListContinuousQueries(*user, "db1")
+		c.Assert(err, IsNil)
+		c.Assert(results[0].Points, HasLen, 0)
+
+		c.Assert(coordinator.CreateContinuousQuery(*user, "db1", "select * from foo into bar;"), IsNil)
+		time.Sleep(REPLICATION_LAG)
+		results, err = coordinator.ListContinuousQueries(*user, "db1")
+		c.Assert(err, IsNil)
+		c.Assert(results[0].Points, HasLen, 1)
+		c.Assert(*results[0].Points[0].Values[0].Int64Value, Equals, int64(1))
+		c.Assert(*results[0].Points[0].Values[1].StringValue, Equals, "select * from foo into bar;")
+
+		c.Assert(coordinator.DeleteContinuousQuery(*user, "db1", 1), IsNil)
+
+		results, err = coordinator.ListContinuousQueries(*user, "db1")
+		c.Assert(err, IsNil)
+		c.Assert(results[0].Points, HasLen, 0)
+	}
+
+	// regular database users shouldn't be able to do anything
+	for _, user := range disallowedUsers {
+		_, err := coordinator.ListContinuousQueries(*user, "db1")
+		c.Assert(err, NotNil)
+		c.Assert(coordinator.CreateContinuousQuery(*user, "db1", "select * from foo into bar;"), NotNil)
+		c.Assert(coordinator.DeleteContinuousQuery(*user, "db1", 1), NotNil)
+	}
+
+	coordinator.DeleteDbUser(root, "db1", "db_admin")
+	coordinator.DeleteDbUser(root, "db1", "db_user")
 }
 
 func (self *CoordinatorSuite) TestDbAdminOperations(c *C) {
@@ -361,7 +476,11 @@ func (self *CoordinatorSuite) TestDbAdminOperations(c *C) {
 	// can get db users
 	admins, err := coordinator.ListDbUsers(dbUser, "db1")
 	c.Assert(err, IsNil)
-	c.Assert(admins, DeepEquals, []string{"db_user", "db_user2"})
+	adminsSet := map[string]bool{}
+	for _, admin := range admins {
+		adminsSet[admin] = true
+	}
+	c.Assert(adminsSet, DeepEquals, map[string]bool{"db_user": true, "db_user2": true})
 
 	// cannot create db users for a different db
 	c.Assert(coordinator.CreateDbUser(dbUser, "db2", "db_user"), NotNil)
@@ -436,6 +555,7 @@ func (self *CoordinatorSuite) TestUserDataReplication(c *C) {
 	}
 
 	c.Assert(coordinators[0].CreateClusterAdminUser(root, "admin"), IsNil)
+	time.Sleep(time.Second)
 	c.Assert(coordinators[0].ChangeClusterAdminPassword(root, "admin", "admin"), IsNil)
 	time.Sleep(REPLICATION_LAG)
 	for _, coordinator := range coordinators {
@@ -463,8 +583,12 @@ func (self *CoordinatorSuite) TestCanCreateDatabaseWithNameAndReplicationFactor(
 	time.Sleep(REPLICATION_LAG)
 
 	for i := 0; i < 3; i++ {
-		databases := servers[i].clusterConfig.GetDatabases()
-		c.Assert(databases, DeepEquals, []*Database{&Database{"db1", 1}, &Database{"db2", 1}, &Database{"db3", 3}})
+		databases := servers[i].clusterConfig.databaseReplicationFactors
+		c.Assert(databases, DeepEquals, map[string]uint8{
+			"db1": 1,
+			"db2": 1,
+			"db3": 3,
+		})
 	}
 
 	err := servers[0].CreateDatabase("db3", 1)

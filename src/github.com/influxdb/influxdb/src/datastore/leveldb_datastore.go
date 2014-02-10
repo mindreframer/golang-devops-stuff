@@ -32,6 +32,7 @@ type LevelDbDatastore struct {
 	incrementLock      sync.Mutex
 	requestId          uint32
 	requestLogDir      string
+	maxOpenFiles       int
 }
 
 type Field struct {
@@ -61,12 +62,13 @@ func getRequestLogDirForDate(baseDir string, t time.Time) string {
 	return filepath.Join(baseDir, logDir)
 }
 
-func NewRequestLogDb(dir string) (*requestLogDb, error) {
+func NewRequestLogDb(dir string, maxOpenFiles int) (*requestLogDb, error) {
 	err := os.MkdirAll(dir, 0744)
 	if err != nil {
 		return nil, err
 	}
 	opts := levigo.NewOptions()
+	opts.SetMaxOpenFiles(maxOpenFiles)
 	opts.SetCache(levigo.NewLRUCache(ONE_MEGABYTE))
 	opts.SetCreateIfMissing(true)
 	opts.SetBlockSize(TWO_FIFTY_SIX_KILOBYTES)
@@ -116,7 +118,6 @@ const (
 	ONE_GIGABYTE                 = ONE_MEGABYTE * 1024
 	TWO_FIFTY_SIX_KILOBYTES      = 256 * 1024
 	BLOOM_FILTER_BITS_PER_KEY    = 64
-	MAX_POINTS_TO_SCAN           = 1000000
 	MAX_SERIES_SIZE              = ONE_MEGABYTE
 	REQUEST_SEQUENCE_NUMBER_KEY  = "r"
 	REQUEST_LOG_BASE_DIR         = "request_logs"
@@ -140,9 +141,11 @@ var (
 	MAX_SEQUENCE                 = []byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}
 
 	replicateWrite = protocol.Request_REPLICATION_WRITE
+
+	TRUE = true
 )
 
-func NewLevelDbDatastore(dbDir string) (Datastore, error) {
+func NewLevelDbDatastore(dbDir string, maxOpenFiles int) (Datastore, error) {
 	mainDbDir := filepath.Join(dbDir, DATABASE_DIR)
 	requestLogDir := filepath.Join(dbDir, REQUEST_LOG_BASE_DIR)
 
@@ -150,16 +153,17 @@ func NewLevelDbDatastore(dbDir string) (Datastore, error) {
 	if err != nil {
 		return nil, err
 	}
-	previousLog, err := NewRequestLogDb(getRequestLogDirForDate(requestLogDir, time.Now().Add(-time.Hour*24)))
+	previousLog, err := NewRequestLogDb(getRequestLogDirForDate(requestLogDir, time.Now().Add(-time.Hour*24)), maxOpenFiles)
 	if err != nil {
 		return nil, err
 	}
-	currentLog, err := NewRequestLogDb(getRequestLogDirForDate(requestLogDir, time.Now()))
+	currentLog, err := NewRequestLogDb(getRequestLogDirForDate(requestLogDir, time.Now()), maxOpenFiles)
 	if err != nil {
 		return nil, err
 	}
 
 	opts := levigo.NewOptions()
+	opts.SetMaxOpenFiles(maxOpenFiles)
 	opts.SetCache(levigo.NewLRUCache(ONE_GIGABYTE))
 	opts.SetCreateIfMissing(true)
 	opts.SetBlockSize(TWO_FIFTY_SIX_KILOBYTES)
@@ -194,7 +198,9 @@ func NewLevelDbDatastore(dbDir string) (Datastore, error) {
 		writeOptions:       wo,
 		requestLogDir:      requestLogDir,
 		currentRequestLog:  currentLog,
-		previousRequestLog: previousLog}
+		previousRequestLog: previousLog,
+		maxOpenFiles:       maxOpenFiles,
+	}
 
 	go leveldbStore.periodicallyRotateRequestLog()
 
@@ -217,7 +223,7 @@ func (self *LevelDbDatastore) rotateRequestLog() {
 	oldLog := self.previousRequestLog
 	self.previousRequestLog = self.currentRequestLog
 	var err error
-	self.currentRequestLog, err = NewRequestLogDb(getRequestLogDirForDate(self.requestLogDir, time.Now()))
+	self.currentRequestLog, err = NewRequestLogDb(getRequestLogDirForDate(self.requestLogDir, time.Now()), self.maxOpenFiles)
 	if err != nil {
 		log.Error("Error creating new requst log: ", err)
 		panic(err)
@@ -302,7 +308,7 @@ func (self *LevelDbDatastore) WriteSeriesData(database string, series *protocol.
 			binary.Write(sequenceNumberBuffer, binary.BigEndian, *point.SequenceNumber)
 			pointKey := append(append(id, timestampBuffer.Bytes()...), sequenceNumberBuffer.Bytes()...)
 
-			if point.Values[fieldIndex] == nil {
+			if point.Values[fieldIndex].GetIsNull() {
 				wb.Delete(pointKey)
 				continue
 			}
@@ -503,7 +509,7 @@ func (self *LevelDbDatastore) LogRequestAndAssignSequenceNumber(request *protoco
 		}
 		// Do a less than comparison because it's ok if we're just getting the same write again. As long as we haven't missed one.
 		if previousSequenceNumber+uint64(1) < *request.SequenceNumber {
-			log.Warn("MISSING REQUESTS: ", previousSequenceNumber, *request.SequenceNumber)
+			log.Warn("MISSING REQUESTS: %d, %d", previousSequenceNumber, *request.SequenceNumber)
 			return SequenceMissingRequestsError{"Missing requests between last seen and this one.", previousSequenceNumber, *request.SequenceNumber}
 		}
 	}
@@ -615,12 +621,23 @@ func (self *LevelDbDatastore) deleteRangeOfSeriesCommon(database, series string,
 				}
 			}
 		}
+		count := 0
 		for it = it; it.Valid(); it.Next() {
 			k := it.Key()
 			if len(k) < 16 || !bytes.Equal(k[:8], field.Id) || bytes.Compare(k[8:16], endTimeBytes) == 1 {
 				break
 			}
 			wb.Delete(k)
+			count++
+			// delete every one million keys which is approximately 24 megabytes
+			if count == ONE_MEGABYTE {
+				err = self.db.Write(self.writeOptions, wb)
+				if err != nil {
+					return err
+				}
+				wb.Clear()
+				count = 0
+			}
 			endKey = k
 		}
 		err = self.db.Write(self.writeOptions, wb)
@@ -769,10 +786,11 @@ func (self *LevelDbDatastore) executeQueryForSeries(database, series string, col
 	result := &protocol.Series{Name: &series, Fields: fieldNames, Points: make([]*protocol.Point, 0)}
 
 	limit := query.Limit
+	shouldLimit := true
 	if limit == 0 {
-		limit = MAX_POINTS_TO_SCAN
+		limit = -1
+		shouldLimit = false
 	}
-
 	resultByteCount := 0
 
 	// TODO: clean up, this is super gnarly
@@ -818,12 +836,13 @@ func (self *LevelDbDatastore) executeQueryForSeries(database, series string, col
 		}
 
 		for i, iterator := range iterators {
-			// if the value is nil, or doesn't match the point's timestamp and sequence number
+			// if the value is nil or doesn't match the point's timestamp and sequence number
 			// then skip it
 			if rawColumnValues[i] == nil ||
 				!bytes.Equal(rawColumnValues[i].time, pointTimeRaw) ||
 				!bytes.Equal(rawColumnValues[i].sequence, pointSequenceRaw) {
 
+				point.Values[i] = &protocol.FieldValue{IsNull: &TRUE}
 				continue
 			}
 
@@ -839,21 +858,23 @@ func (self *LevelDbDatastore) executeQueryForSeries(database, series string, col
 			}
 
 			fv := &protocol.FieldValue{}
+			resultByteCount += len(rawColumnValues[i].value)
 			err := proto.Unmarshal(rawColumnValues[i].value, fv)
 			if err != nil {
 				return err
 			}
-			resultByteCount += len(rawColumnValues[i].value)
 			point.Values[i] = fv
-			var sequence uint64
-			binary.Read(bytes.NewBuffer(rawColumnValues[i].sequence), binary.BigEndian, &sequence)
-			var t uint64
-			binary.Read(bytes.NewBuffer(rawColumnValues[i].time), binary.BigEndian, &t)
-			time := self.convertUintTimestampToInt64(&t)
-			point.SetTimestampInMicroseconds(time)
-			point.SequenceNumber = &sequence
 			rawColumnValues[i] = nil
 		}
+
+		var sequence uint64
+		// set the point sequence number and timestamp
+		binary.Read(bytes.NewBuffer(pointSequenceRaw), binary.BigEndian, &sequence)
+		var t uint64
+		binary.Read(bytes.NewBuffer(pointTimeRaw), binary.BigEndian, &t)
+		time := self.convertUintTimestampToInt64(&t)
+		point.SetTimestampInMicroseconds(time)
+		point.SequenceNumber = &sequence
 
 		// stop the loop if we ran out of points
 		if !isValid {
@@ -872,7 +893,7 @@ func (self *LevelDbDatastore) executeQueryForSeries(database, series string, col
 		resultByteCount += 16
 
 		// check if we should send the batch along
-		if resultByteCount > MAX_SERIES_SIZE || limit < 1 {
+		if resultByteCount > MAX_SERIES_SIZE || (shouldLimit && limit == 0) {
 			dropped, err := self.sendBatch(query, result, yield)
 			if err != nil {
 				return err
@@ -881,7 +902,7 @@ func (self *LevelDbDatastore) executeQueryForSeries(database, series string, col
 			resultByteCount = 0
 			result = &protocol.Series{Name: &series, Fields: fieldNames, Points: make([]*protocol.Point, 0)}
 		}
-		if limit < 1 {
+		if shouldLimit && limit < 1 {
 			break
 		}
 	}

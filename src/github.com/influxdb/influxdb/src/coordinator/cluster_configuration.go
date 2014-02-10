@@ -1,13 +1,17 @@
 package coordinator
 
 import (
+	"bytes"
 	log "code.google.com/p/log4go"
 	"common"
 	"configuration"
+	"encoding/gob"
 	"errors"
 	"fmt"
+	"parser"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 /*
@@ -27,11 +31,21 @@ type ClusterConfiguration struct {
 	dbUsers                    map[string]map[string]*dbUser
 	servers                    []*ClusterServer
 	serversLock                sync.RWMutex
+	continuousQueries          map[string][]*ContinuousQuery
+	continuousQueriesLock      sync.RWMutex
+	parsedContinuousQueries    map[string]map[uint32]*parser.SelectQuery
+	continuousQueryTimestamp   time.Time
 	hasRunningServers          bool
 	localServerId              uint32
 	ClusterVersion             uint32
 	config                     *configuration.Configuration
 	addedLocalServerWait       chan bool
+	addedLocalServer           bool
+}
+
+type ContinuousQuery struct {
+	Id    uint32
+	Query string
 }
 
 type Database struct {
@@ -44,6 +58,8 @@ func NewClusterConfiguration(config *configuration.Configuration) *ClusterConfig
 		databaseReplicationFactors: make(map[string]uint8),
 		clusterAdmins:              make(map[string]*clusterAdmin),
 		dbUsers:                    make(map[string]map[string]*dbUser),
+		continuousQueries:          make(map[string][]*ContinuousQuery),
+		parsedContinuousQueries:    make(map[string]map[uint32]*parser.SelectQuery),
 		servers:                    make([]*ClusterServer, 0),
 		config:                     config,
 		addedLocalServerWait:       make(chan bool, 1),
@@ -285,13 +301,15 @@ func (self *ClusterConfiguration) AddPotentialServer(server *ClusterServer) {
 	self.servers = append(self.servers, server)
 	server.Id = uint32(len(self.servers))
 	log.Info("Added server to cluster config: %d, %s, %s", server.Id, server.RaftConnectionString, server.ProtobufConnectionString)
+	log.Info("Checking whether this is the local server new: %s, local: %s\n", self.config.ProtobufConnectionString(), server.ProtobufConnectionString)
 	if server.ProtobufConnectionString != self.config.ProtobufConnectionString() {
 		log.Info("Connecting to ProtobufServer: %s", server.ProtobufConnectionString)
 		server.Connect()
-	} else {
+	} else if !self.addedLocalServer {
 		log.Info("Added the local server")
 		self.localServerId = server.Id
 		self.addedLocalServerWait <- true
+		self.addedLocalServer = true
 	}
 }
 
@@ -332,6 +350,74 @@ func (self *ClusterConfiguration) DropDatabase(name string) error {
 
 	delete(self.dbUsers, name)
 	return nil
+}
+
+func (self *ClusterConfiguration) CreateContinuousQuery(db string, query string) error {
+	self.continuousQueriesLock.Lock()
+	defer self.continuousQueriesLock.Unlock()
+
+	if self.continuousQueries == nil {
+		self.continuousQueries = map[string][]*ContinuousQuery{}
+	}
+
+	if self.parsedContinuousQueries == nil {
+		self.parsedContinuousQueries = map[string]map[uint32]*parser.SelectQuery{}
+	}
+
+	maxId := uint32(0)
+	for _, query := range self.continuousQueries[db] {
+		if query.Id > maxId {
+			maxId = query.Id
+		}
+	}
+
+	selectQuery, err := parser.ParseSelectQuery(query)
+	if err != nil {
+		return fmt.Errorf("Failed to parse continuous query: %s", query)
+	}
+
+	queryId := maxId + 1
+	if self.parsedContinuousQueries[db] == nil {
+		self.parsedContinuousQueries[db] = map[uint32]*parser.SelectQuery{queryId: selectQuery}
+	} else {
+		self.parsedContinuousQueries[db][queryId] = selectQuery
+	}
+	self.continuousQueries[db] = append(self.continuousQueries[db], &ContinuousQuery{queryId, query})
+
+	return nil
+}
+
+func (self *ClusterConfiguration) SetContinuousQueryTimestamp(timestamp time.Time) error {
+	self.continuousQueriesLock.Lock()
+	defer self.continuousQueriesLock.Unlock()
+
+	self.continuousQueryTimestamp = timestamp
+
+	return nil
+}
+
+func (self *ClusterConfiguration) DeleteContinuousQuery(db string, id uint32) error {
+	self.continuousQueriesLock.Lock()
+	defer self.continuousQueriesLock.Unlock()
+
+	for i, query := range self.continuousQueries[db] {
+		if query.Id == id {
+			q := self.continuousQueries[db]
+			q[len(q)-1], q[i], q = nil, q[len(q)-1], q[:len(q)-1]
+			self.continuousQueries[db] = q
+			delete(self.parsedContinuousQueries[db], id)
+			break
+		}
+	}
+
+	return nil
+}
+
+func (self *ClusterConfiguration) GetContinuousQueries(db string) []*ContinuousQuery {
+	self.continuousQueriesLock.Lock()
+	defer self.continuousQueriesLock.Unlock()
+
+	return self.continuousQueries[db]
 }
 
 func (self *ClusterConfiguration) GetDbUsers(db string) (names []string) {
@@ -421,4 +507,90 @@ func (self *ClusterConfiguration) GetDatabaseReplicationFactor(name string) uint
 	self.createDatabaseLock.RLock()
 	defer self.createDatabaseLock.RUnlock()
 	return self.databaseReplicationFactors[name]
+}
+
+func (self *ClusterConfiguration) Save() ([]byte, error) {
+	log.Debug("Dumping the cluster configuration")
+	data := struct {
+		Databases         map[string]uint8
+		Admins            map[string]*clusterAdmin
+		DbUsers           map[string]map[string]*dbUser
+		Servers           []*ClusterServer
+		HasRunningServers bool
+		LocalServerId     uint32
+		ClusterVersion    uint32
+	}{
+		self.databaseReplicationFactors,
+		self.clusterAdmins,
+		self.dbUsers,
+		self.servers,
+		self.hasRunningServers,
+		self.localServerId,
+		self.ClusterVersion,
+	}
+
+	b := bytes.NewBuffer(nil)
+	err := gob.NewEncoder(b).Encode(&data)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.Bytes(), nil
+}
+
+func (self *ClusterConfiguration) Recovery(b []byte) error {
+	log.Debug("Recovering the cluster configuration")
+	data := struct {
+		Databases         map[string]uint8
+		Admins            map[string]*clusterAdmin
+		DbUsers           map[string]map[string]*dbUser
+		Servers           []*ClusterServer
+		HasRunningServers bool
+		LocalServerId     uint32
+		ClusterVersion    uint32
+	}{}
+
+	err := gob.NewDecoder(bytes.NewReader(b)).Decode(&data)
+	if err != nil {
+		return err
+	}
+
+	self.databaseReplicationFactors = data.Databases
+	self.clusterAdmins = data.Admins
+	self.dbUsers = data.DbUsers
+
+	// copy the protobuf client from the old servers
+	oldServers := map[string]*ProtobufClient{}
+	for _, server := range self.servers {
+		oldServers[server.ProtobufConnectionString] = server.protobufClient
+	}
+
+	self.servers = data.Servers
+	for _, server := range self.servers {
+		server.protobufClient = oldServers[server.ProtobufConnectionString]
+		if server.protobufClient == nil {
+			server.Connect()
+		}
+	}
+
+	self.hasRunningServers = data.HasRunningServers
+	self.localServerId = data.LocalServerId
+	self.ClusterVersion = data.ClusterVersion
+
+	if self.addedLocalServer {
+		return nil
+	}
+
+	for _, server := range self.servers {
+		log.Info("Checking whether this is the local server new: %s, local: %s\n", self.config.ProtobufConnectionString(), server.ProtobufConnectionString)
+		if server.ProtobufConnectionString != self.config.ProtobufConnectionString() {
+			continue
+		}
+		log.Info("Added the local server")
+		self.addedLocalServerWait <- true
+		self.addedLocalServer = true
+		break
+	}
+
+	return nil
 }

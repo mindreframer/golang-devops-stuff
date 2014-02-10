@@ -7,7 +7,7 @@
 
 [logging]
 # logging level can be one of "debug", "info", "warn" or "error"
-# level  = "info"
+level  = "info"
 file   = "/tmp/influxdb/test/1/influxdb.log"
 
 # Configure the admin server
@@ -18,6 +18,8 @@ assets = "./admin"
 # Configure the http api
 [api]
 port = 60500
+ssl-port = 60503
+ssl-cert = "./cert.pem"
 
 # Raft configuration
 [raft]

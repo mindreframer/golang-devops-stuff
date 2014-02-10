@@ -140,7 +140,7 @@
 - [Issue #75](https://github.com/influxdb/influxdb/issues/75). Don't allow time series names that start with underscore
 - [Issue #85](https://github.com/influxdb/influxdb/issues/85). Non-existing columns exist after they have been queried before
 
-## v0.4.0 (unreleased)
+## v0.4.0 [2014-01-17]
 
 ## Features
 
@@ -161,8 +161,11 @@
 - [Issue #108](https://github.com/influxdb/influxdb/issues/108). Querying one point using `time =`
 - [Issue #114](https://github.com/influxdb/influxdb/issues/114). Servers should periodically check that they're consistent.
 - [Issue #93](https://github.com/influxdb/influxdb/issues/93). Should be able to drop a time series
+- [Issue #177](https://github.com/influxdb/influxdb/issues/177). Support drop series in the query language.
+- [Issue #184](https://github.com/influxdb/influxdb/issues/184). Implement Raft log compaction.
+- [Issue #153](https://github.com/influxdb/influxdb/issues/153). Implement continuous queries
 
-## Bugfixes
+### Bugfixes
 
 - [Issue #90](https://github.com/influxdb/influxdb/issues/90). Group by multiple columns panic
 - [Issue #89](https://github.com/influxdb/influxdb/issues/89). 'Group by' combined with 'where' not working
@@ -178,6 +181,8 @@
 - [Issue #136](https://github.com/influxdb/influxdb/issues/136). Make sure writes are replicated in order to avoid triggering replays
 - [Issue #145](https://github.com/influxdb/influxdb/issues/145). Server fails to join cluster if all starting at same time.
 - [Issue #176](https://github.com/influxdb/influxdb/issues/176). Drop database should take effect on all nodes
+- [Issue #180](https://github.com/influxdb/influxdb/issues/180). Column names not returned when running multi-node cluster and writing more than one point.
+- [Issue #182](https://github.com/influxdb/influxdb/issues/182). Queries with invalid limit clause crash the server
 
 ### Deprecated
 
@@ -187,3 +192,44 @@
 - deprecate endpoints `/db/:db/admins/:user` in favor of using `/db/:db/users/:user` which should
   be used to update user flags, password, etc.
 - Querying for column names that don't exist no longer throws an error.
+
+## v0.4.1 [2014-01-30]
+
+### Features
+
+- [Issue #193](https://github.com/influxdb/influxdb/issues/193). Allow logging to stdout. Thanks @schmurfy
+- [Issue #190](https://github.com/influxdb/influxdb/pull/190). Add support for SSL.
+- [Issue #194](https://github.com/influxdb/influxdb/pull/194). Should be able to disable Admin interface.
+
+### Bugfixes
+
+- [Issue #33](https://github.com/influxdb/influxdb/issues/33). Don't call WriteHeader more than once per request
+- [Issue #195](https://github.com/influxdb/influxdb/issues/195). Allow the bind address to be configurable, Thanks @schmurfy.
+- [Issue #199](https://github.com/influxdb/influxdb/issues/199). Make the test timeout configurable
+- [Issue #200](https://github.com/influxdb/influxdb/issues/200). Selecting `time` or `sequence_number` silently fail
+- [Issue #215](https://github.com/influxdb/influxdb/pull/215). Server fails to start up after Raft log compaction and restart.
+
+### Deprecated
+
+## v0.4.3 [2014-01-31]
+
+### Bugfixes
+
+- [Issue #225](https://github.com/influxdb/influxdb/issues/225). Remove a hard limit on the points returned by the datastore
+- [Issue #223](https://github.com/influxdb/influxdb/issues/223). Null values caused count(distinct()) to panic
+- [Issue #224](https://github.com/influxdb/influxdb/issues/224). Null values broke replication due to protobuf limitation
+
+## v0.4.4 [2014-02-05]
+
+### Features
+
+- Make the leveldb max open files configurable in the toml file
+
+## v0.4.5 [unreleased]
+
+### Bugfixes
+
+- Ensure large deletes don't take too much memory
+- [Issue #240](https://github.com/influxdb/influxdb/pull/240). Unable to query against columns with `.` in the name.
+
+### Features
