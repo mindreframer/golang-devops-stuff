@@ -11,7 +11,7 @@ Run 'server' at your endpoint, by default it listens on port 8888.
 Run 'client' on your local machine, by default it listens locally on 2222.
 Use -http=serverAddress:8888 to point to your server, 
 and -dest=destAddr:destPort to point to your tunnel endpoint
-(deafult is -dest=127.0.0.1:22 to connect to local sshd on the server).
+(default is -dest=127.0.0.1:22 to connect to local sshd on the server).
 	./client -http=serverAddress:8888
 
 With both of them running (you must start server first), you can then
