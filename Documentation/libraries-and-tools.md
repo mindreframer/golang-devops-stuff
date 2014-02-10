@@ -3,6 +3,7 @@
 **Tools**
 
 - [etcdctl](https://github.com/coreos/etcdctl) - A command line client for etcd
+- [etcd-dump](https://npmjs.org/package/etcd-dump) - Command line utility for dumping/restoring etcd.
 
 **Go libraries**
 
@@ -43,6 +44,9 @@
 **Erlang libraries**
 
 - [marshall-lee/etcd.erl](https://github.com/marshall-lee/etcd.erl)
+
+**.Net Libraries**
+-[drusellers/etcetera](https://github.com/drusellers/etcetera)
 
 A detailed recap of client functionalities can be found in the [clients compatibility matrix][clients-matrix.md].
 

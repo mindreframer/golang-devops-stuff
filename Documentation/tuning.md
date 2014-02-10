@@ -3,6 +3,8 @@
 The default settings in etcd should work well for installations on a local network where the average network latency is low.
 However, when using etcd across multiple data centers or over networks with high latency you may need to tweak the heartbeat and election timeout settings.
 
+### Timeouts
+
 The underlying distributed consensus protocol relies on two separate timeouts to ensure that nodes can handoff leadership if one stalls or goes offline.
 The first timeout is called the *Heartbeat Timeout*.
 This is the frequency with which the leader will notify followers that it is still the leader.
@@ -43,3 +45,49 @@ election_timeout = 100
 ```
 
 The values are specified in milliseconds.
+
+
+### Snapshots
+
+etcd appends all key changes to a log file.
+This log grows forever and is a complete linear history of every change made to the keys.
+A complete history works well for lightly used clusters but clusters that are heavily used would carry around a large log.
+
+To avoid having a huge log etcd makes periodic snapshots.
+These snapshots provide a way for etcd to compact the log by saving the current state of the system and removing old logs.
+
+### Snapshot Tuning
+
+Creating snapshots can be expensive so they're only created after a given number of changes to etcd.
+By default, snapshots will be made after every 10,000 changes.
+If etcd's memory usage and disk usage are too high, you can lower the snapshot threshold by setting the following on the command line:
+
+```sh
+# Command line arguments:
+$ etcd -snapshot-count=5000
+
+# Environment variables:
+$ ETCD_SNAPSHOT_COUNT=5000 etcd
+```
+
+Or you can change the setting in the configuration file:
+
+```toml
+snapshot_count = 5000
+```
+
+You can also disable snapshotting by adding the following to your command line:
+
+```sh
+# Command line arguments:
+$ etcd -snapshot false
+
+# Environment variables:
+$ ETCD_SNAPSHOT=false etcd
+```
+
+You can also enable snapshotting within the configuration file:
+
+```toml
+snapshot = false
+```

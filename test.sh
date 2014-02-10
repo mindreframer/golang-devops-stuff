@@ -1,27 +1,24 @@
-#!/bin/sh
-set -e
+#!/bin/sh -e
 
-if [ -z "$PKG" ]; then
-    PKG="./store ./server ./server/v2/tests ./mod/lock/v2/tests"
-fi
-
-if [ -z "$RUN" ]; then
-    RUN="."
-fi
-
-# Get GOPATH, etc from build
 . ./build
 
-# use right GOPATH
-export GOPATH="${PWD}"
+go test -i ./http
+go test -v ./http
 
-# Unit tests
-for i in $PKG
-do
-    go test -i $i
-    go test -v -test.run=$RUN $i
-done
+go test -i ./store
+go test -v ./store
 
-# Functional tests
+go test -i ./server
+go test -v ./server
+
+go test -i ./config
+go test -v ./config
+
+go test -i ./server/v2/tests
+go test -v ./server/v2/tests
+
+go test -i ./mod/lock/v2/tests
+go test -v ./mod/lock/v2/tests
+
 go test -i ./tests/functional
-ETCD_BIN_PATH=$(pwd)/etcd go test -v  -test.run=$RUN ./tests/functional
+ETCD_BIN_PATH=$(pwd)/bin/etcd go test -v ./tests/functional

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/coreos/etcd/tests"
-	"github.com/stretchr/testify/assert"
+	"github.com/coreos/etcd/third_party/github.com/stretchr/testify/assert"
 )
 
 // Ensure that we can start a v2 node from the log of a v1 node.
@@ -37,6 +37,7 @@ func TestV1SoloMigration(t *testing.T) {
 	args := []string{"etcd", fmt.Sprintf("-data-dir=%s", nodepath)}
 	args = append(args, "-addr", "127.0.0.1:4001")
 	args = append(args, "-peer-addr", "127.0.0.1:7001")
+	args = append(args, "-name", "v1")
 	process, err := os.StartProcess(EtcdBinPath, args, procAttr)
 	if err != nil {
 		t.Fatal("start process failed:" + err.Error())
@@ -79,6 +80,7 @@ func TestV1ClusterMigration(t *testing.T) {
 		args := []string{"etcd", fmt.Sprintf("-data-dir=%s", nodepath)}
 		args = append(args, "-addr", fmt.Sprintf("127.0.0.1:%d", 4001+i))
 		args = append(args, "-peer-addr", fmt.Sprintf("127.0.0.1:%d", 7001+i))
+		args = append(args, "-name", node)
 		process, err := os.StartProcess(EtcdBinPath, args, procAttr)
 		if err != nil {
 			t.Fatal("start process failed:" + err.Error())

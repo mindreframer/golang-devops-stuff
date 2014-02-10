@@ -1,39 +1,40 @@
 package raft
 
 import (
-	"code.google.com/p/goprotobuf/proto"
-	"github.com/coreos/raft/protobuf"
 	"io"
 	"io/ioutil"
+
+	"github.com/coreos/etcd/third_party/code.google.com/p/gogoprotobuf/proto"
+	"github.com/coreos/etcd/third_party/github.com/coreos/raft/protobuf"
 )
 
 // The request sent to a server to vote for a candidate to become a leader.
 type RequestVoteRequest struct {
-	peer          *Peer
-	Term          uint64
-	LastLogIndex  uint64
-	LastLogTerm   uint64
-	CandidateName string
+	peer		*Peer
+	Term		uint64
+	LastLogIndex	uint64
+	LastLogTerm	uint64
+	CandidateName	string
 }
 
 // Creates a new RequestVote request.
 func newRequestVoteRequest(term uint64, candidateName string, lastLogIndex uint64, lastLogTerm uint64) *RequestVoteRequest {
 	return &RequestVoteRequest{
-		Term:          term,
-		LastLogIndex:  lastLogIndex,
-		LastLogTerm:   lastLogTerm,
-		CandidateName: candidateName,
+		Term:		term,
+		LastLogIndex:	lastLogIndex,
+		LastLogTerm:	lastLogTerm,
+		CandidateName:	candidateName,
 	}
 }
 
 // Encodes the RequestVoteRequest to a buffer. Returns the number of bytes
 // written and any error that may have occurred.
 func (req *RequestVoteRequest) Encode(w io.Writer) (int, error) {
-	pb := &protobuf.ProtoRequestVoteRequest{
-		Term:          proto.Uint64(req.Term),
-		LastLogIndex:  proto.Uint64(req.LastLogIndex),
-		LastLogTerm:   proto.Uint64(req.LastLogTerm),
-		CandidateName: proto.String(req.CandidateName),
+	pb := &protobuf.RequestVoteRequest{
+		Term:		proto.Uint64(req.Term),
+		LastLogIndex:	proto.Uint64(req.LastLogIndex),
+		LastLogTerm:	proto.Uint64(req.LastLogTerm),
+		CandidateName:	proto.String(req.CandidateName),
 	}
 	p, err := proto.Marshal(pb)
 	if err != nil {
@@ -54,7 +55,7 @@ func (req *RequestVoteRequest) Decode(r io.Reader) (int, error) {
 
 	totalBytes := len(data)
 
-	pb := &protobuf.ProtoRequestVoteRequest{}
+	pb := &protobuf.RequestVoteRequest{}
 	if err = proto.Unmarshal(data, pb); err != nil {
 		return -1, err
 	}

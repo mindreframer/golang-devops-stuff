@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"path"
 
-	"github.com/gorilla/context"
+	"github.com/coreos/etcd/third_party/github.com/gorilla/context"
 )
 
 // NewRouter returns a new router instance.
@@ -37,17 +37,17 @@ func NewRouter() *Router {
 // This will send all incoming requests to the router.
 type Router struct {
 	// Configurable Handler to be used when no route matches.
-	NotFoundHandler http.Handler
+	NotFoundHandler	http.Handler
 	// Parent route, if this is a subrouter.
-	parent parentRoute
+	parent	parentRoute
 	// Routes to be matched, in order.
-	routes []*Route
+	routes	[]*Route
 	// Routes by name for URL building.
-	namedRoutes map[string]*Route
+	namedRoutes	map[string]*Route
 	// See Router.StrictSlash(). This defines the flag for new routes.
-	strictSlash bool
+	strictSlash	bool
 	// If true, do not clear the request context after handling the request
-	KeepContext bool
+	KeepContext	bool
 }
 
 // Match matches registered routes against the request.
@@ -69,7 +69,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if p := cleanPath(req.URL.Path); p != req.URL.Path {
 
 		// Added 3 lines (Philip Schlump) - It was droping the query string and #whatever from query.
-		// This matches with fix in go 1.2 r.c. 4 for same problem.  Go Issue: 
+		// This matches with fix in go 1.2 r.c. 4 for same problem.  Go Issue:
 		// http://code.google.com/p/go/issues/detail?id=5252
 		url := *req.URL
 		url.Path = p
@@ -166,7 +166,7 @@ func (r *Router) Handle(path string, handler http.Handler) *Route {
 // HandleFunc registers a new route with a matcher for the URL path.
 // See Route.Path() and Route.HandlerFunc().
 func (r *Router) HandleFunc(path string, f func(http.ResponseWriter,
-	*http.Request),) *Route {
+	*http.Request)) *Route {
 	return r.NewRoute().Path(path).HandlerFunc(f)
 }
 
@@ -224,15 +224,15 @@ func (r *Router) Schemes(schemes ...string) *Route {
 
 // RouteMatch stores information about a matched route.
 type RouteMatch struct {
-	Route   *Route
-	Handler http.Handler
-	Vars    map[string]string
+	Route	*Route
+	Handler	http.Handler
+	Vars	map[string]string
 }
 
 type contextKey int
 
 const (
-	varsKey contextKey = iota
+	varsKey	contextKey	= iota
 	routeKey
 )
 
