@@ -1,20 +1,19 @@
 package hm
 
 import (
+	"errors"
 	"fmt"
+	"github.com/cloudfoundry/gunk/timeprovider"
+	"github.com/cloudfoundry/gunk/timeprovider/faketimeprovider"
 	"github.com/cloudfoundry/hm9000/config"
-	"github.com/cloudfoundry/hm9000/helpers/exiter"
-	"github.com/cloudfoundry/hm9000/helpers/locker"
 	"github.com/cloudfoundry/hm9000/helpers/logger"
 	"github.com/cloudfoundry/hm9000/helpers/metricsaccountant"
-	"github.com/cloudfoundry/hm9000/helpers/timeprovider"
-	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	"github.com/cloudfoundry/hm9000/store"
-	"github.com/cloudfoundry/hm9000/storeadapter"
-	"github.com/cloudfoundry/hm9000/testhelpers/fakelocker"
-	"github.com/cloudfoundry/hm9000/testhelpers/faketimeprovider"
+	"github.com/cloudfoundry/storeadapter"
+	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
+	"github.com/cloudfoundry/storeadapter/workerpool"
+	"github.com/cloudfoundry/storeadapter/zookeeperstoreadapter"
 	"github.com/cloudfoundry/yagnats"
-	"github.com/coreos/go-etcd/etcd"
 	"strconv"
 	"time"
 
@@ -64,24 +63,21 @@ func connectToMessageBus(l logger.Logger, conf *config.Config) yagnats.NATSClien
 	return natsClient
 }
 
-func buildLocker(l logger.Logger, conf *config.Config, lockName string) locker.Locker {
-	if conf.StoreType == "etcd" {
-		etcdClient := etcd.NewClient(conf.StoreURLs)
-		return locker.New(etcdClient, exiter.New(), lockName, 10)
-	}
-
-	l.Info("Looks like you're trying to use not-etcd with a locker...  lol!")
-	return fakelocker.New()
-}
-
 func acquireLock(l logger.Logger, conf *config.Config, lockName string) {
-	locker := buildLocker(l, conf, lockName)
+	adapter, _ := connectToStoreAdapter(l, conf)
 	l.Info("Acquiring lock for " + lockName)
-	err := locker.GetAndMaintainLock()
+	lostLockChannel, _, err := adapter.GetAndMaintainLock(lockName, 10)
 	if err != nil {
 		l.Error("Failed to talk to lock store", err)
 		os.Exit(1)
 	}
+
+	go func() {
+		<-lostLockChannel
+		l.Error("Lost the lock", errors.New("Lock the lock"))
+		os.Exit(197)
+	}()
+
 	l.Info("Acquired lock for " + lockName)
 }
 
@@ -89,9 +85,9 @@ func connectToStoreAdapter(l logger.Logger, conf *config.Config) (storeadapter.S
 	var adapter storeadapter.StoreAdapter
 	workerPool := workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests)
 	if conf.StoreType == "etcd" {
-		adapter = storeadapter.NewETCDStoreAdapter(conf.StoreURLs, workerPool)
+		adapter = etcdstoreadapter.NewETCDStoreAdapter(conf.StoreURLs, workerPool)
 	} else if conf.StoreType == "ZooKeeper" {
-		adapter = storeadapter.NewZookeeperStoreAdapter(conf.StoreURLs, workerPool, buildTimeProvider(l), time.Second)
+		adapter = zookeeperstoreadapter.NewZookeeperStoreAdapter(conf.StoreURLs, workerPool, buildTimeProvider(l), time.Second)
 	} else {
 		l.Error(fmt.Sprintf("Unknown store type %s.  Choose one of 'etcd' or 'ZooKeeper'", conf.StoreType), fmt.Errorf("Unkown store type"))
 		os.Exit(1)

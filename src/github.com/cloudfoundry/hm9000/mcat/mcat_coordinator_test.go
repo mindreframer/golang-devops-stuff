@@ -1,16 +1,20 @@
 package mcat_test
 
 import (
+	"github.com/cloudfoundry/gunk/timeprovider"
 	"github.com/cloudfoundry/hm9000/config"
-	"github.com/cloudfoundry/hm9000/helpers/timeprovider"
-	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	storepackage "github.com/cloudfoundry/hm9000/store"
-	"github.com/cloudfoundry/hm9000/storeadapter"
 	"github.com/cloudfoundry/hm9000/testhelpers/desiredstateserver"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
 	"github.com/cloudfoundry/hm9000/testhelpers/natsrunner"
 	"github.com/cloudfoundry/hm9000/testhelpers/startstoplistener"
-	"github.com/cloudfoundry/hm9000/testhelpers/storerunner"
+	"github.com/cloudfoundry/storeadapter"
+	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
+	"github.com/cloudfoundry/storeadapter/storerunner"
+	"github.com/cloudfoundry/storeadapter/storerunner/etcdstorerunner"
+	"github.com/cloudfoundry/storeadapter/storerunner/zookeeperstorerunner"
+	"github.com/cloudfoundry/storeadapter/workerpool"
+	"github.com/cloudfoundry/storeadapter/zookeeperstoreadapter"
 	"github.com/cloudfoundry/yagnats"
 	. "github.com/onsi/gomega"
 	"strconv"
@@ -97,10 +101,10 @@ func (coordinator *MCATCoordinator) StartStartStopListener() {
 func (coordinator *MCATCoordinator) StartETCD() {
 	coordinator.CurrentStoreType = "etcd"
 	etcdPort := 5000 + (coordinator.ParallelNode-1)*10
-	coordinator.StoreRunner = storerunner.NewETCDClusterRunner(etcdPort, 1)
+	coordinator.StoreRunner = etcdstorerunner.NewETCDClusterRunner(etcdPort, 1)
 	coordinator.StoreRunner.Start()
 
-	coordinator.StoreAdapter = storeadapter.NewETCDStoreAdapter(coordinator.StoreRunner.NodeURLS(), workerpool.NewWorkerPool(coordinator.Conf.StoreMaxConcurrentRequests))
+	coordinator.StoreAdapter = etcdstoreadapter.NewETCDStoreAdapter(coordinator.StoreRunner.NodeURLS(), workerpool.NewWorkerPool(coordinator.Conf.StoreMaxConcurrentRequests))
 	err := coordinator.StoreAdapter.Connect()
 	Ω(err).ShouldNot(HaveOccurred())
 }
@@ -108,10 +112,10 @@ func (coordinator *MCATCoordinator) StartETCD() {
 func (coordinator *MCATCoordinator) StartZooKeeper() {
 	coordinator.CurrentStoreType = "ZooKeeper"
 	zookeeperPort := 2181 + (coordinator.ParallelNode-1)*10
-	coordinator.StoreRunner = storerunner.NewZookeeperClusterRunner(zookeeperPort, 1)
+	coordinator.StoreRunner = zookeeperstorerunner.NewZookeeperClusterRunner(zookeeperPort, 1)
 	coordinator.StoreRunner.Start()
 
-	coordinator.StoreAdapter = storeadapter.NewZookeeperStoreAdapter(coordinator.StoreRunner.NodeURLS(), workerpool.NewWorkerPool(coordinator.Conf.StoreMaxConcurrentRequests), &timeprovider.RealTimeProvider{}, time.Second)
+	coordinator.StoreAdapter = zookeeperstoreadapter.NewZookeeperStoreAdapter(coordinator.StoreRunner.NodeURLS(), workerpool.NewWorkerPool(coordinator.Conf.StoreMaxConcurrentRequests), &timeprovider.RealTimeProvider{}, time.Second)
 	err := coordinator.StoreAdapter.Connect()
 	Ω(err).ShouldNot(HaveOccurred())
 }

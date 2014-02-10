@@ -3,8 +3,9 @@ package hm
 import (
 	"errors"
 	"fmt"
-	"github.com/cloudfoundry/hm9000/helpers/locker"
 	"github.com/cloudfoundry/hm9000/helpers/logger"
+	"github.com/cloudfoundry/storeadapter"
+	"os"
 	"time"
 )
 
@@ -14,15 +15,21 @@ func Daemonize(
 	period time.Duration,
 	timeout time.Duration,
 	logger logger.Logger,
-	locker locker.Locker,
+	adapter storeadapter.StoreAdapter,
 ) error {
 	logger.Info("Acquiring lock for " + component)
 
-	err := locker.GetAndMaintainLock()
+	lostLockChannel, releaseLockChannel, err := adapter.GetAndMaintainLock(component, 10)
 	if err != nil {
 		logger.Info(fmt.Sprintf("Failed to acquire lock: %s", err))
 		return err
 	}
+
+	go func() {
+		<-lostLockChannel
+		logger.Error("Lost the lock", errors.New("Lock the lock"))
+		os.Exit(197)
+	}()
 
 	logger.Info("Acquired lock for " + component)
 
@@ -49,7 +56,7 @@ func Daemonize(
 				logger.Error("Daemon returned an error. Continuining...", err)
 			}
 		case <-timeoutChan:
-			locker.ReleaseLock()
+			releaseLockChannel <- true
 			return errors.New("Daemon timed out. Aborting!")
 		}
 

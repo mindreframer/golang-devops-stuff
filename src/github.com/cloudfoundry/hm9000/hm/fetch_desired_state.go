@@ -17,11 +17,11 @@ func FetchDesiredState(l logger.Logger, conf *config.Config, poll bool) {
 	if poll {
 		l.Info("Starting Desired State Daemon...")
 
-		locker := buildLocker(l, conf, "fetcher")
+		adapter, _ := connectToStoreAdapter(l, conf)
 
 		err := Daemonize("Fetcher", func() error {
 			return fetchDesiredState(l, conf, store)
-		}, conf.FetcherPollingInterval(), conf.FetcherTimeout(), l, locker)
+		}, conf.FetcherPollingInterval(), conf.FetcherTimeout(), l, adapter)
 		if err != nil {
 			l.Error("Desired State Daemon Errored", err)
 		}
@@ -42,7 +42,7 @@ func fetchDesiredState(l logger.Logger, conf *config.Config, store store.Store) 
 	fetcher := desiredstatefetcher.New(conf,
 		store,
 		metricsaccountant.New(store),
-		httpclient.NewHttpClient(conf.FetcherNetworkTimeout()),
+		httpclient.NewHttpClient(conf.SkipSSLVerification, conf.FetcherNetworkTimeout()),
 		buildTimeProvider(l),
 		l,
 	)

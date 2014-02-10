@@ -11,10 +11,10 @@ import (
 	. "github.com/cloudfoundry/hm9000/testhelpers/custommatchers"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakemetricsaccountant"
-	"github.com/cloudfoundry/hm9000/testhelpers/fakestoreadapter"
+	"github.com/cloudfoundry/storeadapter/fakestoreadapter"
 
+	"github.com/cloudfoundry/gunk/timeprovider/faketimeprovider"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakehttpclient"
-	"github.com/cloudfoundry/hm9000/testhelpers/faketimeprovider"
 	"time"
 
 	. "github.com/onsi/ginkgo"

@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 	"github.com/cloudfoundry/hm9000/models"
-	"github.com/cloudfoundry/hm9000/storeadapter"
+	"github.com/cloudfoundry/storeadapter"
 	"strings"
 	"time"
 )
@@ -39,7 +39,7 @@ func (store *RealStore) SyncDesiredState(newDesiredStates ...models.DesiredAppSt
 	}
 
 	tSet := time.Now()
-	err = store.adapter.Set(nodesToSave)
+	err = store.adapter.SetMulti(nodesToSave)
 	dtSet := time.Since(tSet).Seconds()
 
 	if err != nil {

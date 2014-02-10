@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 	"github.com/cloudfoundry/hm9000/models"
-	"github.com/cloudfoundry/hm9000/storeadapter"
+	"github.com/cloudfoundry/storeadapter"
 	"strings"
 	"time"
 )
@@ -82,7 +82,7 @@ func (store *RealStore) SyncHeartbeats(incomingHeartbeats ...models.Heartbeat) e
 	store.instanceHeartbeatCacheMutex.Unlock()
 
 	tSave := time.Now()
-	err = store.adapter.Set(nodesToSave)
+	err = store.adapter.SetMulti(nodesToSave)
 	dtSave := time.Since(tSave).Seconds()
 
 	if err != nil {

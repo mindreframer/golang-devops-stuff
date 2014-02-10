@@ -25,6 +25,7 @@ var _ = Describe("Config", func() {
         "cc_auth_user": "mcat",
         "cc_auth_password": "testing",
         "cc_base_url": "http://127.0.0.1:6001",
+        "skip_cert_verify": true,
         "store_schema_version": 1,
         "store_type": "etcd",
         "store_urls": ["http://127.0.0.1:4001"],
@@ -91,6 +92,7 @@ var _ = Describe("Config", func() {
 			Ω(config.CCAuthUser).Should(Equal("mcat"))
 			Ω(config.CCAuthPassword).Should(Equal("testing"))
 			Ω(config.CCBaseURL).Should(Equal("http://127.0.0.1:6001"))
+			Ω(config.SkipSSLVerification).Should(BeTrue())
 
 			Ω(config.ListenerHeartbeatSyncInterval()).Should(Equal(time.Second))
 			Ω(config.StoreHeartbeatCacheRefreshInterval()).Should(Equal(20 * time.Second))

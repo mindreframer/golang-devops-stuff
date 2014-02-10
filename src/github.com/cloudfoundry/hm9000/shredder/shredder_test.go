@@ -4,9 +4,9 @@ import (
 	"github.com/cloudfoundry/hm9000/config"
 	. "github.com/cloudfoundry/hm9000/shredder"
 	storepackage "github.com/cloudfoundry/hm9000/store"
-	"github.com/cloudfoundry/hm9000/storeadapter"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
-	"github.com/cloudfoundry/hm9000/testhelpers/fakestoreadapter"
+	"github.com/cloudfoundry/storeadapter"
+	"github.com/cloudfoundry/storeadapter/fakestoreadapter"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -24,7 +24,7 @@ var _ = Describe("Shredder", func() {
 		store := storepackage.NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
 		shredder = New(store)
 
-		storeAdapter.Set([]storeadapter.StoreNode{
+		storeAdapter.SetMulti([]storeadapter.StoreNode{
 			{Key: "/hm/v2/pokemon/geodude", Value: []byte{}},
 			{Key: "/hm/v2/deep-pokemon/abra/kadabra/alakazam", Value: []byte{}},
 			{Key: "/hm/v2/pokemonCount", Value: []byte("151")},

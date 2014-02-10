@@ -14,11 +14,11 @@ func Shred(l logger.Logger, conf *config.Config, poll bool) {
 	if poll {
 		l.Info("Starting Shredder Daemon...")
 
-		locker := buildLocker(l, conf, "shredder")
+		adapter, _ := connectToStoreAdapter(l, conf)
 
 		err := Daemonize("Shredder", func() error {
 			return shred(l, store)
-		}, conf.ShredderPollingInterval(), conf.ShredderTimeout(), l, locker)
+		}, conf.ShredderPollingInterval(), conf.ShredderTimeout(), l, adapter)
 		if err != nil {
 			l.Error("Shredder Errored", err)
 		}

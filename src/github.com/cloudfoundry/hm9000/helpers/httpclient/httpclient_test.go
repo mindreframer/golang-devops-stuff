@@ -12,6 +12,10 @@ import (
 	"time"
 )
 
+//We tried to test skipSSLVerification and failed...
+//There appears to be a bug in go where a TLS server launched within the same process as the client that makes the connection
+//refuses all connections from the client.
+
 func init() {
 	net.Listen("tcp", ":8887")
 
@@ -28,7 +32,7 @@ var _ = Describe("Httpclient", func() {
 	var client HttpClient
 
 	BeforeEach(func() {
-		client = NewHttpClient(1 * time.Millisecond)
+		client = NewHttpClient(true, 1*time.Millisecond)
 	})
 
 	Context("when the request times out (trying to connect)", func() {

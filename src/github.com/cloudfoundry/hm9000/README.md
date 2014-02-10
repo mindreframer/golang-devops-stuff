@@ -342,14 +342,6 @@ Provides a (sys)logger.  Eventually this will use steno to perform logging.
 
 Supports metrics tracking.  Used by the `metricsserver` and components that post metrics.
 
-#### `timeprovider`
-
-Provides a `TimeProvider`.  Useful for injecting time dependencies in tests.
-
-#### `workerpool`
-
-Provides a worker pool with a configurable pool size.  Work scheduled on the pool will run concurrently, but no more `poolSize` workers can be running at any given moment.
-
 ### `models`
 
 `models` encapsulates the various JSON structs that are sent/received over NATS/HTTP.  Simple serializing/deserializing behavior is attached to these structs.
@@ -357,10 +349,6 @@ Provides a worker pool with a configurable pool size.  Work scheduled on the poo
 ### `store`
 
 `store` sits on top of the lower-level `storeadapter` and provides the various hm9000 components with high-level access to the store (components speak to the `store` about setting and fetching models instead of the lower-level `StoreNode` defined inthe `storeadapter`).
-
-### `storeadapter`
-
-The `storeadapter` is an generalized client for connecting to a Zookeeper/ETCD-like high availability store.  Writes are performed concurrently for optimal performance.
 
 ## Test Support Packages (under testhelpers)
 
@@ -372,10 +360,6 @@ The `storeadapter` is an generalized client for connecting to a Zookeeper/ETCD-l
 
 Provides a fake implementation of the `helpers/logger` interface
 
-#### `faketimeprovider`
-
-Provides a fake implementation of the `helpers/timeprovider` interface.  Useful for injecting time dependency in test.
-
 #### `fakehttpclient`
 
 Provides a fake implementation of the `helpers/httpclient` interface that allows tests to have fine-grained control over the http request/response lifecycle.
@@ -383,10 +367,6 @@ Provides a fake implementation of the `helpers/httpclient` interface that allows
 #### `fakemetricsaccountant`
 
 Provides a fake implementation of the `helpers/metricsaccountant` interface that allows test to make assertions on metrics tracking.
-
-#### `fakestoreadapter`
-
-Provides a fake in-memory implementation of the `storeadapter` to allow for unit tests that do not need to spin up a database.
 
 ### Fixtures & Misc.
 
@@ -440,10 +420,6 @@ Brings up an in-process http server that mimics the CC's bulk endpoints (includi
 #### `natsrunner`
 
 Brings up and manages the lifecycle of a live NATS server.  After bringing the server up it provides a fully configured cfmessagebus object that you can pass to your test subjects.
-
-#### `storerunner`
-
-Brings up and manages the lifecycle of a live ETCD/ZooKeeper server cluster.
 
 ## The MCAT
 

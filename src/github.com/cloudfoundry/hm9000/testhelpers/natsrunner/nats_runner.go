@@ -3,6 +3,7 @@ package natsrunner
 import (
 	"fmt"
 	. "github.com/onsi/gomega"
+	"os"
 
 	"github.com/cloudfoundry/yagnats"
 
@@ -25,8 +26,14 @@ func NewNATSRunner(port int) *NATSRunner {
 }
 
 func (runner *NATSRunner) Start() {
+	_, err := exec.LookPath("gnatsd")
+	if err != nil {
+		fmt.Println("You need gnatsd installed!")
+		os.Exit(1)
+	}
+
 	runner.natsCommand = exec.Command("gnatsd", "-p", strconv.Itoa(runner.port))
-	err := runner.natsCommand.Start()
+	err = runner.natsCommand.Start()
 	Ω(err).ShouldNot(HaveOccurred(), "Make sure to have gnatsd on your path")
 
 	connectionInfo := &yagnats.ConnectionInfo{
