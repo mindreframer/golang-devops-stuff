@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,53 +6,18 @@ package docker
 
 import (
 	"fmt"
-	"github.com/dotcloud/docker"
+	"github.com/fsouza/go-dockerclient"
 	"github.com/globocom/config"
 	"github.com/globocom/docker-cluster/cluster"
+	"github.com/globocom/docker-cluster/storage"
 	etesting "github.com/globocom/tsuru/exec/testing"
-	rtesting "github.com/globocom/tsuru/router/testing"
-	"labix.org/v2/mgo/bson"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
-
-var inspectOut = `
-{
-	"State": {
-		"Running": false,
-		"Pid": 0,
-		"ExitCode": 0,
-		"StartedAt": "2013-06-13T20:59:31.699407Z",
-		"Ghost": false
-	},
-	"NetworkSettings": {
-		"IpAddress": "10.10.10.10",
-		"IpPrefixLen": 8,
-		"Gateway": "10.65.41.1",
-		"Ports": {
-			"8888/tcp": [
-				{
-					"HostIp": "0.0.0.0",
-					"HostPort": "34233"
-				}
-			]
-		}
-	}
-}`
-
-func createTestRoutes(names ...string) func() {
-	for _, name := range names {
-		rtesting.FakeRouter.AddBackend(name)
-	}
-	return func() {
-		for _, name := range names {
-			rtesting.FakeRouter.RemoveBackend(name)
-		}
-	}
-}
 
 func startTestListener(addr string) net.Listener {
 	listener, err := net.Listen("tcp", addr)
@@ -62,7 +27,7 @@ func startTestListener(addr string) net.Listener {
 	return listener
 }
 
-func startDockerTestServer(containerPort string, calls *int) (func(), *httptest.Server) {
+func startDockerTestServer(containerPort string, calls *int64) (func(), *httptest.Server) {
 	listAllOutput := `[
     {
         "Id": "8dfafdbc3a40",
@@ -131,7 +96,7 @@ func startDockerTestServer(containerPort string, calls *int) (func(), *httptest.
 		"IpPrefixLen": 8,
 		"Gateway": "10.65.41.1",
 		"Ports": {
-			"8889/tcp": [
+			"8888/tcp": [
 				{
 					"HostIp": "0.0.0.0",
 					"HostPort": "9024"
@@ -141,7 +106,7 @@ func startDockerTestServer(containerPort string, calls *int) (func(), *httptest.
 	}
 }`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		(*calls)++
+		atomic.AddInt64(calls, 1)
 		if strings.Contains(r.URL.Path, "/containers/") {
 			if strings.Contains(r.URL.Path, "/containers/9930c24f1c4f") {
 				w.Write([]byte(c2Output))
@@ -162,7 +127,7 @@ func startDockerTestServer(containerPort string, calls *int) (func(), *httptest.
 	}))
 	var err error
 	oldCluster := dockerCluster()
-	dCluster, err = cluster.New(nil,
+	dCluster, err = cluster.New(nil, storage.Redis("localhost:6379", "tests"),
 		cluster.Node{ID: "server", Address: server.URL},
 	)
 	if err != nil {
@@ -184,36 +149,6 @@ func startSSHAgentServer(output string) (*FakeSSHServer, func()) {
 	return &handler, func() {
 		server.Close()
 		config.Unset("docker:ssh-agent-port")
-	}
-}
-
-func insertContainers(containerPort string) func() {
-	coll := collection()
-	defer coll.Close()
-	err := coll.Insert(
-		container{
-			ID: "9930c24f1c5f", AppName: "ashamed", Type: "python",
-			Port: "8888", Status: "running", IP: "127.0.0.3",
-			HostPort: "9023", HostAddr: "127.0.0.1",
-		},
-		container{
-			ID: "9930c24f1c4f", AppName: "make-up", Type: "python",
-			Port: "8889", Status: "running", IP: "127.0.0.4",
-			HostPort: "9025", HostAddr: "127.0.0.1",
-		},
-		container{ID: "9930c24f1c6f", AppName: "make-up", Type: "python", Port: "9090", Status: "error", HostAddr: "127.0.0.1"},
-		container{ID: "9930c24f1c7f", AppName: "make-up", Type: "python", Port: "9090", Status: "created", HostAddr: "127.0.0.1"},
-	)
-	if err != nil {
-		panic(err)
-	}
-	rtesting.FakeRouter.AddRoute("ashamed", fmt.Sprintf("http://127.0.0.1:%s", containerPort))
-	rtesting.FakeRouter.AddRoute("make-up", "http://127.0.0.1:9025")
-	return func() {
-		coll := collection()
-		defer coll.Close()
-		coll.RemoveAll(bson.M{"appname": "make-up"})
-		coll.RemoveAll(bson.M{"appname": "ashamed"})
 	}
 }
 

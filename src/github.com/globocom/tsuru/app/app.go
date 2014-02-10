@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -81,24 +81,20 @@ type Applog struct {
 	AppName string
 }
 
-// Get queries the database and fills the App object with data retrieved from
-// the database. It uses the name of the app as filter in the query, so you can
-// provide this field:
-//
-//     app := App{Name: "myapp"}
-//     err := app.Get()
-//     // do something with the app
-func (app *App) Get() error {
+// GetAppByName queries the database to find an app identified by the given
+// name.
+func GetByName(name string) (*App, error) {
+	var app App
 	conn, err := db.Conn()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer conn.Close()
-	err = conn.Apps().Find(bson.M{"name": app.Name}).One(app)
+	err = conn.Apps().Find(bson.M{"name": name}).One(&app)
 	if err == mgo.ErrNotFound {
-		return ErrAppNotFound
+		return nil, ErrAppNotFound
 	}
-	return err
+	return &app, err
 }
 
 // CreateApp creates a new app.
@@ -236,11 +232,12 @@ func (app *App) AddUnits(n uint) error {
 	if n == 0 {
 		return stderr.New("Cannot add zero units.")
 	}
-	return action.NewPipeline(
+	err := action.NewPipeline(
 		&reserveUnitsToAdd,
 		&provisionAddUnits,
 		&saveNewUnitsInDatabase,
 	).Execute(app, n)
+	return err
 }
 
 // RemoveUnit removes a unit by its InstanceId or Name.

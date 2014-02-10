@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -18,7 +18,7 @@ import (
 
 var m = pat.New()
 
-func RegisterHandler(path string, method string, h http.Handler) {
+func RegisterAdminHandler(path string, method string, h http.Handler) {
 	if method == "GET" {
 		m.Get(path, h)
 	}

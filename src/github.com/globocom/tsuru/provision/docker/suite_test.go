@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,8 +6,10 @@ package docker
 
 import (
 	dtesting "github.com/fsouza/go-dockerclient/testing"
+	"github.com/garyburd/redigo/redis"
 	"github.com/globocom/config"
 	"github.com/globocom/docker-cluster/cluster"
+	"github.com/globocom/docker-cluster/storage"
 	ftesting "github.com/globocom/tsuru/fs/testing"
 	"github.com/globocom/tsuru/provision"
 	_ "github.com/globocom/tsuru/testing"
@@ -63,9 +65,16 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 	f.Close()
 	s.server, err = dtesting.NewServer(nil)
 	c.Assert(err, gocheck.IsNil)
-	dCluster, _ = cluster.New(nil,
+}
+
+func (s *S) SetUpTest(c *gocheck.C) {
+	var err error
+	cmutex.Lock()
+	defer cmutex.Unlock()
+	dCluster, err = cluster.New(nil, storage.Redis("localhost:6379", "tests"),
 		cluster.Node{ID: "server", Address: s.server.URL()},
 	)
+	c.Assert(err, gocheck.IsNil)
 }
 
 func (s *S) TearDownSuite(c *gocheck.C) {
@@ -74,11 +83,49 @@ func (s *S) TearDownSuite(c *gocheck.C) {
 	err := coll.Database.DropDatabase()
 	c.Assert(err, gocheck.IsNil)
 	fsystem = nil
+	clearSchedStorage(c)
 }
 
-func (s *S) SetUp(c *gocheck.C) {
-	clusterNodes = map[string]string{"server": s.server.URL()}
-	config.Unset("docker:registry")
+func removeClusterNodes(ids []string, c *gocheck.C) {
+	conn, err := redis.Dial("tcp", "localhost:6379")
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	c.Assert(err, gocheck.IsNil)
+	err = conn.Send("multi")
+	c.Assert(err, gocheck.IsNil)
+	for _, id := range ids {
+		conn.Send("del", "tests:node:"+id)
+		conn.Send("lrem", "tests:nodes", "0", id)
+	}
+	_, err = conn.Do("exec")
+	c.Assert(err, gocheck.IsNil)
+}
+
+func clearSchedStorage(c *gocheck.C) {
+	conn, err := redis.Dial("tcp", "localhost:6379")
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	keys, err := conn.Do("keys", "*")
+	c.Assert(err, gocheck.IsNil)
+	for _, key := range keys.([]interface{}) {
+		k := string(key.([]byte))
+		_, err := conn.Do("del", k)
+		c.Assert(err, gocheck.IsNil)
+	}
+}
+
+func insertImage(repo, nodeID string, c *gocheck.C) func() {
+	conn, err := redis.Dial("tcp", "localhost:6379")
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	_, err = conn.Do("set", "tests:image:"+repo, nodeID)
+	c.Assert(err, gocheck.IsNil)
+	return func() {
+		conn, err := redis.Dial("tcp", "localhost:6379")
+		c.Assert(err, gocheck.IsNil)
+		defer conn.Close()
+		conn.Do("del", "tests:image:"+repo)
+	}
 }
 
 type unitSlice []provision.Unit
@@ -97,4 +144,20 @@ func (s unitSlice) Swap(i, j int) {
 
 func sortUnits(units []provision.Unit) {
 	sort.Sort(unitSlice(units))
+}
+
+func createFakeContainers(ids []string, c *gocheck.C) func() {
+	conn, err := redis.Dial("tcp", "localhost:6379")
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	filter := []interface{}{}
+	for _, id := range ids {
+		key := "tests:" + id
+		_, err = conn.Do("SET", key, "server")
+		c.Assert(err, gocheck.IsNil)
+		filter = append(filter, key)
+	}
+	return func() {
+		conn.Do("DEL", filter...)
+	}
 }
