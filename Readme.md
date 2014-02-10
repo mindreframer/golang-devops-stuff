@@ -39,15 +39,15 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     abh/geodns:
       DNS server with per-client targeted responses
-       241 commits, last change: 2014-01-08 05:50:49, 276 stars, 22 forks
+       241 commits, last change: 2014-01-08 05:50:49, 277 stars, 22 forks
 
     adnaan/hamster:
       A back end as a service based on MongoDB
-       44 commits, last change: , 51 stars, 2 forks
+       44 commits, last change: 2014-01-27 22:54:15, 51 stars, 2 forks
 
     apcera/gnatsd:
       High Performance NATS Server
-       289 commits, last change: 2014-02-06 19:34:12, 299 stars, 35 forks
+       289 commits, last change: 2014-02-06 19:34:12, 301 stars, 35 forks
 
     apcera/nats:
       NATS client for Go
@@ -59,19 +59,19 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     benbjohnson/go-raft:
       A Go implementation of the Raft distributed consensus protocol.
-       472 commits, last change: 2014-02-07 12:33:01, 705 stars, 84 forks
+       473 commits, last change: 2014-02-10 07:47:46, 708 stars, 84 forks
 
     bitly/google_auth_proxy:
       A reverse proxy that provides authentication using Google OAuth2
-       19 commits, last change: 2013-10-24 10:42:28, 130 stars, 21 forks
+       19 commits, last change: 2013-10-24 10:42:28, 132 stars, 22 forks
 
     bitly/nsq:
       A realtime distributed messaging platform
-       1,014 commits, last change: 2014-02-06 19:35:02, 1,986 stars, 174 forks
+       1,017 commits, last change: 2014-02-10 08:43:06, 1,990 stars, 175 forks
 
     buger/gor:
       HTTP traffic replay in real-time. Replay traffic from production to staging and dev environments.
-       248 commits, last change: 2014-01-29 07:29:46, 1,102 stars, 58 forks
+       248 commits, last change: 2014-01-29 07:29:46, 1,104 stars, 58 forks
 
     BurntSushi/cmail:
       cmail runs a command and sends the output to your email address at certain intervals.
@@ -83,11 +83,11 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     cloudflare/redoctober:
       Go server for two-man rule style file encryption and decryption.
-       62 commits, last change: 2014-02-05 21:16:31, 496 stars, 36 forks
+       62 commits, last change: 2014-02-05 21:16:31, 498 stars, 36 forks
 
     cloudfoundry/gorouter:
 
-       407 commits, last change: 2014-02-03 12:08:19, 106 stars, 39 forks
+       407 commits, last change: 2014-02-03 12:08:19, 107 stars, 41 forks
 
     cloudfoundry/gosigar:
 
@@ -103,19 +103,19 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     coreos/etcd:
       A highly-available key value store for shared configuration and service discovery
-       1,485 commits, last change: 2014-02-08 09:22:45, 2,348 stars, 201 forks
+       1,493 commits, last change: 2014-02-10 07:05:57, 2,373 stars, 202 forks
 
     crosbymichael/skydock:
       Service discovery via DNS for docker
-       70 commits, last change: 2014-02-07 09:51:09, 165 stars, 11 forks
+       72 commits, last change: 2014-02-09 13:46:40, 171 stars, 12 forks
 
     crowdmob/goamz:
       Fork of the GOAMZ version developed within Canonical with additional functionality with DynamoDB
-       563 commits, last change: 2014-02-07 13:05:09, 101 stars, 60 forks
+       563 commits, last change: 2014-02-07 13:05:09, 106 stars, 61 forks
 
     dotcloud/docker:
       Docker - the open-source application container engine
-       6,114 commits, last change: 2014-02-07 18:48:19, 9,609 stars, 1,438 forks
+       6,124 commits, last change: 2014-02-10 12:10:38, 9,657 stars, 1,448 forks
 
     efficient/epaxos:
 
@@ -123,7 +123,7 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     erikh/gollector:
       json-based metrics collector
-       159 commits, last change: 2014-02-07 07:29:37, 86 stars, 5 forks
+       161 commits, last change: 2014-02-08 19:36:46, 86 stars, 5 forks
 
     errplane/errplane-go:
       Go library for metrics for Errplane
@@ -131,43 +131,43 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     flynn/go-crypto-ssh:
       Forked from go.crypto as Flynn working copy until changes merged upstream
-       5 commits, last change: , 1 stars, 1 forks
+       5 commits, last change: 2013-10-22 14:14:21, 1 stars, 1 forks
 
     flynn/go-discover:
       Service discovery system written in Go
-       95 commits, last change: 2014-01-31 16:02:13, 126 stars, 11 forks
+       97 commits, last change: 2014-02-09 17:07:30, 127 stars, 11 forks
 
     flynn/rpcplus:
       Go RPC plus streaming responses (forked from vitess)
-       18 commits, last change: 2014-02-02 16:37:57, 11 stars, 1 forks
+       18 commits, last change: , 11 stars, 1 forks
 
     globocom/gandalf:
       Gandalf is an API to manage git repositories.
-       464 commits, last change: 2014-02-01 07:55:04, 109 stars, 15 forks
+       464 commits, last change: 2014-01-30 11:40:32, 109 stars, 15 forks
 
     globocom/tsuru:
       Open source Platform as a Service.
-       6,539 commits, last change: 2014-02-07 20:15:10, 784 stars, 71 forks
+       6,555 commits, last change: 2014-02-10 12:15:05, 785 stars, 70 forks
 
     golang/groupcache:
       groupcache is a caching and cache-filling library, intended as a replacement for memcached in many cases.
-       21 commits, last change: 2013-10-30 09:55:26, 2,550 stars, 222 forks
+       21 commits, last change: 2013-10-30 09:55:26, 2,557 stars, 223 forks
 
     hashicorp/serf:
       Service orchestration and management tool.
-       756 commits, last change: 2014-02-06 08:28:52, 1,496 stars, 82 forks
+       767 commits, last change: 2014-02-10 10:48:02, 1,502 stars, 83 forks
 
     inconshreveable/muxado:
       Stream multiplexing for Go
-       13 commits, last change: 2014-01-10 01:38:28, 104 stars, 5 forks
+       13 commits, last change: 2014-01-10 01:38:28, 103 stars, 5 forks
 
     inconshreveable/ngrok:
       Introspected tunnels to localhost
-       261 commits, last change: 2014-02-02 01:08:37, 1,395 stars, 86 forks
+       261 commits, last change: 2014-02-02 01:08:37, 1,401 stars, 86 forks
 
     influxdb/influxdb:
       Scalable datastore for metrics, events, and real-time analytics
-       727 commits, last change: 2014-02-06 11:34:29, 1,359 stars, 62 forks
+       731 commits, last change: 2014-02-10 11:21:25, 1,372 stars, 62 forks
 
     jingweno/gotask:
       Idiomatic build tool in Go
@@ -175,7 +175,7 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     joewalnes/websocketd:
       Like inetd, but for WebSockets. Turn any application that uses STDIN/STDOUT into a WebSocket server.
-       107 commits, last change: 2014-01-07 02:12:06, 2,917 stars, 127 forks
+       107 commits, last change: 2014-01-07 02:12:06, 2,931 stars, 126 forks
 
     jondot/groundcontrol:
       Manage and monitor your Raspberry Pi with ease
@@ -183,11 +183,11 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     jordansissel/lumberjack:
       An experiment to cut logs in preparation for processing elsewhere.
-       536 commits, last change: 2014-02-04 09:37:24, 377 stars, 91 forks
+       536 commits, last change: 2014-02-04 09:37:24, 378 stars, 92 forks
 
     jyap808/jaeger:
       Jaeger is a JSON encoded GPG encrypted key value store. It is useful for generating and keeping configuration files secure. Jaeger is written in Go.
-       32 commits, last change: , 7 stars, 2 forks
+       32 commits, last change: 2014-01-23 16:23:58, 7 stars, 2 forks
 
     mailgun/vulcan:
       Programmatic HTTP rate limiting proxy for JSON based APIs.
@@ -199,15 +199,15 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     mitchellh/packer:
       Packer is a tool for creating identical machine images for multiple platforms from a single source configuration.
-       2,642 commits, last change: 2014-01-20 08:55:40, 1,941 stars, 283 forks
+       2,642 commits, last change: 2014-01-20 08:55:40, 1,953 stars, 285 forks
 
     mozilla-services/heka:
       Data collection and processing made easy.
-       2,058 commits, last change: 2014-02-07 13:36:21, 928 stars, 82 forks
+       2,058 commits, last change: 2014-02-07 13:36:21, 932 stars, 82 forks
 
     necrogami/watchdog:
       Watchdog
-       7 commits, last change: 2012-12-06 00:30:13, 2 stars, 1 forks
+       7 commits, last change: , 2 stars, 1 forks
 
     nf/gohttptun:
       A tool to tunnel TCP over HTTP, written in Go
@@ -215,11 +215,11 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     oleiade/trousseau:
       Networked and encrypted key-value database
-       158 commits, last change: 2013-12-17 22:43:18, 333 stars, 15 forks
+       158 commits, last change: 2013-12-17 22:43:18, 426 stars, 18 forks
 
     petar/GoTeleport:
       Teleport Transport: End-to-end resilience to network outages
-       6 commits, last change: 2013-08-30 10:54:44, 99 stars, 1 forks
+       6 commits, last change: , 99 stars, 1 forks
 
     rackspace/gophercloud:
       The Go SDK for the Rackspace Cloud
@@ -227,7 +227,7 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     rcrowley/go-metrics:
       Go port of Coda Hale's Metrics library
-       186 commits, last change: 2014-01-27 10:15:57, 281 stars, 32 forks
+       186 commits, last change: 2014-01-27 10:15:57, 284 stars, 33 forks
 
     Sendhub/shipbuilder:
       The Open-source self-hosted Platform-as-a-Service written in Go
@@ -235,11 +235,11 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     skydb/sky:
       Sky is an open source, behavioral analytics database.
-       557 commits, last change: 2014-01-31 08:39:53, 392 stars, 35 forks
+       557 commits, last change: 2014-01-31 08:39:53, 393 stars, 35 forks
 
     skynetservices/skydns:
       DNS for skynet or any other service discovery
-       244 commits, last change: 2014-02-08 00:42:03, 299 stars, 24 forks
+       252 commits, last change: 2014-02-09 15:42:29, 304 stars, 24 forks
 
     spf13/nitro:
       Quick and easy performance analyzer library for golang
@@ -251,19 +251,19 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     tsenart/tb:
       A generic lock-free implementation of the "Token-Bucket" algorithm
-       43 commits, last change: 2014-02-07 08:19:23, 23 stars, 0 forks
+       48 commits, last change: 2014-02-10 07:06:36, 25 stars, 0 forks
 
     tsenart/vegeta:
       HTTP load testing tool and library. It's over 9000!
-       155 commits, last change: 2014-02-02 16:01:46, 1,378 stars, 67 forks
+       155 commits, last change: 2014-02-02 16:01:46, 1,383 stars, 67 forks
 
     uniqush/uniqush-push:
       Uniqush is a free and open source software which provides a unified push service for server-side notification to apps on mobile devices.
-       406 commits, last change: 2013-11-07 12:23:32, 390 stars, 52 forks
+       406 commits, last change: 2013-11-07 12:23:32, 392 stars, 52 forks
 
     vito/garden:
       Go Warden
-       276 commits, last change: 2014-02-07 15:41:31, 2 stars, 2 forks
+       287 commits, last change: , 0 stars, 3 forks
 
     VividCortex/robustly:
       Run functions resiliently
@@ -271,9 +271,9 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     xtaci/gonet:
       a game server skeleton with golang
-       915 commits, last change: 2014-01-25 21:11:21, 143 stars, 64 forks
+       915 commits, last change: 2014-01-25 21:11:21, 145 stars, 64 forks
 
     zimbatm/socketmaster:
       Zero downtime restarts for your apps
-       51 commits, last change: 2014-01-31 07:54:23, 394 stars, 19 forks
+       51 commits, last change: 2014-01-31 07:54:23, 395 stars, 19 forks
 <!-- PROJECTS_LIST_END -->
