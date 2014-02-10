@@ -151,6 +151,14 @@ func (s *S) TestRequestedRepositoryName(c *gocheck.C) {
 	c.Assert(name, gocheck.Equals, "foobar")
 }
 
+func (s *S) TestRequestedRepositoryNameWithSlash(c *gocheck.C) {
+	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack '/foobar.git'")
+	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
+	name, err := requestedRepositoryName()
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(name, gocheck.Equals, "foobar")
+}
+
 func (s *S) TestrequestedRepositoryNameShouldReturnErrorWhenTheresNoMatch(c *gocheck.C) {
 	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack foobar")
 	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
@@ -168,6 +176,13 @@ func (s *S) TestValidateCmdReturnsErrorWhenSSH_ORIGINAL_COMMANDIsNotAGitCommand(
 
 func (s *S) TestValidateCmdDoNotReturnsErrorWhenSSH_ORIGINAL_COMMANDIsAValidGitCommand(c *gocheck.C) {
 	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack 'my-repo.git'")
+	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
+	err := validateCmd()
+	c.Assert(err, gocheck.IsNil)
+}
+
+func (s *S) TestValidateCmdDoNotReturnsErrorWhenSSH_ORIGINAL_COMMANDIsAValidGitCommandWithDashInName(c *gocheck.C) {
+	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack '/my-repo.git'")
 	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
 	err := validateCmd()
 	c.Assert(err, gocheck.IsNil)
@@ -226,6 +241,17 @@ func (s *S) TestExecuteActionShouldNotCallSSH_ORIGINAL_COMMANDWhenRepositoryDoes
 
 func (s *S) TestFormatCommandShouldReceiveAGitCommandAndCanonizalizeTheRepositoryPath(c *gocheck.C) {
 	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack 'myproject.git'")
+	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
+	cmd, err := formatCommand()
+	c.Assert(err, gocheck.IsNil)
+	p, err := config.GetString("git:bare:location")
+	c.Assert(err, gocheck.IsNil)
+	expected := path.Join(p, "myproject.git")
+	c.Assert(cmd, gocheck.DeepEquals, []string{"git-receive-pack", expected})
+}
+
+func (s *S) TestFormatCommandShouldReceiveAGitCommandProjectWithDash(c *gocheck.C) {
+	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack '/myproject.git'")
 	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
 	cmd, err := formatCommand()
 	c.Assert(err, gocheck.IsNil)

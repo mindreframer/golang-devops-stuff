@@ -29,8 +29,8 @@ func (r *Repository) MarshalJSON() ([]byte, error) {
 	data := map[string]interface{}{
 		"name":    r.Name,
 		"public":  r.IsPublic,
-		"ssh_url": r.SshURL(),
-		"git_url": r.GitURL(),
+		"ssh_url": r.ReadWriteURL(),
+		"git_url": r.ReadOnlyURL(),
 	}
 	return json.Marshal(&data)
 }
@@ -91,28 +91,50 @@ func Rename(oldName, newName string) error {
 	return fs.Fsystem.Rename(barePath(oldName), barePath(newName))
 }
 
-// SshURL formats the git ssh url and return it. If no remote is configured in
+// ReadWriteURL formats the git ssh url and return it. If no remote is configured in
 // gandalf.conf, this method panics.
-func (r *Repository) SshURL() string {
-	host, err := config.GetString("host")
-	if err != nil {
-		panic(err.Error())
-	}
+func (r *Repository) ReadWriteURL() string {
 	uid, err := config.GetString("uid")
 	if err != nil {
 		panic(err.Error())
 	}
-	return fmt.Sprintf("%s@%s:%s.git", uid, host, r.Name)
-}
-
-// GitURL formats the git url and return it. If no host is configured in
-// gandalf.conf, this method panics.
-func (r *Repository) GitURL() string {
+	remote := uid + "@%s:%s.git"
+	if useSSH, _ := config.GetBool("git:ssh:use"); useSSH {
+		port, err := config.GetString("git:ssh:port")
+		if err == nil {
+			remote = "ssh://" + uid + "@%s:" + port + "/%s.git"
+		} else {
+			remote = "ssh://" + uid + "@%s/%s.git"
+		}
+	}
 	host, err := config.GetString("host")
 	if err != nil {
 		panic(err.Error())
 	}
-	return fmt.Sprintf("git://%s/%s.git", host, r.Name)
+	return fmt.Sprintf(remote, host, r.Name)
+}
+
+// ReadOnly formats the git url and return it. If no host is configured in
+// gandalf.conf, this method panics.
+func (r *Repository) ReadOnlyURL() string {
+	remote := "git://%s/%s.git"
+	if useSSH, _ := config.GetBool("git:ssh:use"); useSSH {
+		uid, err := config.GetString("uid")
+		if err != nil {
+			panic(err.Error())
+		}
+		port, err := config.GetString("git:ssh:port")
+		if err == nil {
+			remote = "ssh://" + uid + "@%s:" + port + "/%s.git"
+		} else {
+			remote = "ssh://" + uid + "@%s/%s.git"
+		}
+	}
+	host, err := config.GetString("host")
+	if err != nil {
+		panic(err.Error())
+	}
+	return fmt.Sprintf(remote, host, r.Name)
 }
 
 // Validates a repository

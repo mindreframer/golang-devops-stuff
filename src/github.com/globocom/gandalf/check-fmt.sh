@@ -7,6 +7,8 @@
 # This script was copied from tsuru, that's why the Copyright note above refers
 # to "tsuru authors" instead of "gandalf authors".
 
+go get code.google.com/p/go.tools/cmd/vet
+
 status=0
 out=`gofmt -s -l .`
 if [ "${out}" != "" ]

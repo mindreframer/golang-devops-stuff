@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -58,9 +58,9 @@ func action() string {
 
 // Get the repository name requested in SSH_ORIGINAL_COMMAND and retrieves
 // the related document on the database and returns it.
-// this function does two distinct things (maybe it should'n), it
-// parses the SSH_ORIGINAL_COMMAND and returns a "validation" error if it doesn't
-// matches the expected format and gets the repository from the database based on the info
+// This function does two distinct things, parses the SSH_ORIGINAL_COMMAND and
+// returns a "validation" error if it doesn't matches the expected format
+// and gets the repository from the database based on the info
 // obtained by the SSH_ORIGINAL_COMMAND parse.
 func requestedRepository() (repository.Repository, error) {
 	repoName, err := requestedRepositoryName()
@@ -75,7 +75,7 @@ func requestedRepository() (repository.Repository, error) {
 }
 
 func requestedRepositoryName() (string, error) {
-	r, err := regexp.Compile(`[\w-]+ '([\w-]+)\.git'`)
+	r, err := regexp.Compile(`[\w-]+ '/?([\w-]+)\.git'`)
 	if err != nil {
 		panic(err)
 	}
@@ -90,7 +90,7 @@ func requestedRepositoryName() (string, error) {
 // The following format is allowed:
 //  git-([\w-]+) '([\w-]+)\.git'
 func validateCmd() error {
-	r, err := regexp.Compile(`git-([\w-]+) '([\w-]+)\.git'`)
+	r, err := regexp.Compile(`git-([\w-]+) '/?([\w-]+)\.git'`)
 	if err != nil {
 		panic(err)
 	}
@@ -159,7 +159,9 @@ func formatCommand() ([]string, error) {
 	repoName += ".git"
 	cmdList := strings.Split(os.Getenv("SSH_ORIGINAL_COMMAND"), " ")
 	for i, c := range cmdList {
-		if c == "'"+repoName+"'" {
+		c = strings.Trim(c, "'")
+		c = strings.Trim(c, "/")
+		if c == repoName {
 			cmdList[i] = path.Join(p, repoName)
 			break
 		}

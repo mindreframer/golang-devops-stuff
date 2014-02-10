@@ -9,9 +9,14 @@ import (
 	"fmt"
 	"github.com/globocom/gandalf/db"
 	"github.com/globocom/gandalf/repository"
+	"github.com/globocom/tsuru/log"
 	"labix.org/v2/mgo/bson"
 	"regexp"
 )
+
+func init() {
+	log.Init()
+}
 
 var ErrUserNotFound = errors.New("User not found")
 
@@ -23,11 +28,14 @@ type User struct {
 //
 // The authorized_keys file belongs to the user running the process.
 func New(name string, keys map[string]string) (*User, error) {
+	log.Debugf(`Creating user "%s"`, name)
 	u := &User{Name: name}
 	if v, err := u.isValid(); !v {
+		log.Errorf("user.New: %s", err.Error())
 		return u, err
 	}
 	if err := db.Session.User().Insert(&u); err != nil {
+		log.Errorf("user.New: %s", err.Error())
 		return u, err
 	}
 	return u, addKeys(keys, u.Name)
