@@ -9,7 +9,7 @@ email="badr.adnaan@gmail.com"
 
 	[servers.local]
 	port = 8686
-	host = "http://localhost:8686"
+	host = "http://127.0.0.1:8686"
 	cookiesecret="mycookiesecret"
 
 [databases]

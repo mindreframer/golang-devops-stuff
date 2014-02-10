@@ -6,10 +6,11 @@ package hamster
 import (
 	"errors"
 	"fmt"
-	"labix.org/v2/mgo"
-	"labix.org/v2/mgo/bson"
 	"net/http"
 	"time"
+
+	"labix.org/v2/mgo"
+	"labix.org/v2/mgo/bson"
 )
 
 var oName = "objects"
@@ -102,7 +103,7 @@ func (s *Server) CreateObject(w http.ResponseWriter, r *http.Request) {
 		delete(result, "parentId")
 		result["parent_id"] = encodeBase64Token(hamster_obj.ParentId.Hex())
 
-		s.logger.Printf("created new object: %+v, id: %v\n", result)
+		s.logger.Printf("created new object: %+v\n", result)
 		s.serveJson(w, &result)
 	}
 
@@ -124,6 +125,7 @@ func (s *Server) CreateObjects(w http.ResponseWriter, r *http.Request) {
 
 	var object_name string
 	object_name = obj["objectName"].(string)
+	fmt.Printf("object name: %v \n", obj["objectName"])
 	if obj["objectName"] == "" {
 		s.badRequest(r, w, errors.New("expected objectName"), "")
 	}

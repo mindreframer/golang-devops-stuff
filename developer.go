@@ -3,9 +3,9 @@ package hamster
 
 import (
 	"fmt"
+	"net/http"
 	"labix.org/v2/mgo"
 	"labix.org/v2/mgo/bson"
-	"net/http"
 
 	"time"
 )
@@ -270,4 +270,8 @@ func (s *Server) DeleteDev(w http.ResponseWriter, r *http.Request) {
 	response := DeleteResponse{Status: "ok"}
 	s.serveJson(w, &response)
 
+}
+
+func (s *Server) info(w http.ResponseWriter, r *http.Request) {
+	fmt.Fprint(w, "hamster api")
 }

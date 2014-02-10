@@ -5,11 +5,11 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/kr/fernet"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"testing"
+	"github.com/kr/fernet"
 )
 
 /*Tests ending with OK is a positive test, while others are negative tests
@@ -287,6 +287,9 @@ func TestCreateAppOK(t *testing.T) {
 			api_token = response.ApiToken
 			api_secret = response.ApiSecret
 
+			fmt.Printf("api_token: %v\n", api_token)
+			fmt.Printf("api_secret: %v\n", api_secret)
+
 		}
 
 	})
@@ -515,7 +518,7 @@ func TestCreateManyObjectsOK(t *testing.T) {
 		headers["X-Api-Token"] = api_token
 		headers["X-Api-Secret"] = api_secret
 
-		url := "/api/v1/objects/" + "GameScore"
+		url := "/api/v1/objects/batch" + "GameScore"
 		//make request
 		res, err := testHttpRequestWithHeaders("POST", url, scores, headers)
 

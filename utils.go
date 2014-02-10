@@ -2,17 +2,14 @@
 package hamster
 
 import (
-	//"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"strconv"
-	//"os"
-	"errors"
 	"strings"
-	//"testing"
 )
 
 var (

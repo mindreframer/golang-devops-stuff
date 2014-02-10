@@ -8,6 +8,8 @@ import (
 //add path handlers
 func (s *Server) addHandlers() {
 
+	//api server info
+	s.route.Get("/", s.info)
 	//add pprof path handlers
 	s.route.AddRoute("GET", "/debug/pprof", pprof.Index)
 	s.route.AddRoute("GET", "/debug/pprof/cmdline", pprof.Cmdline)
@@ -45,7 +47,7 @@ func (s *Server) addHandlers() {
 	s.route.Del("/api/v1/developers/apps/:objectId", s.DeleteApp)
 
 	/*Object*/
-	s.route.Post("/api/v1/objects/", s.CreateObjects)
+	s.route.Post("/api/v1/objects/batch/:objectName", s.CreateObjects)
 	s.route.Post("/api/v1/objects/:objectName", s.CreateObject)
 	//get an object
 	s.route.Get("/api/v1/objects/:objectName/:objectId", s.QueryObject)

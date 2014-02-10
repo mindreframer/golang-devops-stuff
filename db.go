@@ -2,6 +2,8 @@
 package hamster
 
 import (
+	"log"
+
 	"labix.org/v2/mgo"
 )
 
@@ -17,7 +19,8 @@ func (d *Db) GetSession() *mgo.Session {
 		var err error
 		d.MgoSession, err = mgo.Dial(d.Url)
 		if err != nil {
-			panic(err) // no, not really
+			log.Fatalf("dialing mongo url %v failed with %v", d.Url, err)
+			//panic(err)
 		}
 	}
 	return d.MgoSession.Clone()
