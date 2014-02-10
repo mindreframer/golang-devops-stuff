@@ -6,7 +6,7 @@ type TestInput struct {
 
 func NewTestInput() (i *TestInput) {
 	i = new(TestInput)
-	i.data = make(chan []byte)
+	i.data = make(chan []byte, 100)
 
 	return
 }

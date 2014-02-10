@@ -71,3 +71,29 @@ func TestEmitterRoundRobin(t *testing.T) {
 
 	Settings.splitOutput = false
 }
+
+func BenchmarkEmitter(b *testing.B) {
+	wg := new(sync.WaitGroup)
+	quit := make(chan int)
+
+	input := NewTestInput()
+
+	output := NewTestOutput(func(data []byte) {
+		wg.Done()
+	})
+
+	Plugins.Inputs = []io.Reader{input}
+	Plugins.Outputs = []io.Writer{output}
+
+	go Start(quit)
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		wg.Add(1)
+		input.EmitGET()
+	}
+
+	wg.Wait()
+	close(quit)
+}

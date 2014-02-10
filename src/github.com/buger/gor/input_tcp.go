@@ -1,7 +1,8 @@
 package gor
 
 import (
-	"io"
+	"bufio"
+	"bytes"
 	"log"
 	"net"
 )
@@ -10,8 +11,9 @@ import (
 //    echo "asdad" | nc 127.0.0.1 27017
 //
 type TCPInput struct {
-	data    chan []byte
-	address string
+	data     chan []byte
+	address  string
+	listener net.Listener
 }
 
 func NewTCPInput(address string) (i *TCPInput) {
@@ -33,6 +35,7 @@ func (i *TCPInput) Read(data []byte) (int, error) {
 
 func (i *TCPInput) listen(address string) {
 	listener, err := net.Listen("tcp", address)
+	i.listener = listener
 
 	if err != nil {
 		log.Fatal("Can't start:", err)
@@ -52,32 +55,36 @@ func (i *TCPInput) listen(address string) {
 	}()
 }
 
+func scanBytes(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+
+	// Search for ¶ symbol
+	if i := bytes.IndexByte(data, 194); i >= 0 {
+		if data[i+1] == 182 {
+			// We have a full newline-terminated line.
+			return i + 2, data[0:i], nil
+		}
+	}
+	// If we're at EOF, we have a final, non-terminated line. Return it.
+	if atEOF {
+		return len(data), data, nil
+	}
+	// Request more data.
+	return 0, nil, nil
+}
+
 func (i *TCPInput) handleConnection(conn net.Conn) {
 	defer conn.Close()
 
-	var read = true
-	var response []byte
-	var buf []byte
+	scanner := bufio.NewScanner(conn)
 
-	buf = make([]byte, 4094)
+	scanner.Split(scanBytes)
 
-	for read {
-		n, err := conn.Read(buf)
-
-		switch err {
-		case io.EOF:
-			read = false
-		case nil:
-			response = append(response, buf[:n]...)
-			if n < 4096 {
-				read = false
-			}
-		default:
-			read = false
-		}
+	for scanner.Scan() {
+		i.data <- scanner.Bytes()
 	}
-
-	i.data <- response
 }
 
 func (i *TCPInput) String() string {

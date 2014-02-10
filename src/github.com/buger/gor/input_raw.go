@@ -4,6 +4,7 @@ import (
 	raw "github.com/buger/gor/raw_socket_listener"
 	"log"
 	"net"
+	"strings"
 )
 
 type RAWInput struct {
@@ -29,6 +30,8 @@ func (i *RAWInput) Read(data []byte) (int, error) {
 }
 
 func (i *RAWInput) listen(address string) {
+	address = strings.Replace(address, "[::]", "127.0.0.1", -1)
+
 	host, port, err := net.SplitHostPort(address)
 
 	if err != nil {

@@ -12,6 +12,7 @@ import (
 type TCPOutput struct {
 	address string
 	limit   int
+	buf     chan []byte
 }
 
 func NewTCPOutput(options string) io.Writer {
@@ -20,8 +21,14 @@ func NewTCPOutput(options string) io.Writer {
 	optionsArr := strings.Split(options, "|")
 	o.address = optionsArr[0]
 
+	o.buf = make(chan []byte, 100)
+
 	if len(optionsArr) > 1 {
 		o.limit, _ = strconv.Atoi(optionsArr[1])
+	}
+
+	for i := 0; i < 10; i++ {
+		go o.worker()
 	}
 
 	if o.limit > 0 {
@@ -31,15 +38,20 @@ func NewTCPOutput(options string) io.Writer {
 	}
 }
 
-func (o *TCPOutput) Write(data []byte) (n int, err error) {
-	conn, err := o.connect(o.address)
+func (o *TCPOutput) worker() {
+	conn, _ := o.connect(o.address)
 	defer conn.Close()
 
-	if err != nil {
-		n, err = conn.Write(data)
+	for {
+		conn.Write(<-o.buf)
+		conn.Write([]byte("¶"))
 	}
+}
 
-	return
+func (o *TCPOutput) Write(data []byte) (n int, err error) {
+	o.buf <- data
+
+	return len(data), nil
 }
 
 func (o *TCPOutput) connect(address string) (conn net.Conn, err error) {

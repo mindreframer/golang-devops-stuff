@@ -1,6 +1,7 @@
 package gor
 
 import (
+	"bufio"
 	"io"
 	"log"
 	"net"
@@ -12,12 +13,11 @@ func TestTCPOutput(t *testing.T) {
 	wg := new(sync.WaitGroup)
 	quit := make(chan int)
 
-	input := NewTestInput()
-	output := NewTCPOutput(":50002")
-
-	startTCP(":50002", func(data []byte) {
+	listener := startTCP(func(data []byte) {
 		wg.Done()
 	})
+	input := NewTestInput()
+	output := NewTCPOutput(listener.Addr().String())
 
 	Plugins.Inputs = []io.Reader{input}
 	Plugins.Outputs = []io.Writer{output}
@@ -34,8 +34,8 @@ func TestTCPOutput(t *testing.T) {
 	close(quit)
 }
 
-func startTCP(addr string, cb func([]byte)) {
-	listener, err := net.Listen("tcp", addr)
+func startTCP(cb func([]byte)) net.Listener {
+	listener, err := net.Listen("tcp", ":0")
 
 	if err != nil {
 		log.Fatal("Can't start:", err)
@@ -45,31 +45,45 @@ func startTCP(addr string, cb func([]byte)) {
 		for {
 			conn, _ := listener.Accept()
 
-			var read = true
-			var response []byte
-			var buf []byte
+			go func() {
+				scanner := bufio.NewScanner(conn)
 
-			buf = make([]byte, 4094)
+				scanner.Split(scanBytes)
 
-			for read {
-				n, err := conn.Read(buf)
-
-				switch err {
-				case io.EOF:
-					read = false
-				case nil:
-					response = append(response, buf[:n]...)
-					if n < 4096 {
-						read = false
-					}
-				default:
-					read = false
+				for scanner.Scan() {
+					cb(scanner.Bytes())
 				}
-			}
 
-			cb(response)
-
-			conn.Close()
+				conn.Close()
+			}()
 		}
 	}()
+
+	return listener
+}
+
+func BenchmarkTCPOutput(b *testing.B) {
+	wg := new(sync.WaitGroup)
+	quit := make(chan int)
+
+	listener := startTCP(func(data []byte) {
+		wg.Done()
+	})
+	input := NewTestInput()
+	output := NewTCPOutput(listener.Addr().String())
+
+	Plugins.Inputs = []io.Reader{input}
+	Plugins.Outputs = []io.Writer{output}
+
+	go Start(quit)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		wg.Add(1)
+		input.EmitGET()
+	}
+
+	wg.Wait()
+
+	close(quit)
 }
