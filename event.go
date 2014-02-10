@@ -7,8 +7,10 @@ const (
 	AddPeerEventType      = "addPeer"
 	RemovePeerEventType   = "removePeer"
 
-	HeartbeatTimeoutEventType         = "heartbeatTimeout"
+	HeartbeatIntervalEventType        = "heartbeatInterval"
 	ElectionTimeoutThresholdEventType = "electionTimeoutThreshold"
+
+	HeartbeatEventType = "heartbeat"
 )
 
 // Event represents an action that occurred within the Raft library.
