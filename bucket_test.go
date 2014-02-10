@@ -95,16 +95,17 @@ func TestBucket_Take_throughput(t *testing.T) {
 
 	b.Take(1000)
 
-	var out int64
-	ts := time.Now()
-	for time.Now().Before(ts.Add(1 * time.Second)) {
-		out += b.Take(1)
+	var (
+		out   int64
+		began = time.Now()
+	)
+	for out < 1000 {
+		out += b.Take(1000 - out)
 	}
 
-	// The time scheduler isn't as precise as we need so we need some tolerance
-	thresholds := []int64{1000 - 50, 1000 + 50}
-	if out < thresholds[0] || out > thresholds[1] {
-		t.Errorf("Want %d to be within [%d, %d]", out, thresholds[0], thresholds[1])
+	ended := time.Since(began)
+	if int(ended.Seconds()) != 1 {
+		t.Errorf("Want 1000 tokens to take 1s. Got: %d", int(ended.Seconds()))
 	}
 }
 
