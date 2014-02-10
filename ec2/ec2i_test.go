@@ -83,7 +83,7 @@ func (s *ClientTests) TestRunAndTerminate(c *gocheck.C) {
 
 	instId := resp1.Instances[0].InstanceId
 
-	resp2, err := s.ec2.Instances([]string{instId}, nil)
+	resp2, err := s.ec2.DescribeInstances([]string{instId}, nil)
 	c.Assert(err, gocheck.IsNil)
 	if c.Check(resp2.Reservations, gocheck.HasLen, 1) && c.Check(len(resp2.Reservations[0].Instances), gocheck.Equals, 1) {
 		inst := resp2.Reservations[0].Instances[0]

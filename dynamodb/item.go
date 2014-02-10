@@ -121,40 +121,20 @@ func (batchWriteItem *BatchWriteItem) Execute() (map[string]interface{}, error) 
 }
 
 func (t *Table) GetItem(key *Key) (map[string]*Attribute, error) {
-	q := NewQuery(t)
-	q.AddKey(t, key)
-
-	jsonResponse, err := t.Server.queryServer(target("GetItem"), q)
-	if err != nil {
-		return nil, err
-	}
-
-	json, err := simplejson.NewJson(jsonResponse)
-	if err != nil {
-		return nil, err
-	}
-
-	itemJson, ok := json.CheckGet("Item")
-	if !ok {
-		// We got an empty from amz. The item doesn't exist.
-		return nil, ErrNotFound
-	}
-
-	item, err := itemJson.Map()
-	if err != nil {
-		message := fmt.Sprintf("Unexpected response %s", jsonResponse)
-		return nil, errors.New(message)
-	}
-
-	return parseAttributes(item), nil
-
+	return t.getItem(key, false)
 }
 
 func (t *Table) GetItemConsistent(key *Key, consistentRead bool) (map[string]*Attribute, error) {
+	return t.getItem(key, consistentRead)
+}
+
+func (t *Table) getItem(key *Key, consistentRead bool) (map[string]*Attribute, error) {
 	q := NewQuery(t)
 	q.AddKey(t, key)
 
-	q.ConsistentRead(consistentRead)
+	if consistentRead {
+		q.ConsistentRead(consistentRead)
+	}
 
 	jsonResponse, err := t.Server.queryServer(target("GetItem"), q)
 	if err != nil {
@@ -179,11 +159,18 @@ func (t *Table) GetItemConsistent(key *Key, consistentRead bool) (map[string]*At
 	}
 
 	return parseAttributes(item), nil
+
 }
 
-
 func (t *Table) PutItem(hashKey string, rangeKey string, attributes []Attribute) (bool, error) {
+	return t.putItem(hashKey, rangeKey, attributes, nil)
+}
 
+func (t *Table) ConditionalPutItem(hashKey, rangeKey string, attributes, expected []Attribute) (bool, error) {
+	return t.putItem(hashKey, rangeKey, attributes, expected)
+}
+
+func (t *Table) putItem(hashKey, rangeKey string, attributes, expected []Attribute) (bool, error) {
 	if len(attributes) == 0 {
 		return false, errors.New("At least one attribute is required.")
 	}
@@ -194,6 +181,9 @@ func (t *Table) PutItem(hashKey string, rangeKey string, attributes []Attribute)
 	attributes = append(attributes, keys...)
 
 	q.AddItem(attributes)
+	if expected != nil {
+		q.AddExpected(expected)
+	}
 
 	jsonResponse, err := t.Server.queryServer(target("PutItem"), q)
 
@@ -209,10 +199,13 @@ func (t *Table) PutItem(hashKey string, rangeKey string, attributes []Attribute)
 	return true, nil
 }
 
-func (t *Table) DeleteItem(key *Key) (bool, error) {
-
+func (t *Table) deleteItem(key *Key, expected []Attribute) (bool, error) {
 	q := NewQuery(t)
 	q.AddKey(t, key)
+
+	if expected != nil {
+		q.AddExpected(expected)
+	}
 
 	jsonResponse, err := t.Server.queryServer(target("DeleteItem"), q)
 
@@ -228,19 +221,39 @@ func (t *Table) DeleteItem(key *Key) (bool, error) {
 	return true, nil
 }
 
+func (t *Table) DeleteItem(key *Key) (bool, error) {
+	return t.deleteItem(key, nil)
+}
+
+func (t *Table) ConditionalDeleteItem(key *Key, expected []Attribute) (bool, error) {
+	return t.deleteItem(key, expected)
+}
+
 func (t *Table) AddAttributes(key *Key, attributes []Attribute) (bool, error) {
-	return t.modifyAttributes(key, attributes, "ADD")
+	return t.modifyAttributes(key, attributes, nil, "ADD")
 }
 
 func (t *Table) UpdateAttributes(key *Key, attributes []Attribute) (bool, error) {
-	return t.modifyAttributes(key, attributes, "PUT")
+	return t.modifyAttributes(key, attributes, nil, "PUT")
 }
 
 func (t *Table) DeleteAttributes(key *Key, attributes []Attribute) (bool, error) {
-	return t.modifyAttributes(key, attributes, "DELETE")
+	return t.modifyAttributes(key, attributes, nil, "DELETE")
 }
 
-func (t *Table) modifyAttributes(key *Key, attributes []Attribute, action string) (bool, error) {
+func (t *Table) ConditionalAddAttributes(key *Key, attributes, expected []Attribute) (bool, error) {
+	return t.modifyAttributes(key, attributes, expected, "ADD")
+}
+
+func (t *Table) ConditionalUpdateAttributes(key *Key, attributes, expected []Attribute) (bool, error) {
+	return t.modifyAttributes(key, attributes, expected, "PUT")
+}
+
+func (t *Table) ConditionalDeleteAttributes(key *Key, attributes, expected []Attribute) (bool, error) {
+	return t.modifyAttributes(key, attributes, expected, "DELETE")
+}
+
+func (t *Table) modifyAttributes(key *Key, attributes, expected []Attribute, action string) (bool, error) {
 
 	if len(attributes) == 0 {
 		return false, errors.New("At least one attribute is required.")
@@ -249,6 +262,10 @@ func (t *Table) modifyAttributes(key *Key, attributes []Attribute, action string
 	q := NewQuery(t)
 	q.AddKey(t, key)
 	q.AddUpdates(attributes, action)
+
+	if expected != nil {
+		q.AddExpected(expected)
+	}
 
 	jsonResponse, err := t.Server.queryServer(target("UpdateItem"), q)
 

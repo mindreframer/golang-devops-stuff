@@ -148,6 +148,15 @@ func (a *Attribute) SetType() bool {
 	return false
 }
 
+func (a *Attribute) SetExists(exists bool) *Attribute {
+	if exists {
+		a.Exists = "true"
+	} else {
+		a.Exists = "false"
+	}
+	return a
+}
+
 func (k *PrimaryKey) HasRange() bool {
 	return k.RangeAttribute != nil
 }

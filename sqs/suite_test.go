@@ -1,4 +1,4 @@
-package sqs_test
+package sqs
 
 import (
 	"flag"
@@ -35,7 +35,7 @@ func (s *SuiteI) SetUpSuite(c *gocheck.C) {
 
 type HTTPSuite struct{}
 
-var testServer = NewTestHTTPServer("http://localhost:4444", 5e9)
+var testServer = NewTestHTTPServer("http://localhost:4455", 5e9)
 
 func (s *HTTPSuite) SetUpSuite(c *gocheck.C) {
 	testServer.Start()
@@ -75,7 +75,12 @@ func (s *TestHTTPServer) Start() {
 	s.pending = make(chan bool, 64)
 
 	url, _ := url.Parse(s.URL)
-	go http.ListenAndServe(url.Host, s)
+	go func() {
+		err := http.ListenAndServe(url.Host, s)
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 	s.PrepareResponse(202, nil, "Nothing.")
 	for {

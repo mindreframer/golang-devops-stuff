@@ -24,8 +24,9 @@ import (
 
 // Defines the valid signers
 const (
-	V2Signature = iota
-	V4Signature = iota
+	V2Signature      = iota
+	V4Signature      = iota
+	Route53Signature = iota
 )
 
 // Defines the service endpoint and correct Signer implementation to use
@@ -52,6 +53,8 @@ type Region struct {
 	ELBEndpoint            string
 	DynamoDBEndpoint       string
 	CloudWatchServicepoint ServiceInfo
+	AutoScalingEndpoint    string
+	RDSEndpoint            ServiceInfo
 }
 
 var Regions = map[string]Region{
@@ -103,8 +106,13 @@ func MakeParams(action string) map[string]string {
 // Create a new AWS server to handle making requests
 func NewService(auth Auth, service ServiceInfo) (s *Service, err error) {
 	var signer Signer
-	if service.Signer == V2Signature {
+	switch service.Signer {
+	case V2Signature:
 		signer, err = NewV2Signer(auth, service)
+	// case V4Signature:
+	// 	signer, err = NewV4Signer(auth, service, Regions["eu-west-1"])
+	default:
+		err = fmt.Errorf("Unsupported signer for service")
 	}
 	if err != nil {
 		return
@@ -128,6 +136,7 @@ func (s *Service) Query(method, path string, params map[string]string) (resp *ht
 	} else if method == "POST" {
 		resp, err = http.PostForm(u.String(), multimap(params))
 	}
+
 	return
 }
 

@@ -1,6 +1,7 @@
 package dynamodb
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	simplejson "github.com/bitly/go-simplejson"
@@ -13,8 +14,8 @@ type Table struct {
 }
 
 type AttributeDefinitionT struct {
-	Name string
-	Type string
+	Name string `json:"AttributeName"`
+	Type string `json:"AttributeType"`
 }
 
 type KeySchemaT struct {
@@ -50,6 +51,10 @@ type TableDescriptionT struct {
 	TableName             string
 	TableSizeBytes        int64
 	TableStatus           string
+}
+
+type describeTableResponse struct {
+	Table TableDescriptionT
 }
 
 func findAttributeDefinitionByName(ads []AttributeDefinitionT, name string) *AttributeDefinitionT {
@@ -169,6 +174,28 @@ func (s *Server) DeleteTable(tableDescription TableDescriptionT) (string, error)
 	}
 
 	return json.Get("TableDescription").Get("TableStatus").MustString(), nil
+}
+
+func (t *Table) DescribeTable() (*TableDescriptionT, error) {
+	return t.Server.DescribeTable(t.Name)
+}
+
+func (s *Server) DescribeTable(name string) (*TableDescriptionT, error) {
+	q := NewEmptyQuery()
+	q.addTableByName(name)
+
+	jsonResponse, err := s.queryServer(target("DescribeTable"), q)
+	if err != nil {
+		return nil, err
+	}
+
+	var r describeTableResponse
+	err = json.Unmarshal(jsonResponse, &r)
+	if err != nil {
+		return nil, err
+	}
+
+	return &r.Table, nil
 }
 
 func keyParam(k *PrimaryKey, hashKey string, rangeKey string) string {

@@ -50,8 +50,8 @@ func (s *AmazonClientSuite) SetUpSuite(c *gocheck.C) {
 
 func (s *ClientTests) TestCreateAndDeleteLoadBalancer(c *gocheck.C) {
 	createLBReq := elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -72,9 +72,9 @@ func (s *ClientTests) TestCreateAndDeleteLoadBalancer(c *gocheck.C) {
 
 func (s *ClientTests) TestCreateLoadBalancerError(c *gocheck.C) {
 	createLBReq := elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a"},
-		Subnets:    []string{"subnetid-1"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a"},
+		Subnets:           []string{"subnetid-1"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -95,16 +95,16 @@ func (s *ClientTests) TestCreateLoadBalancerError(c *gocheck.C) {
 
 func (s *ClientTests) createInstanceAndLB(c *gocheck.C) (*elb.CreateLoadBalancer, string) {
 	options := ec2.RunInstancesOptions{
-		ImageId:      "ami-ccf405a5",
-		InstanceType: "t1.micro",
-		AvailZone:    "us-east-1c",
+		ImageId:          "ami-ccf405a5",
+		InstanceType:     "t1.micro",
+		AvailabilityZone: "us-east-1c",
 	}
 	resp1, err := s.ec2.RunInstances(&options)
 	c.Assert(err, gocheck.IsNil)
 	instId := resp1.Instances[0].InstanceId
 	createLBReq := elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1c"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1c"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -138,8 +138,8 @@ func (s *ClientTests) TestCreateRegisterAndDeregisterInstanceWithLoadBalancer(c 
 
 func (s *ClientTests) TestDescribeLoadBalancers(c *gocheck.C) {
 	createLBReq := elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -158,7 +158,7 @@ func (s *ClientTests) TestDescribeLoadBalancers(c *gocheck.C) {
 	resp, err := s.elb.DescribeLoadBalancers()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(len(resp.LoadBalancerDescriptions) > 0, gocheck.Equals, true)
-	c.Assert(resp.LoadBalancerDescriptions[0].AvailZones, gocheck.DeepEquals, []string{"us-east-1a"})
+	c.Assert(resp.LoadBalancerDescriptions[0].AvailabilityZones, gocheck.DeepEquals, []string{"us-east-1a"})
 	c.Assert(resp.LoadBalancerDescriptions[0].LoadBalancerName, gocheck.Equals, "testlb")
 	c.Assert(resp.LoadBalancerDescriptions[0].Scheme, gocheck.Equals, "internet-facing")
 	hc := elb.HealthCheck{
@@ -215,8 +215,8 @@ func (s *ClientTests) TestDescribeInstanceHealth(c *gocheck.C) {
 
 func (s *ClientTests) TestDescribeInstanceHealthBadRequest(c *gocheck.C) {
 	createLBReq := elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -240,8 +240,8 @@ func (s *ClientTests) TestDescribeInstanceHealthBadRequest(c *gocheck.C) {
 
 func (s *ClientTests) TestConfigureHealthCheck(c *gocheck.C) {
 	createLBReq := elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -275,8 +275,8 @@ func (s *ClientTests) TestConfigureHealthCheck(c *gocheck.C) {
 
 func (s *ClientTests) TestConfigureHealthCheckBadRequest(c *gocheck.C) {
 	createLBReq := elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,

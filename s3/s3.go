@@ -36,7 +36,9 @@ const debug = false
 type S3 struct {
 	aws.Auth
 	aws.Region
-	private byte // Reserve the right of using private data.
+	ConnectTimeout time.Duration
+	ReadTimeout    time.Duration
+	private        byte // Reserve the right of using private data.
 }
 
 // The Bucket type encapsulates operations with an S3 bucket.
@@ -54,15 +56,21 @@ type Owner struct {
 // Fold options into an Options struct
 //
 type Options struct {
-	SSE             bool
-	Meta            map[string][]string
-	ContentEncoding string
+	SSE              bool
+	Meta             map[string][]string
+	ContentEncoding  string
+	CacheControl     string
+	RedirectLocation string
 	// What else?
-	// Cache-Control string
 	// Content-Disposition string
 	//// The following become headers so they are []strings rather than strings... I think
-	// x-amz-website-redirect-location: []string
 	// x-amz-storage-class []string
+}
+
+// CopyObjectResult is the output from a Copy request
+type CopyObjectResult struct {
+	ETag         string
+	LastModified string
 }
 
 var attempts = aws.AttemptStrategy{
@@ -73,7 +81,7 @@ var attempts = aws.AttemptStrategy{
 
 // New creates a new S3.
 func New(auth aws.Auth, region aws.Region) *S3 {
-	return &S3{auth, region, 0}
+	return &S3{auth, region, 0, 0, 0}
 }
 
 // Bucket returns a Bucket with the given name.
@@ -278,6 +286,35 @@ func (b *Bucket) Put(path string, data []byte, contType string, perm ACL, option
 	return b.PutReader(path, body, int64(len(data)), contType, perm, options)
 }
 
+// PutCopy puts a copy of an object given by the key path into bucket b using b.Path as the target key
+func (b *Bucket) PutCopy(path string, perm ACL, options Options, source string) (*CopyObjectResult, error) {
+	headers := map[string][]string{
+		"x-amz-acl":         {string(perm)},
+		"x-amz-copy-source": {source},
+	}
+	if options.SSE {
+		headers["x-amz-server-side-encryption"] = []string{"AES256"}
+	}
+	if len(options.ContentEncoding) != 0 {
+		headers["Content-Encoding"] = []string{options.ContentEncoding}
+	}
+	for k, v := range options.Meta {
+		headers["x-amz-meta-"+k] = v
+	}
+	req := &request{
+		method:  "PUT",
+		bucket:  b.Name,
+		path:    path,
+		headers: headers,
+	}
+	resp := &CopyObjectResult{}
+	err := b.S3.query(req, resp)
+	if err != nil {
+		return resp, err
+	}
+	return resp, nil
+}
+
 // PutReader inserts an object into the S3 bucket by consuming data
 // from r until EOF.
 func (b *Bucket) PutReader(path string, r io.Reader, length int64, contType string, perm ACL, options Options) error {
@@ -291,6 +328,12 @@ func (b *Bucket) PutReader(path string, r io.Reader, length int64, contType stri
 	}
 	if len(options.ContentEncoding) != 0 {
 		headers["Content-Encoding"] = []string{options.ContentEncoding}
+	}
+	if len(options.CacheControl) != 0 {
+		headers["Cache-Control"] = []string{options.CacheControl}
+	}
+	if len(options.RedirectLocation) != 0 {
+		headers["x-amz-website-redirect-location"] = []string{options.RedirectLocation}
 	}
 	for k, v := range options.Meta {
 		headers["x-amz-meta-"+k] = v
@@ -723,7 +766,27 @@ func (s3 *S3) run(req *request, resp interface{}) (*http.Response, error) {
 		hreq.Body = ioutil.NopCloser(req.payload)
 	}
 
-	hresp, err := http.DefaultClient.Do(&hreq)
+	c := http.Client{
+		Transport: &http.Transport{
+			Dial: func(netw, addr string) (c net.Conn, err error) {
+				deadline := time.Now().Add(s3.ReadTimeout)
+				if s3.ConnectTimeout > 0 {
+					c, err = net.DialTimeout(netw, addr, s3.ConnectTimeout)
+				} else {
+					c, err = net.Dial(netw, addr)
+				}
+				if err != nil {
+					return
+				}
+				if s3.ReadTimeout > 0 {
+					err = c.SetDeadline(deadline)
+				}
+				return
+			},
+		},
+	}
+
+	hresp, err := c.Do(&hreq)
 	if err != nil {
 		return nil, err
 	}
