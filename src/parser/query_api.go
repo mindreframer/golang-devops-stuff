@@ -113,6 +113,9 @@ func (self *SelectQuery) GetReferencedColumns() map[*Value][]string {
 
 	notPrefixedColumns := []string{}
 	for _, value := range self.GetColumnNames() {
+		if value.Name == "time" || value.Name == "sequence_number" {
+			continue
+		}
 		notPrefixedColumns = append(notPrefixedColumns, getReferencedColumnsFromValue(value, mapping)...)
 	}
 
@@ -153,6 +156,24 @@ func (self *SelectQuery) GetReferencedColumns() map[*Value][]string {
 		}
 
 		delete(mapping, name)
+	}
+
+	if len(mapping) == 0 {
+		return returnedMapping
+	}
+
+	// if `mapping` still have some mappings, then we have mistaken a
+	// column name with dots with a prefix.column, see issue #240
+	for prefix, columnNames := range mapping {
+		for _, columnName := range columnNames {
+			for table, columns := range returnedMapping {
+				if len(returnedMapping[table]) > 1 && returnedMapping[table][0] == "*" {
+					continue
+				}
+				returnedMapping[table] = append(columns, prefix+"."+columnName)
+			}
+		}
+		delete(mapping, prefix)
 	}
 
 	return returnedMapping
@@ -337,6 +358,33 @@ func (self *SelectDeleteCommonQuery) GetQueryStringWithTimeCondition() string {
 	return queryString + " and time < " + timeStr + "u"
 }
 
+func (self *SelectDeleteCommonQuery) GetQueryStringForContinuousQuery(start, end time.Time) string {
+	queryString := self.GetQueryString()
+	queryString = strings.TrimSuffix(queryString, ";")
+
+	intoRegex, _ := regexp.Compile("(?i)\\s+into\\s+")
+	components := intoRegex.Split(queryString, 2)
+
+	queryString = components[0]
+
+	startTime := common.TimeToMicroseconds(start)
+	startTimeStr := strconv.FormatInt(startTime-1, 10)
+	endTime := common.TimeToMicroseconds(end)
+	endTimeStr := strconv.FormatInt(endTime, 10)
+
+	if self.GetWhereCondition() == nil {
+		queryString = queryString + " where "
+	} else {
+		queryString = queryString + " and "
+	}
+
+	if start.IsZero() {
+		return queryString + "time < " + endTimeStr + "u"
+	} else {
+		return queryString + "time > " + startTimeStr + "u and time < " + endTimeStr + "u"
+	}
+}
+
 // parse the start time or end time from the where conditions and return the new condition
 // without the time clauses, or nil if there are no where conditions left
 func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereCondition, time.Time, error) {
@@ -345,6 +393,15 @@ func getTime(condition *WhereCondition, isParsingStartTime bool) (*WhereConditio
 	}
 
 	if expr, ok := condition.GetBoolExpression(); ok {
+		switch expr.Type {
+		case ValueDuration, ValueFloat, ValueInt, ValueString, ValueWildcard:
+			return nil, ZERO_TIME, fmt.Errorf("Invalid where expression: %v", expr)
+		}
+
+		if expr.Type == ValueFunctionCall {
+			return condition, ZERO_TIME, nil
+		}
+
 		leftValue := expr.Elems[0]
 		isTimeOnLeft := leftValue.Type != ValueExpression && leftValue.Type != ValueFunctionCall
 		rightValue := expr.Elems[1]

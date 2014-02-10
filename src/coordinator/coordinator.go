@@ -9,7 +9,9 @@ import (
 	"math"
 	"parser"
 	"protocol"
+	"regexp"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,6 +56,17 @@ var (
 	sequenceNumber        = protocol.Request_SEQUENCE_NUMBER
 )
 
+// usernames and db names should match this regex
+var VALID_NAMES *regexp.Regexp
+
+func init() {
+	var err error
+	VALID_NAMES, err = regexp.Compile("^[a-zA-Z0-9_][a-zA-Z0-9\\._-]*$")
+	if err != nil {
+		panic(err)
+	}
+}
+
 func NewCoordinatorImpl(datastore datastore.Datastore, raftServer ClusterConsensus, clusterConfiguration *ClusterConfiguration) *CoordinatorImpl {
 	coordinator := &CoordinatorImpl{
 		clusterConfiguration: clusterConfiguration,
@@ -62,9 +75,15 @@ func NewCoordinatorImpl(datastore datastore.Datastore, raftServer ClusterConsens
 		runningReplays:       make(map[string][]*protocol.Request),
 	}
 
-	go coordinator.SyncLogs()
-
 	return coordinator
+}
+
+func (self *CoordinatorImpl) ForceCompaction(user common.User) error {
+	if !user.IsClusterAdmin() {
+		return fmt.Errorf("Insufficient permission to force a log compaction")
+	}
+
+	return self.raftServer.ForceLogCompaction()
 }
 
 // Distributes the query across the cluster and combines the results. Yields as they come in ensuring proper order.
@@ -74,16 +93,17 @@ func (self *CoordinatorImpl) DistributeQuery(user common.User, db string, query 
 		return self.datastore.ExecuteQuery(user, db, query, yield, nil)
 	}
 	servers, replicationFactor := self.clusterConfiguration.GetServersToMakeQueryTo(&db)
-	queryString := query.GetQueryString()
 	id := atomic.AddUint32(&self.requestId, uint32(1))
 	userName := user.GetName()
+	isDbUser := !user.IsClusterAdmin()
 	responseChannels := make([]chan *protocol.Response, 0, len(servers)+1)
+	queryString := query.GetQueryString()
 	var localServerToQuery *serverToQuery
 	for _, server := range servers {
 		if server.server.Id == self.clusterConfiguration.localServerId {
 			localServerToQuery = server
 		} else {
-			request := &protocol.Request{Type: &queryRequest, Query: &queryString, Id: &id, Database: &db, UserName: &userName}
+			request := &protocol.Request{Type: &queryRequest, Query: &queryString, Id: &id, Database: &db, UserName: &userName, IsDbUser: &isDbUser}
 			if server.ringLocationsToQuery != replicationFactor {
 				r := server.ringLocationsToQuery
 				request.RingLocationsToQuery = &r
@@ -95,7 +115,7 @@ func (self *CoordinatorImpl) DistributeQuery(user common.User, db string, query 
 	}
 
 	local := make(chan *protocol.Response)
-	nextPointMap := make(map[string]*protocol.Point)
+	nextPointMap := make(map[string]*NextPoint)
 
 	// TODO: this style of wrapping the series in response objects with the
 	//       last point time is duplicated in the request handler. Refactor...
@@ -575,7 +595,6 @@ func (self *CoordinatorImpl) handleReplayRequest(r *protocol.Request, replicatio
 		err = self.datastore.DeleteSeriesData(*r.Database, query[0].DeleteQuery)
 	}
 }
-
 func (self *CoordinatorImpl) WriteSeriesData(user common.User, db string, series *protocol.Series) error {
 	if !user.HasWriteAccess(db) {
 		return common.NewAuthorizationError("Insufficient permission to write to %s", db)
@@ -584,6 +603,51 @@ func (self *CoordinatorImpl) WriteSeriesData(user common.User, db string, series
 		return fmt.Errorf("Can't write series with zero points.")
 	}
 
+	err := self.CommitSeriesData(db, series)
+
+	self.ProcessContinuousQueries(db, series)
+
+	return err
+}
+
+func (self *CoordinatorImpl) ProcessContinuousQueries(db string, series *protocol.Series) {
+	if self.clusterConfiguration.parsedContinuousQueries != nil {
+		incomingSeriesName := *series.Name
+		for _, query := range self.clusterConfiguration.parsedContinuousQueries[db] {
+			groupByClause := query.GetGroupByClause()
+			if groupByClause.Elems != nil {
+				continue
+			}
+
+			fromClause := query.GetFromClause()
+			intoClause := query.GetIntoClause()
+			targetName := intoClause.Target.Name
+
+			interpolatedTargetName := strings.Replace(targetName, ":series_name", incomingSeriesName, -1)
+
+			for _, table := range fromClause.Names {
+				tableValue := table.Name
+				if regex, ok := tableValue.GetCompiledRegex(); ok {
+					if regex.MatchString(incomingSeriesName) {
+						series.Name = &interpolatedTargetName
+						if e := self.CommitSeriesData(db, series); e != nil {
+							log.Error("Couldn't write data for continuous query: ", e)
+						}
+					}
+				} else {
+					if tableValue.Name == incomingSeriesName {
+						series.Name = &interpolatedTargetName
+						if e := self.CommitSeriesData(db, series); e != nil {
+							log.Error("Couldn't write data for continuous query: ", e)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+func (self *CoordinatorImpl) CommitSeriesData(db string, series *protocol.Series) error {
 	// break the series object into separate ones based on their ring location
 
 	// if times server assigned, all the points will go to the same place
@@ -643,6 +707,7 @@ func (self *CoordinatorImpl) WriteSeriesData(user common.User, db string, series
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -848,9 +913,68 @@ func (self *CoordinatorImpl) proxyWrite(clusterServer *ClusterServer, request *p
 	}
 }
 
+func (self *CoordinatorImpl) CreateContinuousQuery(user common.User, db string, query string) error {
+	if !user.IsClusterAdmin() && !user.IsDbAdmin(db) {
+		return common.NewAuthorizationError("Insufficient permission to create continuous query")
+	}
+
+	err := self.raftServer.CreateContinuousQuery(db, query)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (self *CoordinatorImpl) DeleteContinuousQuery(user common.User, db string, id uint32) error {
+	if !user.IsClusterAdmin() && !user.IsDbAdmin(db) {
+		return common.NewAuthorizationError("Insufficient permission to delete continuous query")
+	}
+
+	err := self.raftServer.DeleteContinuousQuery(db, id)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (self *CoordinatorImpl) ListContinuousQueries(user common.User, db string) ([]*protocol.Series, error) {
+	if !user.IsClusterAdmin() && !user.IsDbAdmin(db) {
+		return nil, common.NewAuthorizationError("Insufficient permission to list continuous queries")
+	}
+
+	queries := self.clusterConfiguration.GetContinuousQueries(db)
+	points := []*protocol.Point{}
+
+	for _, query := range queries {
+		queryId := int64(query.Id)
+		queryString := query.Query
+		timestamp := time.Now().Unix()
+		sequenceNumber := uint64(1)
+		points = append(points, &protocol.Point{
+			Values: []*protocol.FieldValue{
+				&protocol.FieldValue{Int64Value: &queryId},
+				&protocol.FieldValue{StringValue: &queryString},
+			},
+			Timestamp:      &timestamp,
+			SequenceNumber: &sequenceNumber,
+		})
+	}
+	seriesName := "continuous queries"
+	series := []*protocol.Series{&protocol.Series{
+		Name:   &seriesName,
+		Fields: []string{"id", "query"},
+		Points: points,
+	}}
+	return series, nil
+}
+
 func (self *CoordinatorImpl) CreateDatabase(user common.User, db string, replicationFactor uint8) error {
 	if !user.IsClusterAdmin() {
 		return common.NewAuthorizationError("Insufficient permission to create database")
+	}
+
+	if !isValidName(db) {
+		return fmt.Errorf("%s isn't a valid db name", db)
 	}
 
 	err := self.raftServer.CreateDatabase(db, replicationFactor)
@@ -895,12 +1019,13 @@ func (self *CoordinatorImpl) ListSeries(user common.User, database string) ([]*p
 	servers, replicationFactor := self.clusterConfiguration.GetServersToMakeQueryTo(&database)
 	id := atomic.AddUint32(&self.requestId, uint32(1))
 	userName := user.GetName()
+	isDbUser := !user.IsClusterAdmin()
 	responseChannels := make([]chan *protocol.Response, 0, len(servers)+1)
 	for _, server := range servers {
 		if server.server.Id == self.clusterConfiguration.localServerId {
 			continue
 		}
-		request := &protocol.Request{Type: &listSeriesRequest, Id: &id, Database: &database, UserName: &userName}
+		request := &protocol.Request{Type: &listSeriesRequest, Id: &id, Database: &database, UserName: &userName, IsDbUser: &isDbUser}
 		if server.ringLocationsToQuery != replicationFactor {
 			r := server.ringLocationsToQuery
 			request.RingLocationsToQuery = &r
@@ -1019,15 +1144,15 @@ func (self *CoordinatorImpl) CreateClusterAdminUser(requester common.User, usern
 		return common.NewAuthorizationError("Insufficient permissions")
 	}
 
-	if username == "" {
-		return fmt.Errorf("Username cannot be empty")
+	if !isValidName(username) {
+		return fmt.Errorf("%s isn't a valid username", username)
 	}
 
 	if self.clusterConfiguration.clusterAdmins[username] != nil {
 		return fmt.Errorf("User %s already exists", username)
 	}
 
-	return self.raftServer.SaveClusterAdminUser(&clusterAdmin{CommonUser{Name: username}})
+	return self.raftServer.SaveClusterAdminUser(&clusterAdmin{CommonUser{Name: username, CacheKey: username}})
 }
 
 func (self *CoordinatorImpl) DeleteClusterAdminUser(requester common.User, username string) error {
@@ -1071,6 +1196,10 @@ func (self *CoordinatorImpl) CreateDbUser(requester common.User, db, username st
 		return fmt.Errorf("Username cannot be empty")
 	}
 
+	if !isValidName(username) {
+		return fmt.Errorf("%s isn't a valid username", username)
+	}
+
 	self.CreateDatabase(requester, db, uint8(1)) // ignore the error since the db may exist
 	dbUsers := self.clusterConfiguration.dbUsers[db]
 	if dbUsers != nil && dbUsers[username] != nil {
@@ -1078,7 +1207,7 @@ func (self *CoordinatorImpl) CreateDbUser(requester common.User, db, username st
 	}
 	matchers := []*Matcher{&Matcher{true, ".*"}}
 	log.Debug("(raft:%s) Creating uesr %s:%s", self.raftServer.(*RaftServer).raftServer.Name(), db, username)
-	return self.raftServer.SaveDbUser(&dbUser{CommonUser{Name: username}, db, matchers, matchers, false})
+	return self.raftServer.SaveDbUser(&dbUser{CommonUser{Name: username, CacheKey: db + "%" + username}, db, matchers, matchers, false})
 }
 
 func (self *CoordinatorImpl) DeleteDbUser(requester common.User, db, username string) error {
@@ -1178,4 +1307,8 @@ func (self *CoordinatorImpl) sendRequestToReplicas(request *protocol.Request, re
 
 func (self *CoordinatorImpl) sequenceNumberWithServerId(n uint64) uint64 {
 	return n*HOST_ID_OFFSET + uint64(self.clusterConfiguration.localServerId)
+}
+
+func isValidName(name string) bool {
+	return VALID_NAMES.MatchString(name)
 }

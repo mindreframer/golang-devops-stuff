@@ -25,7 +25,7 @@ type Server struct {
 
 func NewServer(config *configuration.Configuration) (*Server, error) {
 	log.Info("Opening database at %s", config.DataDir)
-	db, err := datastore.NewLevelDbDatastore(config.DataDir)
+	db, err := datastore.NewLevelDbDatastore(config.DataDir, config.LevelDbMaxOpenFiles)
 	if err != nil {
 		return nil, err
 	}
@@ -33,6 +33,7 @@ func NewServer(config *configuration.Configuration) (*Server, error) {
 	clusterConfig := coordinator.NewClusterConfiguration(config)
 	raftServer := coordinator.NewRaftServer(config, clusterConfig)
 	coord := coordinator.NewCoordinatorImpl(db, raftServer, clusterConfig)
+	go coord.SyncLogs()
 	requestHandler := coordinator.NewProtobufRequestHandler(db, coord, clusterConfig)
 	protobufServer := coordinator.NewProtobufServer(config.ProtobufPortString(), requestHandler)
 
@@ -41,7 +42,9 @@ func NewServer(config *configuration.Configuration) (*Server, error) {
 		return nil, err
 	}
 
+	raftServer.AssignEngineAndCoordinator(eng, coord)
 	httpApi := http.NewHttpServer(config.ApiHttpPortString(), config.AdminAssetsDir, eng, coord, coord)
+	httpApi.EnableSsl(config.ApiHttpSslPortString(), config.ApiHttpCertPath)
 	adminServer := admin.NewHttpServer(config.AdminAssetsDir, config.AdminHttpPortString())
 
 	return &Server{
