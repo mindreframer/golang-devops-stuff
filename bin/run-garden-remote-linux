@@ -3,14 +3,7 @@
 
 set -e
 
-go build -o out/garden
-
-rm -f /tmp/warden.sock
-
-./out/garden \
-  -remoteHost=192.168.50.4 \
-  -root=/vagrant/root \
-  -backend=linux \
-  -depot=/opt/warden/containers \
-  -rootfs=/opt/warden/rootfs \
+ssh -t vagrant@192.168.50.5 /vagrant/bin/run-garden-linux \
+  -listenNetwork=tcp \
+  -listenAddr=:7031 \
   "$@"

@@ -24,7 +24,7 @@ var _ = Describe("Running wshd", func() {
 
 	wsh := "../../root/linux/skeleton/bin/wsh"
 
-	shmTest, err := cmdtest.Build("github.com/vito/garden/integration/wshd/shm_test")
+	shmTest, err := cmdtest.Build("github.com/pivotal-cf-experimental/garden/integration/wshd/shm_test")
 	if err != nil {
 		panic(err)
 	}
@@ -122,30 +122,20 @@ function overlay_directory_in_rootfs() {
 function setup_fs() {
   mkdir -p tmp/rootfs mnt
 
-  modprobe overlayfs 2>/dev/null || true
+  mkdir -p $rootfs_path/proc
 
-  if grep -q -i overlayfs /proc/filesystems
-  then
-    mount -n -t overlayfs -o rw,upperdir=tmp/rootfs,lowerdir=$rootfs_path none mnt
-  elif grep -q -i aufs /proc/filesystems
-  then
-    mount -n -t aufs -o br:tmp/rootfs=rw:$rootfs_path=ro+wh none mnt
-  else
-    mkdir -p $rootfs_path/proc
+  mount -n --bind $rootfs_path mnt
+  mount -n --bind -o remount,ro $rootfs_path mnt
 
-    mount -n --bind $rootfs_path mnt
-    mount -n --bind -o remount,ro $rootfs_path mnt
+  overlay_directory_in_rootfs /dev rw
+  overlay_directory_in_rootfs /etc rw
+  overlay_directory_in_rootfs /home rw
+  overlay_directory_in_rootfs /sbin rw
+  overlay_directory_in_rootfs /var rw
 
-    overlay_directory_in_rootfs /dev rw
-    overlay_directory_in_rootfs /etc rw
-    overlay_directory_in_rootfs /home rw
-    overlay_directory_in_rootfs /sbin rw
-    overlay_directory_in_rootfs /var rw
-
-    mkdir -p tmp/rootfs/tmp
-    chmod 777 tmp/rootfs/tmp
-    overlay_directory_in_rootfs /tmp rw
-  fi
+  mkdir -p tmp/rootfs/tmp
+  chmod 777 tmp/rootfs/tmp
+  overlay_directory_in_rootfs /tmp rw
 }
 
 setup_fs
@@ -174,7 +164,10 @@ setup_fs
 		wshdSession, err := cmdtest.StartWrapped(wshdCommand, outWrapper, outWrapper)
 		Expect(err).ToNot(HaveOccurred())
 
-		Expect(wshdSession).To(ExitWith(0))
+		status, err := wshdSession.Wait(30 * time.Second)
+		Expect(err).ToNot(HaveOccurred())
+
+		Expect(status).To(Equal(0))
 
 		createdContainers = append(createdContainers, containerDir)
 
@@ -198,12 +191,17 @@ setup_fs
 	})
 
 	It("starts the daemon with mount space isolation", func() {
-		mkdir := exec.Command(wsh, "--socket", socketPath, "/bin/mkdir", "/gnome")
+		mkdir := exec.Command(wsh, "--socket", socketPath, "/bin/mkdir", "/home/vcap/lawn")
 		mkdirSession, err := cmdtest.StartWrapped(mkdir, outWrapper, outWrapper)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(mkdirSession).To(ExitWith(0))
 
-		mount := exec.Command(wsh, "--socket", socketPath, "/bin/mount", "--bind", "/home", "/gnome")
+		mkdir = exec.Command(wsh, "--socket", socketPath, "/bin/mkdir", "/home/vcap/gnome")
+		mkdirSession, err = cmdtest.StartWrapped(mkdir, outWrapper, outWrapper)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(mkdirSession).To(ExitWith(0))
+
+		mount := exec.Command(wsh, "--socket", socketPath, "/bin/mount", "--bind", "/home/vcap/lawn", "/home/vcap/gnome")
 		mountSession, err := cmdtest.StartWrapped(mount, outWrapper, outWrapper)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(mountSession).To(ExitWith(0))
@@ -211,7 +209,7 @@ setup_fs
 		cat := exec.Command("/bin/cat", "/proc/mounts")
 		catSession, err := cmdtest.StartWrapped(cat, outWrapper, outWrapper)
 		Expect(err).ToNot(HaveOccurred())
-		Expect(catSession).ToNot(Say("/gnome"))
+		Expect(catSession).ToNot(Say("gnome"))
 		Expect(catSession).To(ExitWith(0))
 	})
 
@@ -221,7 +219,7 @@ setup_fs
 		Expect(err).ToNot(HaveOccurred())
 		Expect(ifconfigSession).To(ExitWith(0))
 
-		localIfconfig := exec.Command("/sbin/ifconfig")
+		localIfconfig := exec.Command("ifconfig")
 		localIfconfigSession, err := cmdtest.StartWrapped(localIfconfig, outWrapper, outWrapper)
 		Expect(err).ToNot(HaveOccurred())
 		Expect(localIfconfigSession).ToNot(Say("lo:0"))
@@ -441,7 +439,7 @@ setup_fs
 				"-p",
 				"--links",
 				wsh, // send wsh binary
-				"root@container:wsh",
+				"vcap@container:wsh",
 			)
 
 			cmdSession, err := cmdtest.StartWrapped(cmd, outWrapper, outWrapper)

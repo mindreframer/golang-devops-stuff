@@ -51,7 +51,18 @@ func TestWshd(t *testing.T) {
 			}
 
 			for i := 0; i < 4; i++ {
+				for _, submount := range []string{"dev", "etc", "home", "sbin", "var", "tmp"} {
+					umount := exec.Command("umount", path.Join(containerDir, "mnt", submount))
+					umount.Stdout = os.Stdout
+					umount.Stderr = os.Stderr
+
+					err := umount.Run()
+					log.Println("unmounting", submount, err)
+				}
+
 				umount := exec.Command("umount", path.Join(containerDir, "mnt"))
+				umount.Stdout = os.Stdout
+				umount.Stderr = os.Stderr
 
 				err := umount.Run()
 

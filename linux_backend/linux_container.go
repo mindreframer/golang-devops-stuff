@@ -14,12 +14,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/vito/garden/backend"
-	"github.com/vito/garden/command_runner"
-	"github.com/vito/garden/linux_backend/bandwidth_manager"
-	"github.com/vito/garden/linux_backend/cgroups_manager"
-	"github.com/vito/garden/linux_backend/job_tracker"
-	"github.com/vito/garden/linux_backend/quota_manager"
+	"github.com/pivotal-cf-experimental/garden/backend"
+	"github.com/pivotal-cf-experimental/garden/command_runner"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/bandwidth_manager"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/cgroups_manager"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/job_tracker"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/quota_manager"
 )
 
 type LinuxContainer struct {
@@ -463,11 +463,7 @@ func (c *LinuxContainer) LimitMemory(limits backend.MemoryLimits) error {
 	//
 	// so, write memory.limit_in_bytes before and after
 	c.cgroupsManager.Set("memory", "memory.limit_in_bytes", limit)
-
-	err = c.cgroupsManager.Set("memory", "memory.memsw.limit_in_bytes", limit)
-	if err != nil {
-		return err
-	}
+	c.cgroupsManager.Set("memory", "memory.memsw.limit_in_bytes", limit)
 
 	err = c.cgroupsManager.Set("memory", "memory.limit_in_bytes", limit)
 	if err != nil {

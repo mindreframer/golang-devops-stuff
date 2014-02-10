@@ -1,11 +1,11 @@
-#!/bin/bash
+#!/bin/bash -l
 # vim: set ft=sh
 
 set -e
 
-go build -o out/garden
+cd $(dirname $0)/..
 
-sudo rm -f /tmp/warden.sock
+go build -o out/garden
 
 sudo ./out/garden \
   -backend=linux \

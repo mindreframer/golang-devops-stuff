@@ -4,26 +4,31 @@
 set -e -x
 
 FIRST_GOPATH=`echo $GOPATH | cut -d':' -f1`
-
 export PATH=$FIRST_GOPATH/bin:$PATH
 
-go get -v github.com/vito/gocart
+go get code.google.com/p/go.tools/cmd/cover
+go get github.com/dustin/goveralls
 
-gocart
+WORKSPACE=$PWD/Godeps/_workspace
+
+export GOPATH=$WORKSPACE:$GOPATH
+export PATH=$WORKSPACE/bin:$PATH
+
 go install github.com/onsi/ginkgo/ginkgo
-go install code.google.com/p/go.tools/cmd/cover
-go install github.com/dustin/goveralls
 
 ginkgo -cover -race -r -i -skipMeasurements -randomizeAllSpecs "$@"
 
-# don't report fakes
-rm -f *fake*.coverprofile
+if [ -n "$COVERALLS_TOKEN" ]; then
+  # don't report fakes
+  rm -f *fake*.coverprofile
 
-echo mode: set > all.coverprofile
-cat *.coverprofile | grep -v mode: >> all.coverprofile
+  echo mode: set > all.coverprofile
+  cat *.coverprofile | grep -v mode: >> all.coverprofile
 
-# don't leak coveralls token
-(
-  set +x
-  goveralls -coverprofile=all.coverprofile $COVERALLS_TOKEN
-)
+  # don't leak coveralls token
+  (
+    set +x
+    goveralls -coverprofile=all.coverprofile $COVERALLS_TOKEN || \
+      echo "Coveralls failed!"
+  )
+fi

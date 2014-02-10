@@ -1,3 +1,6 @@
 [submodule "warden"]
 	path = warden
 	url = https://github.com/cloudfoundry/warden.git
+[submodule "protobuf"]
+	path = protobuf
+	url = https://github.com/vito/warden-protocol.git

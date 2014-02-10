@@ -3,7 +3,7 @@ package fake_quota_manager
 import (
 	"sync"
 
-	"github.com/vito/garden/backend"
+	"github.com/pivotal-cf-experimental/garden/backend"
 )
 
 type FakeQuotaManager struct {

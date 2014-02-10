@@ -1,8 +1,8 @@
 package bomberman
 
 import (
-	"github.com/vito/garden/backend"
-	"github.com/vito/garden/server/timebomb"
+	"github.com/pivotal-cf-experimental/garden/backend"
+	"github.com/pivotal-cf-experimental/garden/server/timebomb"
 )
 
 type Bomberman struct {

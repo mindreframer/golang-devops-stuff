@@ -7,4 +7,4 @@ script: ./bin/test -skip="wshd Suite" -skipMeasurements -skip=Lifecycle
 
 env:
   global:
-    - secure: NGWQaMGFiZULPSLR9mb2PbSjjbl5osvdKeKp54uX1sn1g70Kz7+SuqRpBVybStodsC3yaGF/7ssxMLZeY59MJZNOskgzyyAVus2FM2VdPBr4qSDDxY8W4F+cPuMNdk5aWLQrSxaYy4tKoszQHJVDopmgbwwqiK1b5qTrsFVkP0g=
+    - secure: PBR1JWF0XnZG8vHGGKVAHZ++Pgso9k2AYdPGAKF9qN1cv4Kc/b09R2yEIMgvZdPL25fmAkb6O2R6NNwmNUBwpuNGpI2fVEOFgsPWaYuj2Kk31DMqMDC9arWbyFE2+2cocj5r5fF+QDsKgQa7VHJ1Gge5145f3qjPlg2JUgmjXpQ=

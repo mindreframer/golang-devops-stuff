@@ -1,0 +1,20 @@
+#!/bin/bash
+
+set -e -x
+
+export GARDEN_TEST_ROOTFS=/opt/warden/rootfs
+
+make
+
+export GODEPS_WORKSPACE=$PWD/Godeps/_workspace
+
+# hooray forking
+ln -s $GOPATH/src/github.com/vito $GOPATH/src/github.com/pivotal-cf-experimental
+
+export GOPATH=$GODEPS_WORKSPACE:$GOPATH
+export PATH=$GODEPS_WORKSPACE/bin:$PATH
+
+go install github.com/onsi/ginkgo/ginkgo
+
+ginkgo -r -skipMeasurements -keepGoing
+

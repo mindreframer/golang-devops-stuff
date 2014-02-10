@@ -4,9 +4,9 @@ import (
 	"net"
 )
 
-func ErrorDialingUnix(socketPath string) func() error {
+func ErrorDialing(network, addr string) func() error {
 	return func() error {
-		conn, err := net.Dial("unix", socketPath)
+		conn, err := net.Dial(network, addr)
 		if err == nil {
 			conn.Close()
 		}

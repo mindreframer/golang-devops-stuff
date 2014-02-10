@@ -1,0 +1,29 @@
+{
+	"ImportPath": "github.com/pivotal-cf-experimental/garden",
+	"GoVersion": "go1.2",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "code.google.com/p/gogoprotobuf/proto",
+			"Rev": "5ad34ffef55c3655a6ca3f46adf798484c3e1e2e"
+		},
+		{
+			"ImportPath": "github.com/onsi/ginkgo",
+			"Rev": "dc83f6705d743045e1d2d399bfe0104501a25668"
+		},
+		{
+			"ImportPath": "github.com/onsi/gomega",
+			"Rev": "96f78f1eec17555a416b86839fe5a3c1c2086c8a"
+		},
+		{
+			"ImportPath": "github.com/vito/cmdtest",
+			"Rev": "4b86f8c2259c55e86e4b971cd7dc5dfb03e41b80"
+		},
+		{
+			"ImportPath": "github.com/vito/gordon",
+			"Rev": "efbfec342dbbba9ab2c661a2c29efa9009f6ba6d"
+		}
+	]
+}

@@ -6,8 +6,8 @@ import (
 
 	"code.google.com/p/gogoprotobuf/proto"
 
-	"github.com/vito/garden/backend"
-	protocol "github.com/vito/garden/protocol"
+	"github.com/pivotal-cf-experimental/garden/backend"
+	protocol "github.com/pivotal-cf-experimental/garden/protocol"
 )
 
 func (s *WardenServer) handlePing(ping *protocol.PingRequest) (proto.Message, error) {
