@@ -1,11 +1,10 @@
-// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Copyright (c) 2013 The SkyDNS Authors. All rights reserved.
 // Use of this source code is governed by The MIT License (MIT) that can be
 // found in the LICENSE file.
 
 package server
 
 import (
-	"bytes"
 	"encoding/json"
 	"github.com/skynetservices/skydns/registry"
 	"log"
@@ -13,16 +12,6 @@ import (
 )
 
 func (s *Server) getRegionsHTTPHandler(w http.ResponseWriter, req *http.Request) {
-	var secret string
-
-	//read the authorization header to get the secret.
-	secret = req.Header.Get("Authorization")
-
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
-
 	srv, err := s.registry.Get("*")
 	if err != nil {
 		switch err {
@@ -46,23 +35,12 @@ func (s *Server) getRegionsHTTPHandler(w http.ResponseWriter, req *http.Request)
 		}
 	}
 
-	var b bytes.Buffer
-	json.NewEncoder(&b).Encode(regions)
-	w.Write(b.Bytes())
-
+	if err := json.NewEncoder(w).Encode(regions); err != nil {
+		log.Println("Error: ", err)
+	}
 }
 
 func (s *Server) getEnvironmentsHTTPHandler(w http.ResponseWriter, req *http.Request) {
-	var secret string
-
-	//read the authorization header to get the secret.
-	secret = req.Header.Get("Authorization")
-
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
-
 	srv, err := s.registry.Get("*")
 	if err != nil {
 		switch err {
@@ -86,22 +64,12 @@ func (s *Server) getEnvironmentsHTTPHandler(w http.ResponseWriter, req *http.Req
 		}
 	}
 
-	var b bytes.Buffer
-	json.NewEncoder(&b).Encode(environments)
-	w.Write(b.Bytes())
+	if err := json.NewEncoder(w).Encode(environments); err != nil {
+		log.Println("Error: ", err)
+	}
 }
 
 func (s *Server) getServicesHTTPHandler(w http.ResponseWriter, req *http.Request) {
-	var secret string
-
-	//read the authorization header to get the secret.
-	secret = req.Header.Get("Authorization")
-
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
-
 	log.Println(req.URL.Path)
 	log.Println(s.raftServer.Leader())
 
@@ -127,7 +95,7 @@ func (s *Server) getServicesHTTPHandler(w http.ResponseWriter, req *http.Request
 		return
 	}
 
-	var b bytes.Buffer
-	json.NewEncoder(&b).Encode(srv)
-	w.Write(b.Bytes())
+	if err := json.NewEncoder(w).Encode(srv); err != nil {
+		log.Println("Error: ", err)
+	}
 }

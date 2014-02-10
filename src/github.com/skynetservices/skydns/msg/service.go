@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Copyright (c) 2013 The SkyDNS Authors. All rights reserved.
 // Use of this source code is governed by The MIT License (MIT) that can be
 // found in the LICENSE file.
 
@@ -62,7 +62,7 @@ func (c Callback) Call(s Service) {
 	if err != nil {
 		return
 	}
-	req, err := http.NewRequest("DELETE", "http://" + c.Reply + ":" + strconv.Itoa(int(c.Port)) + "/skydns/callbacks/" + c.UUID, bytes.NewBuffer(b))
+	req, err := http.NewRequest("DELETE", "http://"+c.Reply+":"+strconv.Itoa(int(c.Port))+"/skydns/callbacks/"+c.UUID, bytes.NewBuffer(b))
 	if err != nil {
 		log.Println("Failed to create req.", err.Error)
 		return

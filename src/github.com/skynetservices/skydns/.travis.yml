@@ -10,3 +10,5 @@ install:
   - go get github.com/skynetservices/skydns/msg
   - go get github.com/rcrowley/go-metrics
   - go get github.com/stathat/go
+  - go get github.com/codegangsta/cli
+  - go get github.com/influxdb/influxdb-go
