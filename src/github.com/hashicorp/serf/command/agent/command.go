@@ -3,6 +3,7 @@ package agent
 import (
 	"flag"
 	"fmt"
+	"github.com/armon/go-metrics"
 	"github.com/hashicorp/logutils"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/serf"
@@ -37,6 +38,7 @@ type Command struct {
 func (c *Command) readConfig() *Config {
 	var cmdConfig Config
 	var configFiles []string
+	var tags []string
 	cmdFlags := flag.NewFlagSet("agent", flag.ContinueOnError)
 	cmdFlags.Usage = func() { c.Ui.Output(c.Help()) }
 	cmdFlags.StringVar(&cmdConfig.BindAddr, "bind", "", "address to bind listeners to")
@@ -60,11 +62,25 @@ func (c *Command) readConfig() *Config {
 		"address to bind RPC listener to")
 	cmdFlags.StringVar(&cmdConfig.Profile, "profile", "", "timing profile to use (lan, wan, local)")
 	cmdFlags.StringVar(&cmdConfig.SnapshotPath, "snapshot", "", "path to the snapshot file")
+	cmdFlags.Var((*AppendSliceValue)(&tags), "tag",
+		"tag pair, specified as key=value")
+	cmdFlags.StringVar(&cmdConfig.Discover, "discover", "", "mDNS discovery name")
 	if err := cmdFlags.Parse(c.args); err != nil {
 		return nil
 	}
 
-	config := DefaultConfig
+	// Parse any command line tag values
+	cmdConfig.Tags = make(map[string]string)
+	for _, tag := range tags {
+		parts := strings.SplitN(tag, "=", 2)
+		if len(parts) != 2 {
+			c.Ui.Error(fmt.Sprintf("Invalid tag '%s' provided", tag))
+			return nil
+		}
+		cmdConfig.Tags[parts[0]] = parts[1]
+	}
+
+	config := DefaultConfig()
 	if len(configFiles) > 0 {
 		fileConfig, err := ReadConfigPaths(configFiles)
 		if err != nil {
@@ -92,6 +108,12 @@ func (c *Command) readConfig() *Config {
 			c.Ui.Error(fmt.Sprintf("Invalid event script: %s", script.String()))
 			return nil
 		}
+	}
+
+	// Backward compatibility hack for 'Role'
+	if config.Role != "" {
+		c.Ui.Output("Deprecation warning: 'Role' has been replaced with 'Tags'")
+		config.Tags["role"] = config.Role
 	}
 
 	return config
@@ -140,7 +162,7 @@ func (c *Command) setupAgent(config *Config, logOutput io.Writer) *Agent {
 	serfConfig.MemberlistConfig.AdvertisePort = advertisePort
 	serfConfig.MemberlistConfig.SecretKey = encryptKey
 	serfConfig.NodeName = config.NodeName
-	serfConfig.Role = config.Role
+	serfConfig.Tags = config.Tags
 	serfConfig.SnapshotPath = config.SnapshotPath
 	serfConfig.ProtocolVersion = uint8(config.Protocol)
 	serfConfig.CoalescePeriod = 3 * time.Second
@@ -190,7 +212,7 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 	c.scriptHandler = &ScriptEventHandler{
 		Self: serf.Member{
 			Name: config.NodeName,
-			Role: config.Role,
+			Tags: config.Tags,
 		},
 		Scripts: config.EventScripts(),
 		Logger:  log.New(logOutput, "", log.LstdFlags),
@@ -201,6 +223,24 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 	if err := agent.Start(); err != nil {
 		c.Ui.Error(fmt.Sprintf("Failed to start the Serf agent: %v", err))
 		return nil
+	}
+
+	// Parse the bind address information
+	bindIP, bindPort, err := config.AddrParts(config.BindAddr)
+	bindAddr := &net.TCPAddr{IP: net.ParseIP(bindIP), Port: bindPort}
+
+	// Start the discovery layer
+	if config.Discover != "" {
+		// Use the advertise addr and port
+		local := agent.Serf().Memberlist().LocalNode()
+
+		_, err := NewAgentMDNS(agent, logOutput, config.ReplayOnJoin,
+			config.NodeName, config.Discover, local.Addr, int(local.Port))
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Error starting mDNS listener: %s", err))
+			return nil
+
+		}
 	}
 
 	// Setup the RPC listener
@@ -214,11 +254,9 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 	c.Ui.Output("Starting Serf agent RPC...")
 	ipc := NewAgentIPC(agent, rpcListener, logOutput, logWriter)
 
-	bindIP, bindPort, err := config.AddrParts(config.BindAddr)
-	bindAddr := (&net.TCPAddr{IP: net.ParseIP(bindIP), Port: bindPort}).String()
 	c.Ui.Output("Serf agent running!")
 	c.Ui.Info(fmt.Sprintf("     Node name: '%s'", config.NodeName))
-	c.Ui.Info(fmt.Sprintf("     Bind addr: '%s'", bindAddr))
+	c.Ui.Info(fmt.Sprintf("     Bind addr: '%s'", bindAddr.String()))
 
 	if config.AdvertiseAddr != "" {
 		advertiseIP, advertisePort, _ := config.AddrParts(config.AdvertiseAddr)
@@ -230,6 +268,10 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 	c.Ui.Info(fmt.Sprintf("     Encrypted: %#v", config.EncryptKey != ""))
 	c.Ui.Info(fmt.Sprintf("      Snapshot: %v", config.SnapshotPath != ""))
 	c.Ui.Info(fmt.Sprintf("       Profile: %s", config.Profile))
+
+	if config.Discover != "" {
+		c.Ui.Info(fmt.Sprintf("  mDNS cluster: %s", config.Discover))
+	}
 	return ipc
 }
 
@@ -269,6 +311,16 @@ func (c *Command) Run(args []string) int {
 	if logWriter == nil {
 		return 1
 	}
+
+	/* Setup telemetry
+	Aggregate on 10 second intervals for 1 minute. Expose the
+	metrics over stderr when there is a SIGUSR1 received.
+	*/
+	inm := metrics.NewInmemSink(10*time.Second, time.Minute)
+	metrics.DefaultInmemSignal(inm)
+	metricsConf := metrics.DefaultConfig("serf-agent")
+	metricsConf.EnableHostname = false
+	metrics.NewGlobal(metricsConf, inm)
 
 	// Setup serf
 	agent := c.setupAgent(config, logOutput)
@@ -383,6 +435,17 @@ func (c *Command) handleReload(config *Config, agent *Agent) *Config {
 
 	// Change the event handlers
 	c.scriptHandler.UpdateScripts(config.EventScripts())
+
+	// Update the tags in serf
+	serf := agent.Serf()
+	if err := serf.SetTags(newConf.Tags); err != nil {
+		c.Ui.Error(fmt.Sprintf("Failed to update tags: %v", err))
+		return newConf
+	}
+
+	// Change the tags for the event handlers
+	c.scriptHandler.Self.Tags = newConf.Tags
+
 	return newConf
 }
 
@@ -407,6 +470,9 @@ Options:
                            from. This will read every file ending in ".json"
                            as configuration in this directory in alphabetical
                            order.
+  -discover=cluster        Discover is set to enable mDNS discovery of peer. On
+                           networks that support multicast, this can be used to have
+                           peers join each other without an explicit join.
   -encrypt=foo             Key for encrypting network traffic within Serf.
                            Must be a base64-encoded 16-byte key.
   -event-handler=foo       Script to execute when events occur. This can
@@ -423,10 +489,13 @@ Options:
   -role=foo                The role of this node, if any. This can be used
                            by event scripts to differentiate different types
                            of nodes that may be part of the same cluster.
+                           '-role' is deprecated in favor of '-tag role=foo'.
   -rpc-addr=127.0.0.1:7373 Address to bind the RPC listener.
   -snapshot=path/to/file   The snapshot file is used to store alive nodes and
                            event information so that Serf can rejoin a cluster
 						   and avoid event replay on restart.
+  -tag key=value           Tag can be specified multiple times to attach multiple
+                           key/value tag pairs to the given node.
 
 Event handlers:
 

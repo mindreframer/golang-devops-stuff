@@ -18,14 +18,17 @@ import (
 const DefaultBindPort int = 7946
 
 // DefaultConfig contains the defaults for configurations.
-var DefaultConfig = &Config{
-	BindAddr:      "0.0.0.0",
-	AdvertiseAddr: "",
-	LogLevel:      "INFO",
-	RPCAddr:       "127.0.0.1:7373",
-	Protocol:      serf.ProtocolVersionMax,
-	ReplayOnJoin:  false,
-	Profile:       "lan",
+func DefaultConfig() *Config {
+	return &Config{
+		Tags:          make(map[string]string),
+		BindAddr:      "0.0.0.0",
+		AdvertiseAddr: "",
+		LogLevel:      "INFO",
+		RPCAddr:       "127.0.0.1:7373",
+		Protocol:      serf.ProtocolVersionMax,
+		ReplayOnJoin:  false,
+		Profile:       "lan",
+	}
 }
 
 type dirEnts []os.FileInfo
@@ -40,6 +43,11 @@ type Config struct {
 	// more info.
 	NodeName string `mapstructure:"node_name"`
 	Role     string `mapstructure:"role"`
+
+	// Tags are used to attach key/value metadata to a node. They have
+	// replaced 'Role' as a more flexible meta data mechanism. For compatibility,
+	// the 'role' key is special, and is used for backwards compatibility.
+	Tags map[string]string `mapstructure:"tags"`
 
 	// BindAddr is the address that the Serf agent's communication ports
 	// will bind to. Serf will use this address to bind to for both TCP
@@ -99,6 +107,12 @@ type Config struct {
 	// SkipLeaveOnInt controls if Serf skips a graceful leave when receiving
 	// the INT signal. Defaults false. This can be changed on reload.
 	SkipLeaveOnInt bool `mapstructure:"skip_leave_on_interrupt"`
+
+	// Discover is used to setup an mDNS Discovery name. When this is set, the
+	// agent will setup an mDNS responder and periodically run an mDNS query
+	// to look for peers. For peers on a network that supports multicast, this
+	// allows Serf agents to join each other with zero configuration.
+	Discover string `mapstructure:"discover"`
 }
 
 // BindAddrParts returns the parts of the BindAddr that should be
@@ -165,11 +179,6 @@ func DecodeConfig(r io.Reader) (*Config, error) {
 		return nil, err
 	}
 
-	// If we never set the protocol, then set it to the default
-	if !containsKey(md.Keys, "protocol") {
-		result.Protocol = DefaultConfig.Protocol
-	}
-
 	return &result, nil
 }
 
@@ -196,6 +205,14 @@ func MergeConfig(a, b *Config) *Config {
 	if b.Role != "" {
 		result.Role = b.Role
 	}
+	if b.Tags != nil {
+		if result.Tags == nil {
+			result.Tags = make(map[string]string)
+		}
+		for name, value := range b.Tags {
+			result.Tags[name] = value
+		}
+	}
 	if b.BindAddr != "" {
 		result.BindAddr = b.BindAddr
 	}
@@ -208,7 +225,7 @@ func MergeConfig(a, b *Config) *Config {
 	if b.LogLevel != "" {
 		result.LogLevel = b.LogLevel
 	}
-	if b.Protocol >= 0 {
+	if b.Protocol > 0 {
 		result.Protocol = b.Protocol
 	}
 	if b.RPCAddr != "" {
@@ -228,6 +245,9 @@ func MergeConfig(a, b *Config) *Config {
 	}
 	if b.SkipLeaveOnInt == true {
 		result.SkipLeaveOnInt = true
+	}
+	if b.Discover != "" {
+		result.Discover = b.Discover
 	}
 
 	// Copy the event handlers
