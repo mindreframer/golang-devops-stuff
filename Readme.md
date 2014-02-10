@@ -169,6 +169,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Scalable datastore for metrics, events, and real-time analytics
        727 commits, last change: 2014-02-06 11:34:29, 1,359 stars, 62 forks
 
+    jingweno/gotask:
+      Idiomatic build tool in Go
+       123 commits, last change: 2014-01-12 10:05:21, 95 stars, 4 forks
+
     joewalnes/websocketd:
       Like inetd, but for WebSockets. Turn any application that uses STDIN/STDOUT into a WebSocket server.
        107 commits, last change: 2014-01-07 02:12:06, 2,917 stars, 127 forks
