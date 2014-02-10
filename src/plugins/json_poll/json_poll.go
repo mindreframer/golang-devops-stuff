@@ -40,6 +40,7 @@ func doRequest(req *http.Request, client *http.Client, log *logger.Logger) inter
 
 func readURL(url string, log *logger.Logger) interface{} {
 	req, err := http.NewRequest("GET", url, nil)
+	req.Close = true
 
 	if err != nil {
 		log.Log("crit", fmt.Sprintf("URL '%s' is malformed: %s", url, err.Error()))
@@ -71,6 +72,7 @@ func readUnixSocket(path string, log *logger.Logger) interface{} {
 	}
 
 	req, _ := http.NewRequest("GET", "http://localhost", nil)
+	req.Close = true
 	return doRequest(req, client, log)
 }
 
