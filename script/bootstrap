@@ -1,0 +1,4 @@
+#!/bin/bash
+
+go get -d -t -v ./...
+go get code.google.com/p/go.tools/cmd/cover
