@@ -18,7 +18,7 @@ package log
 // based on previous package by: Cong Ding <dinggnu@gmail.com>
 
 import (
-	"bitbucket.org/kardianos/osext"
+	"github.com/coreos/etcd/third_party/bitbucket.org/kardianos/osext"
 	"os"
 	"path"
 	"time"
@@ -26,13 +26,13 @@ import (
 
 // Logger is user-immutable immutable struct which can log to several outputs
 type Logger struct {
-	sinks   []Sink // the sinks this logger will log to
-	verbose bool   // gather expensive logging data?
-	prefix  string // static field available to all log sinks under this logger
+	sinks	[]Sink	// the sinks this logger will log to
+	verbose	bool	// gather expensive logging data?
+	prefix	string	// static field available to all log sinks under this logger
 
-	created    time.Time // time when this logger was created
-	seq        uint64    // sequential number of log message, starting at 1
-	executable string    // executable name
+	created		time.Time	// time when this logger was created
+	seq		uint64		// sequential number of log message, starting at 1
+	executable	string		// executable name
 }
 
 // New creates a new Logger which logs to all the supplied sinks.  The prefix
@@ -42,13 +42,13 @@ type Logger struct {
 // filename.
 func New(prefix string, verbose bool, sinks ...Sink) *Logger {
 	return &Logger{
-		sinks:   sinks,
-		verbose: verbose,
-		prefix:  prefix,
+		sinks:		sinks,
+		verbose:	verbose,
+		prefix:		prefix,
 
-		created:    time.Now(),
-		seq:        0,
-		executable: getExecutableName(),
+		created:	time.Now(),
+		seq:		0,
+		executable:	getExecutableName(),
 	}
 }
 

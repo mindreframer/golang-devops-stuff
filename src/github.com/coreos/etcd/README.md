@@ -1,8 +1,8 @@
 # etcd
 
-README version 0.2.0
+README version 0.3.0
 
-[![Build Status](https://travis-ci.org/coreos/etcd.png)](https://travis-ci.org/coreos/etcd)
+[![Build Status](https://drone.io/github.com/coreos/etcd/status.png)](https://drone.io/github.com/coreos/etcd/latest)
 
 A highly-available key value store for shared configuration and service discovery.
 etcd is inspired by zookeeper and doozer, with a focus on:
@@ -19,14 +19,6 @@ Or feel free to just use curl, as in the examples below.
 
 [raft]: https://github.com/coreos/go-raft
 [etcdctl]: http://github.com/coreos/etcdctl/
-
-## Contact
-
-- Mailing list: http://coreos.com/lists/etcd-dev/
-- IRC: #coreos on irc.freenode.net
-- Planning/Roadmap: https://trello.com/b/OiEbU547/etcd
-- Bugs: https://github.com/coreos/etcd/issues
-
 
 ## Getting Started
 
@@ -47,9 +39,9 @@ cd etcd
 ./build
 ```
 
-This will generate a binary in the base directory called `./etcd`.
+This will generate a binary called `./bin/etcd`.
 
-_NOTE_: you need go 1.1+. Please check your installation with
+_NOTE_: you need go 1.2+. Please check your installation with
 
 ```
 go version
@@ -60,7 +52,7 @@ go version
 First start a single machine cluster of etcd:
 
 ```sh
-./etcd
+./bin/etcd
 ```
 
 This will bring up etcd listening on port 4001 for client communication and on port 7001 for server-to-server communication.
@@ -91,6 +83,13 @@ You have successfully started an etcd on a single machine and written a key to t
 [modules.md]: https://github.com/coreos/etcd/blob/master/Documentation/modules.md
 [security.md]: https://github.com/coreos/etcd/blob/master/Documentation/security.md
 [tuning.md]: https://github.com/coreos/etcd/blob/master/Documentation/tuning.md
+
+## Contact
+
+- Mailing list: http://coreos.com/lists/etcd-dev/
+- IRC: #coreos on irc.freenode.net
+- Planning/Roadmap: https://trello.com/b/OiEbU547/etcd
+- Bugs: https://github.com/coreos/etcd/issues
 
 ## Contributing
 

@@ -1,33 +1,34 @@
 package raft
 
 import (
-	"code.google.com/p/goprotobuf/proto"
-	"github.com/coreos/raft/protobuf"
 	"io"
 	"io/ioutil"
+
+	"github.com/coreos/etcd/third_party/code.google.com/p/gogoprotobuf/proto"
+	"github.com/coreos/etcd/third_party/github.com/coreos/raft/protobuf"
 )
 
 // The response returned from a server after a vote for a candidate to become a leader.
 type RequestVoteResponse struct {
-	peer        *Peer
-	Term        uint64
-	VoteGranted bool
+	peer		*Peer
+	Term		uint64
+	VoteGranted	bool
 }
 
 // Creates a new RequestVote response.
 func newRequestVoteResponse(term uint64, voteGranted bool) *RequestVoteResponse {
 	return &RequestVoteResponse{
-		Term:        term,
-		VoteGranted: voteGranted,
+		Term:		term,
+		VoteGranted:	voteGranted,
 	}
 }
 
 // Encodes the RequestVoteResponse to a buffer. Returns the number of bytes
 // written and any error that may have occurred.
 func (resp *RequestVoteResponse) Encode(w io.Writer) (int, error) {
-	pb := &protobuf.ProtoRequestVoteResponse{
-		Term:        proto.Uint64(resp.Term),
-		VoteGranted: proto.Bool(resp.VoteGranted),
+	pb := &protobuf.RequestVoteResponse{
+		Term:		proto.Uint64(resp.Term),
+		VoteGranted:	proto.Bool(resp.VoteGranted),
 	}
 
 	p, err := proto.Marshal(pb)
@@ -49,7 +50,7 @@ func (resp *RequestVoteResponse) Decode(r io.Reader) (int, error) {
 
 	totalBytes := len(data)
 
-	pb := &protobuf.ProtoRequestVoteResponse{}
+	pb := &protobuf.RequestVoteResponse{}
 	if err = proto.Unmarshal(data, pb); err != nil {
 		return -1, err
 	}

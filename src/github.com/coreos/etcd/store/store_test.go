@@ -21,7 +21,7 @@ import (
 	"time"
 
 	etcdErr "github.com/coreos/etcd/error"
-	"github.com/stretchr/testify/assert"
+	"github.com/coreos/etcd/third_party/github.com/stretchr/testify/assert"
 )
 
 // Ensure that the store can retrieve an existing value.
@@ -115,6 +115,22 @@ func TestSet(t *testing.T) {
 	assert.Equal(t, e.PrevNode.Key, "/foo", "")
 	assert.Equal(t, e.PrevNode.Value, "", "")
 	assert.Equal(t, e.PrevNode.ModifiedIndex, uint64(1), "")
+	// Set /foo="baz" (for testing prevNode)
+	e, err = s.Set("/foo", false, "baz", Permanent)
+	assert.Nil(t, err, "")
+	assert.Equal(t, e.Action, "set", "")
+	assert.Equal(t, e.Node.Key, "/foo", "")
+	assert.False(t, e.Node.Dir, "")
+	assert.Equal(t, e.Node.Value, "baz", "")
+	assert.Nil(t, e.Node.Nodes, "")
+	assert.Nil(t, e.Node.Expiration, "")
+	assert.Equal(t, e.Node.TTL, 0, "")
+	assert.Equal(t, e.Node.ModifiedIndex, uint64(3), "")
+	// check prevNode
+	assert.NotNil(t, e.PrevNode, "")
+	assert.Equal(t, e.PrevNode.Key, "/foo", "")
+	assert.Equal(t, e.PrevNode.Value, "bar", "")
+	assert.Equal(t, e.PrevNode.ModifiedIndex, uint64(2), "")
 
 	// Set /dir as a directory
 	e, err = s.Set("/dir", true, "", Permanent)
@@ -126,7 +142,7 @@ func TestSet(t *testing.T) {
 	assert.Nil(t, e.Node.Nodes, "")
 	assert.Nil(t, e.Node.Expiration, "")
 	assert.Equal(t, e.Node.TTL, 0, "")
-	assert.Equal(t, e.Node.ModifiedIndex, uint64(3), "")
+	assert.Equal(t, e.Node.ModifiedIndex, uint64(4), "")
 }
 
 // Ensure that the store can create a new key if it doesn't already exist.
@@ -680,6 +696,118 @@ func TestStoreRecoverWithExpiration(t *testing.T) {
 	e, err = s.Get("/foo/y", false, false)
 	assert.NotNil(t, err, "")
 	assert.Nil(t, e, "")
+}
+
+// Ensure that the store can watch for hidden keys as long as it's an exact path match.
+func TestStoreWatchCreateWithHiddenKey(t *testing.T) {
+	s := newStore()
+	w, _ := s.Watch("/_foo", false, false, 0)
+	s.Create("/_foo", false, "bar", false, Permanent)
+	e := nbselect(w.EventChan)
+	assert.Equal(t, e.Action, "create", "")
+	assert.Equal(t, e.Node.Key, "/_foo", "")
+	e = nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+}
+
+// Ensure that the store doesn't see hidden key creates without an exact path match in recursive mode.
+func TestStoreWatchRecursiveCreateWithHiddenKey(t *testing.T) {
+	s := newStore()
+	w, _ := s.Watch("/foo", true, false, 0)
+	s.Create("/foo/_bar", false, "baz", false, Permanent)
+	e := nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+	w, _ = s.Watch("/foo", true, false, 0)
+	s.Create("/foo/_baz", true, "", false, Permanent)
+	e = nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+	s.Create("/foo/_baz/quux", false, "quux", false, Permanent)
+	e = nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+}
+
+// Ensure that the store doesn't see hidden key updates.
+func TestStoreWatchUpdateWithHiddenKey(t *testing.T) {
+	s := newStore()
+	s.Create("/_foo", false, "bar", false, Permanent)
+	w, _ := s.Watch("/_foo", false, false, 0)
+	s.Update("/_foo", "baz", Permanent)
+	e := nbselect(w.EventChan)
+	assert.Equal(t, e.Action, "update", "")
+	assert.Equal(t, e.Node.Key, "/_foo", "")
+	e = nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+}
+
+// Ensure that the store doesn't see hidden key updates without an exact path match in recursive mode.
+func TestStoreWatchRecursiveUpdateWithHiddenKey(t *testing.T) {
+	s := newStore()
+	s.Create("/foo/_bar", false, "baz", false, Permanent)
+	w, _ := s.Watch("/foo", true, false, 0)
+	s.Update("/foo/_bar", "baz", Permanent)
+	e := nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+}
+
+// Ensure that the store can watch for key deletions.
+func TestStoreWatchDeleteWithHiddenKey(t *testing.T) {
+	s := newStore()
+	s.Create("/_foo", false, "bar", false, Permanent)
+	w, _ := s.Watch("/_foo", false, false, 0)
+	s.Delete("/_foo", false, false)
+	e := nbselect(w.EventChan)
+	assert.Equal(t, e.Action, "delete", "")
+	assert.Equal(t, e.Node.Key, "/_foo", "")
+	e = nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+}
+
+// Ensure that the store doesn't see hidden key deletes without an exact path match in recursive mode.
+func TestStoreWatchRecursiveDeleteWithHiddenKey(t *testing.T) {
+	s := newStore()
+	s.Create("/foo/_bar", false, "baz", false, Permanent)
+	w, _ := s.Watch("/foo", true, false, 0)
+	s.Delete("/foo/_bar", false, false)
+	e := nbselect(w.EventChan)
+	assert.Nil(t, e, "")
+}
+
+// Ensure that the store doesn't see expirations of hidden keys.
+func TestStoreWatchExpireWithHiddenKey(t *testing.T) {
+	s := newStore()
+
+	stopChan := make(chan bool)
+	defer func() {
+		stopChan <- true
+	}()
+	go mockSyncService(s.DeleteExpiredKeys, stopChan)
+
+	s.Create("/_foo", false, "bar", false, time.Now().Add(500*time.Millisecond))
+	s.Create("/foofoo", false, "barbarbar", false, time.Now().Add(1000*time.Millisecond))
+
+	w, _ := s.Watch("/", true, false, 0)
+	c := w.EventChan
+	e := nbselect(c)
+	assert.Nil(t, e, "")
+	time.Sleep(600 * time.Millisecond)
+	e = nbselect(c)
+	assert.Nil(t, e, "")
+	time.Sleep(600 * time.Millisecond)
+	e = nbselect(c)
+	assert.Equal(t, e.Action, "expire", "")
+	assert.Equal(t, e.Node.Key, "/foofoo", "")
+}
+
+// Ensure that the store does see hidden key creates if watching deeper than a hidden key in recursive mode.
+func TestStoreWatchRecursiveCreateDeeperThanHiddenKey(t *testing.T) {
+	s := newStore()
+	w, _ := s.Watch("/_foo/bar", true, false, 0)
+	s.Create("/_foo/bar/baz", false, "baz", false, Permanent)
+
+	e := nbselect(w.EventChan)
+	assert.NotNil(t, e, "")
+	assert.Equal(t, e.Action, "create", "")
+	assert.Equal(t, e.Node.Key, "/_foo/bar/baz", "")
 }
 
 // Performs a non-blocking select on an event channel.

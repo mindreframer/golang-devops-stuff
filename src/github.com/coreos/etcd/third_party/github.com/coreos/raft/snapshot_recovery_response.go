@@ -1,41 +1,36 @@
 package raft
 
 import (
-	"code.google.com/p/goprotobuf/proto"
-	"github.com/coreos/raft/protobuf"
 	"io"
 	"io/ioutil"
+
+	"github.com/coreos/etcd/third_party/code.google.com/p/gogoprotobuf/proto"
+	"github.com/coreos/etcd/third_party/github.com/coreos/raft/protobuf"
 )
 
 // The response returned from a server appending entries to the log.
 type SnapshotRecoveryResponse struct {
-	Term        uint64
-	Success     bool
-	CommitIndex uint64
+	Term		uint64
+	Success		bool
+	CommitIndex	uint64
 }
-
-//------------------------------------------------------------------------------
-//
-// Constructors
-//
-//------------------------------------------------------------------------------
 
 // Creates a new Snapshot response.
 func newSnapshotRecoveryResponse(term uint64, success bool, commitIndex uint64) *SnapshotRecoveryResponse {
 	return &SnapshotRecoveryResponse{
-		Term:        term,
-		Success:     success,
-		CommitIndex: commitIndex,
+		Term:		term,
+		Success:	success,
+		CommitIndex:	commitIndex,
 	}
 }
 
-// Encodes the SnapshotRecoveryResponse to a buffer. Returns the number of bytes
-// written and any error that may have occurred.
+// Encode writes the response to a writer.
+// Returns the number of bytes written and any error that occurs.
 func (req *SnapshotRecoveryResponse) Encode(w io.Writer) (int, error) {
-	pb := &protobuf.ProtoSnapshotRecoveryResponse{
-		Term:        proto.Uint64(req.Term),
-		Success:     proto.Bool(req.Success),
-		CommitIndex: proto.Uint64(req.CommitIndex),
+	pb := &protobuf.SnapshotRecoveryResponse{
+		Term:		proto.Uint64(req.Term),
+		Success:	proto.Bool(req.Success),
+		CommitIndex:	proto.Uint64(req.CommitIndex),
 	}
 	p, err := proto.Marshal(pb)
 	if err != nil {
@@ -45,8 +40,7 @@ func (req *SnapshotRecoveryResponse) Encode(w io.Writer) (int, error) {
 	return w.Write(p)
 }
 
-// Decodes the SnapshotRecoveryResponse from a buffer. Returns the number of bytes read and
-// any error that occurs.
+// Decodes the SnapshotRecoveryResponse from a buffer.
 func (req *SnapshotRecoveryResponse) Decode(r io.Reader) (int, error) {
 	data, err := ioutil.ReadAll(r)
 
@@ -56,7 +50,7 @@ func (req *SnapshotRecoveryResponse) Decode(r io.Reader) (int, error) {
 
 	totalBytes := len(data)
 
-	pb := &protobuf.ProtoSnapshotRecoveryResponse{}
+	pb := &protobuf.SnapshotRecoveryResponse{}
 	if err := proto.Unmarshal(data, pb); err != nil {
 		return -1, err
 	}

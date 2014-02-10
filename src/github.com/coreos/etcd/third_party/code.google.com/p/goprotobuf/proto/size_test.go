@@ -36,7 +36,7 @@ import (
 	"testing"
 
 	pb "./testdata"
-	. "code.google.com/p/goprotobuf/proto"
+	. "github.com/coreos/etcd/third_party/code.google.com/p/goprotobuf/proto"
 )
 
 var messageWithExtension1 = &pb.MyMessage{Count: Int32(7)}
@@ -58,8 +58,8 @@ func init() {
 }
 
 var SizeTests = []struct {
-	desc string
-	pb   Message
+	desc	string
+	pb	Message
 }{
 	{"empty", &pb.OtherMessage{}},
 	// Basic types.

@@ -26,6 +26,7 @@ Options:
   -vv               Enabled very verbose logging.
 
 Cluster Configuration Options:
+  -discovery=<url>                Discovery service used to find a peer list.
   -peers-file=<path>              Path to a file containing the peer list.
   -peers=<host:port>,<host:port>  Comma-separated list of peers. The members
                                   should match the peer's '-peer-addr' flag.
@@ -51,8 +52,9 @@ Peer Communication Options:
 Other Options:
   -max-result-buffer   Max size of the result buffer.
   -max-retry-attempts  Number of times a node will try to join a cluster.
+  -retry-interval      Seconds to wait between cluster join retry attempts.
   -max-cluster-size    Maximum number of nodes in the cluster.
-  -snapshot            Open or close the snapshot.
+  -snapshot=false      Disable log snapshots
   -snapshot-count      Number of transactions before issuing a snapshot.
 `
 
