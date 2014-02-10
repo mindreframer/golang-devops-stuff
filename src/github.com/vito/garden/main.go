@@ -11,23 +11,28 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vito/garden/backend"
-	"github.com/vito/garden/backend/fake_backend"
-	"github.com/vito/garden/command_runner"
-	"github.com/vito/garden/command_runner/remote_command_runner"
-	"github.com/vito/garden/linux_backend"
-	"github.com/vito/garden/linux_backend/container_pool"
-	"github.com/vito/garden/linux_backend/network_pool"
-	"github.com/vito/garden/linux_backend/port_pool"
-	"github.com/vito/garden/linux_backend/quota_manager"
-	"github.com/vito/garden/linux_backend/uid_pool"
-	"github.com/vito/garden/server"
+	"github.com/pivotal-cf-experimental/garden/backend"
+	"github.com/pivotal-cf-experimental/garden/backend/fake_backend"
+	"github.com/pivotal-cf-experimental/garden/command_runner"
+	"github.com/pivotal-cf-experimental/garden/linux_backend"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/container_pool"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/network_pool"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/port_pool"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/quota_manager"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/uid_pool"
+	"github.com/pivotal-cf-experimental/garden/server"
 )
 
-var socketFilePath = flag.String(
-	"socket",
+var listenNetwork = flag.String(
+	"listenNetwork",
+	"unix",
+	"how to listen on the address (unix, tcp, etc.)",
+)
+
+var listenAddr = flag.String(
+	"listenAddr",
 	"/tmp/warden.sock",
-	"where to put the wardern server .sock file",
+	"address to listen on",
 )
 
 var snapshotsPath = flag.String(
@@ -58,18 +63,6 @@ var rootFSPath = flag.String(
 	"rootfs",
 	"",
 	"directory of the rootfs for the containers",
-)
-
-var remoteHost = flag.String(
-	"remoteHost",
-	"",
-	"machine to use for the Linux backend",
-)
-
-var remotePort = flag.Int(
-	"remotePort",
-	22,
-	"SSH port of the remote machine",
 )
 
 var disableQuotas = flag.Bool(
@@ -130,16 +123,6 @@ func main() {
 
 		runner = command_runner.New(*debug)
 
-		if *remoteHost != "" {
-			runner = remote_command_runner.New(
-				"root",
-				*remoteHost,
-				uint32(*remotePort),
-				"/host",
-				runner,
-			)
-		}
-
 		quotaManager, err := quota_manager.New(*depotPath, *rootPath, runner)
 		if err != nil {
 			log.Fatalln("error creating quota manager:", err)
@@ -172,11 +155,11 @@ func main() {
 		log.Fatalln("failed to set up backend:", err)
 	}
 
-	log.Println("starting server; listening on", *socketFilePath)
+	log.Println("starting server; listening with", *listenNetwork, "on", *listenAddr)
 
 	graceTime := time.Duration(*containerGraceTime) * time.Second
 
-	wardenServer := server.New(*socketFilePath, graceTime, backend)
+	wardenServer := server.New(*listenNetwork, *listenAddr, graceTime, backend)
 
 	err = wardenServer.Start()
 	if err != nil {
@@ -192,7 +175,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 
 	select {}
 }

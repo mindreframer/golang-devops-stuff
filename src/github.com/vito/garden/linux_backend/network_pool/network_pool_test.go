@@ -6,8 +6,8 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/vito/garden/linux_backend/network"
-	"github.com/vito/garden/linux_backend/network_pool"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/network"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/network_pool"
 )
 
 var _ = Describe("Network Pool", func() {

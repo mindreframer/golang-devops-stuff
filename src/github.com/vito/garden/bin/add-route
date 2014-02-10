@@ -1,0 +1,10 @@
+#!/bin/bash
+
+echo "Adding the following route entry to your local route table to enable direct warden container access. Your sudo password may be required."
+echo "  - net 10.254.0.0/19 via 192.168.50.5"
+if [ `uname` = "Darwin" ]; then
+ sudo route delete -net 10.254.0.0/19 192.168.50.5 > /dev/null 2>&1
+ sudo route add -net 10.254.0.0/19 192.168.50.5
+elif [ `uname` = "Linux" ]; then
+ sudo route add -net 10.254.0.0/19 gw 192.168.50.5
+fi

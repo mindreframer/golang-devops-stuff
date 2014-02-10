@@ -8,7 +8,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/vito/garden/command_runner"
+	"github.com/pivotal-cf-experimental/garden/command_runner"
 )
 
 var _ = Describe("Running commands", func() {

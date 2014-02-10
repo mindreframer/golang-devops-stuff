@@ -7,17 +7,26 @@ import (
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"github.com/vito/gordon"
 
-	"github.com/vito/garden/integration/garden_runner"
+	"github.com/pivotal-cf-experimental/garden/integration/garden_runner"
+	"github.com/vito/gordon"
 )
 
 var runner *garden_runner.GardenRunner
-var client *gordon.Client
+var client gordon.Client
 
 func TestLifecycle(t *testing.T) {
-	rootPath := "../../root"
-	rootFSPath := os.Getenv("GARDEN_TEST_ROOTFS")
+	remote := os.Getenv("GARDEN_REMOTE_HOST")
+
+	var rootPath, rootFSPath string
+
+	if remote != "" {
+		rootPath = "/vagrant/root"
+		rootFSPath = "/opt/warden/rootfs"
+	} else {
+		rootPath = "../../root"
+		rootFSPath = os.Getenv("GARDEN_TEST_ROOTFS")
+	}
 
 	if rootFSPath == "" {
 		log.Println("GARDEN_TEST_ROOTFS undefined; skipping")
@@ -26,7 +35,7 @@ func TestLifecycle(t *testing.T) {
 
 	var err error
 
-	runner, err = garden_runner.New(rootPath, rootFSPath)
+	runner, err = garden_runner.New(rootPath, rootFSPath, remote)
 	if err != nil {
 		log.Fatalln("failed to create runner:", err)
 	}
@@ -36,9 +45,7 @@ func TestLifecycle(t *testing.T) {
 		log.Fatalln("garden failed to start:", err)
 	}
 
-	client = gordon.NewClient(&gordon.ConnectionInfo{
-		SocketPath: runner.SocketPath,
-	})
+	client = runner.NewClient()
 
 	RegisterFailHandler(Fail)
 	RunSpecs(t, "Lifecycle Suite")

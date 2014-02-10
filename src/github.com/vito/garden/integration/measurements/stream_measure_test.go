@@ -16,7 +16,7 @@ import (
 )
 
 var _ = Describe("The Warden server", func() {
-	var wardenClient *gordon.Client
+	var wardenClient gordon.Client
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
@@ -24,7 +24,10 @@ var _ = Describe("The Warden server", func() {
 		socketPath := os.Getenv("WARDEN_TEST_SOCKET")
 		Eventually(ErrorDialingUnix(socketPath)).ShouldNot(HaveOccurred())
 
-		wardenClient = gordon.NewClient(&gordon.ConnectionInfo{SocketPath: socketPath})
+		wardenClient = gordon.NewClient(&gordon.ConnectionInfo{
+			Network: "unix",
+			Addr:    socketPath,
+		})
 
 		err := wardenClient.Connect()
 		Expect(err).ToNot(HaveOccurred())
@@ -71,7 +74,7 @@ var _ = Describe("The Warden server", func() {
 							results, err := wardenClient.Stream(handle, spawnRes.GetJobId())
 							Expect(err).ToNot(HaveOccurred())
 
-							go func(results chan *warden.StreamResponse) {
+							go func(results <-chan *warden.StreamResponse) {
 								for {
 									res, ok := <-results
 									if !ok {

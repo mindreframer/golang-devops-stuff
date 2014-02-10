@@ -2,18 +2,23 @@ package garden_runner
 
 import (
 	"fmt"
-	"io/ioutil"
+	"github.com/onsi/ginkgo/config"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/vito/cmdtest"
+	"github.com/vito/gordon"
 )
 
 type GardenRunner struct {
-	SocketPath    string
+	Remote string
+
+	Port int
+
 	DepotPath     string
 	RootPath      string
 	RootFSPath    string
@@ -25,50 +30,83 @@ type GardenRunner struct {
 	tmpdir string
 }
 
-func New(rootPath, rootFSPath string) (*GardenRunner, error) {
-	gardenBin, err := cmdtest.Build("github.com/vito/garden")
-	if err != nil {
-		return nil, err
+func New(rootPath, rootFSPath, remote string) (*GardenRunner, error) {
+	runner := &GardenRunner{
+		Remote:     remote,
+		Port:       config.GinkgoConfig.ParallelNode + 7012,
+		RootPath:   rootPath,
+		RootFSPath: rootFSPath,
 	}
 
-	tmpdir, err := ioutil.TempDir(os.TempDir(), "garden-runner")
+	return runner, runner.Prepare()
+}
+
+func (r *GardenRunner) cmd(command string, argv ...string) *exec.Cmd {
+	if r.Remote == "" {
+		return exec.Command(command, argv...)
+	} else {
+		args := []string{
+			"-tt", "-l", "root", r.Remote,
+			"shopt -s huponexit; " + command,
+		}
+		args = append(args, argv...)
+
+		return exec.Command("ssh", args...)
+	}
+}
+
+func (r *GardenRunner) Prepare() error {
+	r.tmpdir = fmt.Sprintf("/tmp/garden-%d-%d", time.Now().UnixNano(), config.GinkgoConfig.ParallelNode)
+	err := r.cmd("mkdir", r.tmpdir).Run()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	depotPath := filepath.Join(tmpdir, "containers")
+	if r.Remote == "" {
+		compiled, err := cmdtest.Build("github.com/pivotal-cf-experimental/garden")
+		if err != nil {
+			return err
+		}
 
-	err = os.Mkdir(depotPath, 0755)
-	if err != nil {
-		return nil, err
+		r.gardenBin = compiled
+	} else {
+		buildCmd := r.cmd("/vagrant/bin/integration/build")
+		buildCmd.Stdout = os.Stdout
+		buildCmd.Stderr = os.Stderr
+
+		err = buildCmd.Run()
+		if err != nil {
+			return err
+		}
+
+		r.gardenBin = "/vagrant/bin/integration/out/garden"
 	}
 
-	return &GardenRunner{
-		SocketPath:    filepath.Join(tmpdir, "garden.sock"),
-		DepotPath:     depotPath,
-		RootPath:      rootPath,
-		RootFSPath:    rootFSPath,
-		SnapshotsPath: filepath.Join(tmpdir, "snapshots"),
+	r.DepotPath = filepath.Join(r.tmpdir, "containers")
+	err = r.cmd("mkdir", "-m", "0755", r.DepotPath).Run()
+	if err != nil {
+		return err
+	}
 
-		gardenBin: gardenBin,
-
-		tmpdir: tmpdir,
-	}, nil
+	r.SnapshotsPath = filepath.Join(r.tmpdir, "snapshots")
+	return r.cmd("mkdir", r.SnapshotsPath).Run()
 }
 
 func (r *GardenRunner) Start(argv ...string) error {
-	garden := exec.Command(
-		r.gardenBin,
-		append(
-			argv,
-			"--socket", r.SocketPath,
-			"--root", r.RootPath,
-			"--depot", r.DepotPath,
-			"--rootfs", r.RootFSPath,
-			"--snapshots", r.SnapshotsPath,
-			"--debug",
-		)...,
+	gardenArgs := argv
+	gardenArgs = append(
+		gardenArgs,
+		"--listenNetwork", "tcp",
+		"--listenAddr", fmt.Sprintf(":%d", r.Port),
+		"--root", r.RootPath,
+		"--depot", r.DepotPath,
+		"--rootfs", r.RootFSPath,
+		"--snapshots", r.SnapshotsPath,
+		"--debug",
+		"--disableQuotas",
 	)
+
+	garden := r.cmd(r.gardenBin, gardenArgs...)
 
 	garden.Stdout = os.Stdout
 	garden.Stderr = os.Stderr
@@ -124,28 +162,29 @@ func (r *GardenRunner) Stop() error {
 }
 
 func (r *GardenRunner) DestroyContainers() error {
-	containerDirs, err := ioutil.ReadDir(r.DepotPath)
+	lsOutput, err := r.cmd("find", r.DepotPath, "-maxdepth", "1", "-mindepth", "1", "-print0").Output() // ls does not use linebreaks
 	if err != nil {
 		return err
 	}
 
+	containerDirs := strings.Split(string(lsOutput), "\x00")
+
 	for _, dir := range containerDirs {
-		if dir.Name() == "tmp" {
+		if dir == "" {
 			continue
 		}
 
-		destroy := exec.Command(
+		err := r.cmd(
 			filepath.Join(r.RootPath, "linux", "destroy.sh"),
-			filepath.Join(r.DepotPath, dir.Name()),
-		)
+			dir,
+		).Run()
 
-		err := destroy.Run()
 		if err != nil {
 			return err
 		}
 	}
 
-	return os.RemoveAll(r.SnapshotsPath)
+	return r.cmd("rm", "-rf", r.SnapshotsPath).Run()
 }
 
 func (r *GardenRunner) TearDown() error {
@@ -154,14 +193,33 @@ func (r *GardenRunner) TearDown() error {
 		return err
 	}
 
-	return os.RemoveAll(r.tmpdir)
+	return r.cmd("rm", "-rf", r.tmpdir).Run()
+}
+
+func (r *GardenRunner) NewClient() gordon.Client {
+	return gordon.NewClient(&gordon.ConnectionInfo{
+		Network: "tcp",
+		Addr:    r.addr(),
+	})
 }
 
 func (r *GardenRunner) waitForStart(started chan<- bool, stop <-chan bool) {
 	for {
-		conn, err := net.Dial("unix", r.SocketPath)
+		var err error
+
+		if r.Remote == "" {
+			conn, dialErr := net.Dial("tcp", r.addr())
+
+			if dialErr == nil {
+				conn.Close()
+			}
+
+			err = dialErr
+		} else {
+			err = r.cmd("/vagrant/bin/integration/check_port", fmt.Sprintf("%d", r.Port)).Run()
+		}
+
 		if err == nil {
-			conn.Close()
 			started <- true
 			return
 		}
@@ -176,13 +234,24 @@ func (r *GardenRunner) waitForStart(started chan<- bool, stop <-chan bool) {
 
 func (r *GardenRunner) waitForStop(stopped chan<- bool, stop <-chan bool) {
 	for {
-		conn, err := net.Dial("unix", r.SocketPath)
+		var err error
+
+		if r.Remote == "" {
+			conn, dialErr := net.Dial("tcp", r.addr())
+
+			if dialErr == nil {
+				conn.Close()
+			}
+
+			err = dialErr
+		} else {
+			err = r.cmd("/vagrant/bin/integration/check_port", fmt.Sprintf("%d", r.Port)).Run()
+		}
+
 		if err != nil {
 			stopped <- true
 			return
 		}
-
-		conn.Close()
 
 		select {
 		case <-stop:
@@ -190,4 +259,8 @@ func (r *GardenRunner) waitForStop(stopped chan<- bool, stop <-chan bool) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func (r *GardenRunner) addr() string {
+	return fmt.Sprintf("127.0.0.1:%d", r.Port)
 }

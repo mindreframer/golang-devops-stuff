@@ -1,91 +1,76 @@
 package cgroups_manager_test
 
 import (
-	"errors"
-	"os/exec"
+	"io/ioutil"
+	"os"
+	"path"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/vito/garden/command_runner/fake_command_runner"
-	. "github.com/vito/garden/command_runner/fake_command_runner/matchers"
-	"github.com/vito/garden/linux_backend/cgroups_manager"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/cgroups_manager"
 )
 
 var _ = Describe("Container cgroups", func() {
-	var fakeRunner *fake_command_runner.FakeCommandRunner
+	var cgroupsPath string
 	var cgroupsManager *cgroups_manager.ContainerCgroupsManager
 
 	BeforeEach(func() {
-		fakeRunner = fake_command_runner.New()
+		tmpdir, err := ioutil.TempDir(os.TempDir(), "some-cgroups")
+		Expect(err).ToNot(HaveOccurred())
 
-		cgroupsManager = cgroups_manager.New(
-			"/cgroup/path",
-			"some-container-id",
-			fakeRunner,
-		)
+		cgroupsPath = tmpdir
+
+		cgroupsManager = cgroups_manager.New(cgroupsPath, "some-container-id")
 	})
 
 	Describe("setting", func() {
 		It("writes the value to the name under the subsytem", func() {
-			err := cgroupsManager.Set("memory", "memory.limit_in_bytes", "42")
+			containerMemoryCgroupsPath := path.Join(cgroupsPath, "memory", "instance-some-container-id")
+			err := os.MkdirAll(containerMemoryCgroupsPath, 0755)
 			Expect(err).ToNot(HaveOccurred())
 
-			Expect(fakeRunner).To(HaveExecutedSerially(
-				fake_command_runner.CommandSpec{
-					Path: "bash",
-					Args: []string{
-						"-c",
-						"echo '42' > /cgroup/path/memory/instance-some-container-id/memory.limit_in_bytes",
-					},
-				},
-			))
+			err = cgroupsManager.Set("memory", "memory.limit_in_bytes", "42")
+			Expect(err).ToNot(HaveOccurred())
+
+			value, err := ioutil.ReadFile(path.Join(containerMemoryCgroupsPath, "memory.limit_in_bytes"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(string(value)).To(Equal("42"))
 		})
 
-		Context("when setting the value fails", func() {
-			disaster := errors.New("oh no!")
-
+		Context("when the cgroups directory does not exist", func() {
 			BeforeEach(func() {
-				fakeRunner.WhenRunning(fake_command_runner.CommandSpec{
-					Path: "bash",
-				}, func(*exec.Cmd) error {
-					return disaster
-				})
+				err := os.RemoveAll(cgroupsPath)
+				Expect(err).ToNot(HaveOccurred())
 			})
 
 			It("returns an error", func() {
 				err := cgroupsManager.Set("memory", "memory.limit_in_bytes", "42")
-				Expect(err).To(Equal(disaster))
+				Expect(err).To(HaveOccurred())
 			})
 		})
 	})
 
 	Describe("getting", func() {
 		It("reads the current value from the name under the subsystem", func() {
-			fakeRunner.WhenRunning(
-				fake_command_runner.CommandSpec{
-					Path: "cat",
-					Args: []string{
-						"/cgroup/path/memory/instance-some-container-id/memory.limit_in_bytes",
-					},
-				},
-				func(cmd *exec.Cmd) error {
-					cmd.Stdout.Write([]byte("42\n"))
-					return nil
-				},
-			)
+			containerMemoryCgroupsPath := path.Join(cgroupsPath, "memory", "instance-some-container-id")
+
+			err := os.MkdirAll(containerMemoryCgroupsPath, 0755)
+			Expect(err).ToNot(HaveOccurred())
+
+			err = ioutil.WriteFile(path.Join(containerMemoryCgroupsPath, "memory.limit_in_bytes"), []byte("123\n"), 0644)
+			Expect(err).ToNot(HaveOccurred())
 
 			val, err := cgroupsManager.Get("memory", "memory.limit_in_bytes")
 			Expect(err).ToNot(HaveOccurred())
-
-			Expect(val).To(Equal("42"))
+			Expect(val).To(Equal("123"))
 		})
 	})
 
 	Describe("retrieving a subsystem path", func() {
 		It("returns <path>/<subsytem>/instance-<container-id>", func() {
 			Expect(cgroupsManager.SubsystemPath("memory")).To(Equal(
-				"/cgroup/path/memory/instance-some-container-id",
+				path.Join(cgroupsPath, "memory", "instance-some-container-id"),
 			))
 		})
 	})

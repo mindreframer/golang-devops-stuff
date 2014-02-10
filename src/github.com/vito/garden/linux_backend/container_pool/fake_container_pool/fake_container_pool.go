@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/vito/garden/backend"
-	"github.com/vito/garden/backend/fake_backend"
-	"github.com/vito/garden/linux_backend"
+	"github.com/pivotal-cf-experimental/garden/backend"
+	"github.com/pivotal-cf-experimental/garden/backend/fake_backend"
+	"github.com/pivotal-cf-experimental/garden/linux_backend"
 )
 
 type FakeContainerPool struct {

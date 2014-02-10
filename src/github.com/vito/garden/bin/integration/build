@@ -1,0 +1,7 @@
+#!/bin/bash -l
+
+garden=$(dirname $0)/../..
+
+cd $garden
+
+go build -o bin/integration/out/garden

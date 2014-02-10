@@ -15,11 +15,11 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/vito/garden/backend"
-	"github.com/vito/garden/backend/fake_backend"
-	"github.com/vito/garden/message_reader"
-	protocol "github.com/vito/garden/protocol"
-	"github.com/vito/garden/server"
+	"github.com/pivotal-cf-experimental/garden/backend"
+	"github.com/pivotal-cf-experimental/garden/backend/fake_backend"
+	"github.com/pivotal-cf-experimental/garden/message_reader"
+	protocol "github.com/pivotal-cf-experimental/garden/protocol"
+	"github.com/pivotal-cf-experimental/garden/server"
 )
 
 var _ = Describe("When a client connects", func() {
@@ -43,6 +43,7 @@ var _ = Describe("When a client connects", func() {
 		serverContainerGraceTime = 42 * time.Second
 
 		wardenServer = server.New(
+			"unix",
 			socketPath,
 			serverContainerGraceTime,
 			serverBackend,
@@ -51,7 +52,7 @@ var _ = Describe("When a client connects", func() {
 		err = wardenServer.Start()
 		Expect(err).ToNot(HaveOccurred())
 
-		Eventually(ErrorDialingUnix(socketPath)).ShouldNot(HaveOccurred())
+		Eventually(ErrorDialing("unix", socketPath)).ShouldNot(HaveOccurred())
 
 		serverConnection, err = net.Dial("unix", socketPath)
 		Expect(err).ToNot(HaveOccurred())

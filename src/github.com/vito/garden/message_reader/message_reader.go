@@ -8,7 +8,7 @@ import (
 
 	"code.google.com/p/gogoprotobuf/proto"
 
-	protocol "github.com/vito/garden/protocol"
+	protocol "github.com/pivotal-cf-experimental/garden/protocol"
 )
 
 type WardenError struct {

@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/vito/garden/command_runner/fake_command_runner"
+	"github.com/pivotal-cf-experimental/garden/command_runner/fake_command_runner"
 )
 
 func HaveSignalled(spec fake_command_runner.CommandSpec, signal os.Signal) *HaveSignalledMatcher {

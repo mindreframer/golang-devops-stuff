@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/vito/garden/command_runner/fake_command_runner"
+	"github.com/pivotal-cf-experimental/garden/command_runner/fake_command_runner"
 )
 
 func prettySpecs(specs []fake_command_runner.CommandSpec) string {

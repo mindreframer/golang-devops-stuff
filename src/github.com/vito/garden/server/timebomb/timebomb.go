@@ -3,7 +3,7 @@ package timebomb
 import (
 	"time"
 
-	"github.com/vito/garden/drain"
+	"github.com/pivotal-cf-experimental/garden/drain"
 )
 
 type TimeBomb struct {

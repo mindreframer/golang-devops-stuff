@@ -3,7 +3,7 @@ package fake_network_pool
 import (
 	"net"
 
-	"github.com/vito/garden/linux_backend/network"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/network"
 )
 
 type FakeNetworkPool struct {

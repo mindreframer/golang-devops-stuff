@@ -12,14 +12,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/vito/garden/backend"
-	"github.com/vito/garden/command_runner"
-	"github.com/vito/garden/linux_backend"
-	"github.com/vito/garden/linux_backend/bandwidth_manager"
-	"github.com/vito/garden/linux_backend/cgroups_manager"
-	"github.com/vito/garden/linux_backend/network_pool"
-	"github.com/vito/garden/linux_backend/quota_manager"
-	"github.com/vito/garden/linux_backend/uid_pool"
+	"github.com/pivotal-cf-experimental/garden/backend"
+	"github.com/pivotal-cf-experimental/garden/command_runner"
+	"github.com/pivotal-cf-experimental/garden/linux_backend"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/bandwidth_manager"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/cgroups_manager"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/network_pool"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/quota_manager"
+	"github.com/pivotal-cf-experimental/garden/linux_backend/uid_pool"
 )
 
 type LinuxContainerPool struct {
@@ -78,7 +78,6 @@ func (p *LinuxContainerPool) Setup() error {
 			"CONTAINER_DEPOT_PATH=" + p.depotPath,
 			"CONTAINER_DEPOT_MOUNT_POINT_PATH=" + p.quotaManager.MountPoint(),
 			fmt.Sprintf("DISK_QUOTA_ENABLED=%v", p.quotaManager.IsEnabled()),
-
 			"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
 		},
 	}
@@ -153,7 +152,7 @@ func (p *LinuxContainerPool) Create(spec backend.ContainerSpec) (linux_backend.C
 
 	containerPath := path.Join(p.depotPath, id)
 
-	cgroupsManager := cgroups_manager.New("/tmp/warden/cgroup", id, p.runner)
+	cgroupsManager := cgroups_manager.New("/tmp/warden/cgroup", id)
 
 	bandwidthManager := bandwidth_manager.New(containerPath, id, p.runner)
 
@@ -246,7 +245,7 @@ func (p *LinuxContainerPool) Restore(snapshot io.Reader) (linux_backend.Containe
 
 	containerPath := path.Join(p.depotPath, id)
 
-	cgroupsManager := cgroups_manager.New("/tmp/warden/cgroup", id, p.runner)
+	cgroupsManager := cgroups_manager.New("/tmp/warden/cgroup", id)
 
 	bandwidthManager := bandwidth_manager.New(containerPath, id, p.runner)
 
