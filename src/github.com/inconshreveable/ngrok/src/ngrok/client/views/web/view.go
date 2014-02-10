@@ -2,7 +2,7 @@
 package web
 
 import (
-	"github.com/garyburd/go-websocket/websocket"
+	"github.com/gorilla/websocket"
 	"net/http"
 	"ngrok/client/assets"
 	"ngrok/client/mvc"
@@ -35,7 +35,7 @@ func NewWebView(ctl mvc.Controller, addr string) *WebView {
 
 	// handle web socket connections
 	http.HandleFunc("/_ws", func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Upgrade(w, r.Header, nil, 1024, 1024)
+		conn, err := websocket.Upgrade(w, r, nil, 1024, 1024)
 
 		if err != nil {
 			http.Error(w, "Failed websocket upgrade", 400)
@@ -46,7 +46,7 @@ func NewWebView(ctl mvc.Controller, addr string) *WebView {
 		msgs := wv.wsMessages.Reg()
 		defer wv.wsMessages.UnReg(msgs)
 		for m := range msgs {
-			err := conn.WriteMessage(websocket.OpText, m.([]byte))
+			err := conn.WriteMessage(websocket.TextMessage, m.([]byte))
 			if err != nil {
 				// connection is closed
 				break
@@ -56,7 +56,7 @@ func NewWebView(ctl mvc.Controller, addr string) *WebView {
 
 	// serve static assets
 	http.HandleFunc("/static/", func(w http.ResponseWriter, r *http.Request) {
-		buf, err := assets.ReadAsset(path.Join("assets", "client", r.URL.Path[1:]))
+		buf, err := assets.Asset(path.Join("assets", "client", r.URL.Path[1:]))
 		if err != nil {
 			wv.Warn("Error serving static file: %s", err.Error())
 			http.NotFound(w, r)
