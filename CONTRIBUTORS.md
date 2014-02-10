@@ -4,3 +4,4 @@ The following people have contributed to this project:
 * Brian Ketelsen - bketelsen@gmail.com
 * Miek Gieben - miek@miek.nl
 * Sean Carey - sean@densone.com
+* Michael Crosby - michael@crosbymichael.com

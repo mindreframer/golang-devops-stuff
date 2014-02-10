@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Copyright (c) 2013 The SkyDNS Authors. All rights reserved.
 // Use of this source code is governed by The MIT License (MIT) that can be
 // found in the LICENSE file.
 
@@ -19,6 +19,12 @@ import (
 	"time"
 )
 
+// keep global port counter that increments with 10 for each
+// new call to newTestServer. The dns server is started on port 'port'
+// the http server is started on 'port+1'.
+var Port = 9490
+var StrPort = "9490" // string equivalent of Port
+
 /* TODO: Tests
    Test Cluster
    Test TTL expiration
@@ -26,7 +32,7 @@ import (
 */
 
 func TestAddService(t *testing.T) {
-	s := newTestServer("", 9500, 9501, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -40,7 +46,6 @@ func TestAddService(t *testing.T) {
 	}
 
 	b, err := json.Marshal(m)
-
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +61,7 @@ func TestAddService(t *testing.T) {
 }
 
 func TestAddServiceDuplicate(t *testing.T) {
-	s := newTestServer("", 9510, 9511, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -94,7 +99,7 @@ func TestAddServiceDuplicate(t *testing.T) {
 }
 
 func TestRemoveService(t *testing.T) {
-	s := newTestServer("", 9520, 9521, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -121,7 +126,7 @@ func TestRemoveService(t *testing.T) {
 }
 
 func TestRemoveUnknownService(t *testing.T) {
-	s := newTestServer("", 9530, 9531, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -134,21 +139,19 @@ func TestRemoveUnknownService(t *testing.T) {
 		Port:        9000,
 		TTL:         4,
 	}
-
 	s.registry.Add(m)
 
 	req, _ := http.NewRequest("DELETE", "/skydns/services/54321", nil)
 	resp := httptest.NewRecorder()
 
 	s.router.ServeHTTP(resp, req)
-
 	if resp.Code != http.StatusNotFound || s.registry.Len() != 1 {
 		t.Fatal("API should return 404 when removing unknown service")
 	}
 }
 
 func TestUpdateTTL(t *testing.T) {
-	s := newTestServer("", 9540, 9541, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -186,7 +189,7 @@ func TestUpdateTTL(t *testing.T) {
 }
 
 func TestUpdateTTLUnknownService(t *testing.T) {
-	s := newTestServer("", 9560, 9561, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -217,7 +220,7 @@ func TestUpdateTTLUnknownService(t *testing.T) {
 }
 
 func TestGetService(t *testing.T) {
-	s := newTestServer("", 9570, 9571, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -259,7 +262,7 @@ func TestGetService(t *testing.T) {
 }
 
 func TestGetEnvironments(t *testing.T) {
-	s := newTestServer("", 8500, 8501, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	for _, m := range services {
@@ -282,11 +285,10 @@ func TestGetEnvironments(t *testing.T) {
 	if !bytes.Equal(resp.Body.Bytes(), []byte(expected)) {
 		t.Fatal("Expected ", expected, " got %s", string(resp.Body.Bytes()))
 	}
-
 }
 
 func TestGetRegions(t *testing.T) {
-	s := newTestServer("", 8600, 8601, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	for _, m := range services {
@@ -309,11 +311,10 @@ func TestGetRegions(t *testing.T) {
 	if !bytes.Equal(resp.Body.Bytes(), []byte(expected)) {
 		t.Fatal("Expected ", expected, " got %s", string(resp.Body.Bytes()))
 	}
-
 }
 
 func TestAuthenticationFailure(t *testing.T) {
-	s := newTestServer("", 9610, 9611, "supersecretpassword")
+	s := newTestServer("", "supersecretpassword", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -343,7 +344,7 @@ func TestAuthenticationFailure(t *testing.T) {
 
 func TestAuthenticationSuccess(t *testing.T) {
 	secret := "myimportantsecret"
-	s := newTestServer("", 9620, 9621, secret)
+	s := newTestServer("", secret, "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -373,7 +374,7 @@ func TestAuthenticationSuccess(t *testing.T) {
 }
 
 func TestHostFailure(t *testing.T) {
-	s := newTestServer("", 9630, 9631, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -399,7 +400,7 @@ func TestHostFailure(t *testing.T) {
 }
 
 func TestCallback(t *testing.T) {
-	s := newTestServer("", 9640, 9641, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -449,7 +450,7 @@ func TestCallback(t *testing.T) {
 }
 
 func TestCallbackFailure(t *testing.T) {
-	s := newTestServer("", 9650, 9651, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	m := msg.Service{
@@ -672,7 +673,7 @@ var serviceTestArray []servicesTest = []servicesTest{
 }
 
 func TestGetServicesWithQueries(t *testing.T) {
-	s := newTestServer("", 9590, 9591, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	for _, m := range services {
@@ -700,19 +701,17 @@ func TestGetServicesWithQueries(t *testing.T) {
 }
 
 func TestDNS(t *testing.T) {
-	s := newTestServer("", 9580, 9581, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	for _, m := range services {
 		s.registry.Add(m)
 	}
-
 	c := new(dns.Client)
-
 	for _, tc := range dnsTestCases {
 		m := new(dns.Msg)
 		m.SetQuestion(tc.Question, dns.TypeSRV)
-		resp, _, err := c.Exchange(m, "localhost:9580")
+		resp, _, err := c.Exchange(m, "localhost:"+StrPort)
 
 		if err != nil {
 			t.Fatal(err)
@@ -759,38 +758,61 @@ func TestDNS(t *testing.T) {
 }
 
 func TestDNSARecords(t *testing.T) {
-	s := newTestServer("", 9600, 9601, "")
+	s := newTestServer("", "", "")
 	defer s.Stop()
 
 	c := new(dns.Client)
-
 	m := new(dns.Msg)
 	m.SetQuestion("skydns.local.", dns.TypeA)
-	resp, _, err := c.Exchange(m, "localhost:9600")
-
+	resp, _, err := c.Exchange(m, "localhost:"+StrPort)
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	if len(resp.Answer) != 1 {
 		t.Fatal("Answer expected to have 2 A records but has", len(resp.Answer))
 	}
 }
 
-func newTestServer(leader string, dnsPort int, httpPort int, secret string) *Server {
+func TestDNSForward(t *testing.T) {
+	s := newTestServer("", "", "8.8.8.8:53")
+	defer s.Stop()
+
+	c := new(dns.Client)
+	m := new(dns.Msg)
+	m.SetQuestion("www.example.com.", dns.TypeA)
+	resp, _, err := c.Exchange(m, "localhost:"+StrPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Answer) == 0 || resp.Rcode != dns.RcodeSuccess {
+		t.Fatal("Answer expected to have A records or rcode not equal to RcodeSuccess")
+	}
+	// TCP
+	c.Net = "tcp"
+	resp, _, err = c.Exchange(m, "localhost:"+StrPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Answer) == 0 || resp.Rcode != dns.RcodeSuccess {
+		t.Fatal("Answer expected to have A records or rcode not equal to RcodeSuccess")
+	}
+	// TODO(miek): DNSSEC DO query
+}
+
+func newTestServer(leader string, secret, nameserver string) *Server {
 	members := make([]string, 0)
 
 	p, _ := ioutil.TempDir("", "skydns-test-")
 	if err := os.MkdirAll(p, 0644); err != nil {
 		panic(err.Error())
 	}
-
 	if leader != "" {
 		members = append(members, leader)
 	}
 
-	server := NewServer(members, "skydns.local", net.JoinHostPort("127.0.0.1", strconv.Itoa(dnsPort)), net.JoinHostPort("127.0.0.1", strconv.Itoa(httpPort)), p, 1*time.Second, 1*time.Second, secret)
+	Port += 10
+	StrPort = strconv.Itoa(Port)
+	server := NewServer(members, "skydns.local", net.JoinHostPort("127.0.0.1", StrPort), net.JoinHostPort("127.0.0.1", strconv.Itoa(Port+1)), p, 1*time.Second, 1*time.Second, secret, []string{nameserver})
 	server.Start()
-
 	return server
 }

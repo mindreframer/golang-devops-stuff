@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Erik St. Martin, Brian Ketelsen. All rights reserved.
+// Copyright (c) 2013 The SkyDNS Authors. All rights reserved.
 // Use of this source code is governed by The MIT License (MIT) that can be
 // found in the LICENSE file.
 
@@ -12,9 +12,9 @@ import (
 	"github.com/goraft/raft"
 	"github.com/gorilla/mux"
 	"github.com/miekg/dns"
-	"github.com/rcrowley/go-metrics"
 	"github.com/skynetservices/skydns/msg"
 	"github.com/skynetservices/skydns/registry"
+	"github.com/skynetservices/skydns/stats"
 	"log"
 	"math"
 	"net"
@@ -36,41 +36,17 @@ import (
    TTL cleanup thread should shutdown/start based on being elected master
 */
 
-var expiredCount metrics.Counter
-var requestCount metrics.Counter
-var addServiceCount metrics.Counter
-var updateTTLCount metrics.Counter
-var getServiceCount metrics.Counter
-var removeServiceCount metrics.Counter
-
 func init() {
 	// Register Raft Commands
 	raft.RegisterCommand(&AddServiceCommand{})
 	raft.RegisterCommand(&UpdateTTLCommand{})
 	raft.RegisterCommand(&RemoveServiceCommand{})
 	raft.RegisterCommand(&AddCallbackCommand{})
-
-	expiredCount = metrics.NewCounter()
-	metrics.Register("skydns-expired-entries", expiredCount)
-
-	requestCount = metrics.NewCounter()
-	metrics.Register("skydns-requests", requestCount)
-
-	addServiceCount = metrics.NewCounter()
-	metrics.Register("skydns-add-service-requests", addServiceCount)
-
-	updateTTLCount = metrics.NewCounter()
-	metrics.Register("skydns-update-ttl-requests", updateTTLCount)
-
-	getServiceCount = metrics.NewCounter()
-	metrics.Register("skydns-get-service-requests", getServiceCount)
-
-	removeServiceCount = metrics.NewCounter()
-	metrics.Register("skydns-remove-service-requests", removeServiceCount)
 }
 
 type Server struct {
 	members      []string // initial members to join with
+	nameservers  []string // nameservers to forward to
 	domain       string
 	dnsAddr      string
 	httpAddr     string
@@ -93,7 +69,7 @@ type Server struct {
 }
 
 // Newserver returns a new Server.
-func NewServer(members []string, domain string, dnsAddr string, httpAddr string, dataDir string, rt, wt time.Duration, secret string) (s *Server) {
+func NewServer(members []string, domain string, dnsAddr string, httpAddr string, dataDir string, rt, wt time.Duration, secret string, nameservers []string) (s *Server) {
 	s = &Server{
 		members:      members,
 		domain:       domain,
@@ -107,6 +83,7 @@ func NewServer(members []string, domain string, dnsAddr string, httpAddr string,
 		dnsHandler:   dns.NewServeMux(),
 		waiter:       new(sync.WaitGroup),
 		secret:       secret,
+		nameservers:  nameservers,
 	}
 
 	if _, err := os.Stat(s.dataDir); os.IsNotExist(err) {
@@ -117,21 +94,23 @@ func NewServer(members []string, domain string, dnsAddr string, httpAddr string,
 	// DNS
 	s.dnsHandler.Handle(".", s)
 
-	// API Routes
-	s.router.HandleFunc("/skydns/services/{uuid}", s.addServiceHTTPHandler).Methods("PUT")
-	s.router.HandleFunc("/skydns/services/{uuid}", s.getServiceHTTPHandler).Methods("GET")
-	s.router.HandleFunc("/skydns/services/{uuid}", s.removeServiceHTTPHandler).Methods("DELETE")
-	s.router.HandleFunc("/skydns/services/{uuid}", s.updateServiceHTTPHandler).Methods("PATCH")
+	authWrapper := s.authHTTPWrapper
 
-	s.router.HandleFunc("/skydns/callbacks/{uuid}", s.addCallbackHTTPHandler).Methods("PUT")
+	// API Routes
+	s.router.HandleFunc("/skydns/services/{uuid}", authWrapper(s.addServiceHTTPHandler)).Methods("PUT")
+	s.router.HandleFunc("/skydns/services/{uuid}", authWrapper(s.getServiceHTTPHandler)).Methods("GET")
+	s.router.HandleFunc("/skydns/services/{uuid}", authWrapper(s.removeServiceHTTPHandler)).Methods("DELETE")
+	s.router.HandleFunc("/skydns/services/{uuid}", authWrapper(s.updateServiceHTTPHandler)).Methods("PATCH")
+
+	s.router.HandleFunc("/skydns/callbacks/{uuid}", authWrapper(s.addCallbackHTTPHandler)).Methods("PUT")
 
 	// External API Routes
 	// /skydns/services #list all services
-	s.router.HandleFunc("/skydns/services/", s.getServicesHTTPHandler).Methods("GET")
+	s.router.HandleFunc("/skydns/services/", authWrapper(s.getServicesHTTPHandler)).Methods("GET")
 	// /skydns/regions #list all regions
-	s.router.HandleFunc("/skydns/regions/", s.getRegionsHTTPHandler).Methods("GET")
+	s.router.HandleFunc("/skydns/regions/", authWrapper(s.getRegionsHTTPHandler)).Methods("GET")
 	// /skydns/environnments #list all environments
-	s.router.HandleFunc("/skydns/environments/", s.getEnvironmentsHTTPHandler).Methods("GET")
+	s.router.HandleFunc("/skydns/environments/", authWrapper(s.getEnvironmentsHTTPHandler)).Methods("GET")
 
 	// Raft Routes
 	s.router.HandleFunc("/raft/join", s.joinHandler).Methods("POST")
@@ -148,7 +127,7 @@ func (s *Server) HTTPAddr() string { return s.httpAddr }
 // Start starts a DNS server and blocks waiting to be killed.
 func (s *Server) Start() (*sync.WaitGroup, error) {
 	var err error
-	log.Printf("Initializing Server. DNS Addr: %q, HTTP Addr: %q, Data Dir: %q", s.dnsAddr, s.httpAddr, s.dataDir)
+	log.Printf("Initializing Server. DNS Addr: %q, HTTP Addr: %q, Data Dir: %q, Forwarders: %q", s.dnsAddr, s.httpAddr, s.dataDir, s.nameservers)
 
 	// Initialize and start Raft server.
 	transporter := raft.NewHTTPTransporter("/raft")
@@ -233,12 +212,10 @@ func (s *Server) Stop() {
 // Leader returns the current leader.
 func (s *Server) Leader() string {
 	l := s.raftServer.Leader()
-
 	if l == "" {
 		// We are a single node cluster, we are the leader
 		return s.raftServer.Name()
 	}
-
 	return l
 }
 
@@ -276,7 +253,7 @@ run:
 				// probably minimal chance of this happening, this will just cause commands to fail,
 				// and new leader will take over anyway
 				for _, uuid := range expired {
-					expiredCount.Inc(1)
+					stats.ExpiredCount.Inc(1)
 					s.raftServer.Do(NewRemoveServiceCommand(uuid))
 				}
 			}
@@ -347,25 +324,33 @@ func (s *Server) joinHandler(w http.ResponseWriter, req *http.Request) {
 	}
 }
 
-// Handler for DNS requests, responsible for parsing DNS request and returning response.
+// ServeDNS is the handler for DNS requests, responsible for parsing DNS request, possibly forwarding
+// it to a real dns server and returning a response.
 func (s *Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
-	requestCount.Inc(1)
-
-	m := new(dns.Msg)
-	m.SetReply(req)
-	m.Answer = make([]dns.RR, 0, 10)
-
-	defer w.WriteMsg(m)
+	stats.RequestCount.Inc(1)
 
 	q := req.Question[0]
-
 	log.Printf("Received DNS Request for %q from %q", q.Name, w.RemoteAddr())
+
+	// If the query does not fall in our s.domain, forward it
+	if !strings.HasSuffix(q.Name, dns.Fqdn(s.domain)) {
+		s.ServeDNSForward(w, req)
+		return
+	}
+	m := new(dns.Msg)
+	m.SetReply(req)
+	m.Authoritative = true
+	m.RecursionAvailable = true
+	m.Answer = make([]dns.RR, 0, 10)
+	defer w.WriteMsg(m)
 
 	if q.Qtype == dns.TypeANY || q.Qtype == dns.TypeSRV {
 		records, extra, err := s.getSRVRecords(q)
 
 		if err != nil {
-			m.SetRcode(req, dns.RcodeServerFailure)
+			// We are authoritative for this name, but it does not exist: NXDOMAIN
+			m.SetRcode(req, dns.RcodeNameError)
+			m.Ns = s.createSOA()
 			log.Println("Error: ", err)
 			return
 		}
@@ -374,33 +359,69 @@ func (s *Server) ServeDNS(w dns.ResponseWriter, req *dns.Msg) {
 		m.Extra = append(m.Extra, extra...)
 	}
 
-	if q.Qtype == dns.TypeANY || q.Qtype == dns.TypeA {
+	if q.Qtype == dns.TypeA || q.Qtype == dns.TypeAAAA {
 		records, err := s.getARecords(q)
 
 		if err != nil {
-			m.SetRcode(req, dns.RcodeServerFailure)
+			m.SetRcode(req, dns.RcodeNameError)
+			m.Ns = s.createSOA()
 			log.Println("Error: ", err)
 			return
 		}
-
 		m.Answer = append(m.Answer, records...)
 	}
+	if len(m.Answer) == 0 { // Send back a NODATA response
+		m.Ns = s.createSOA()
+	}
+}
+
+// ServeDNSForward forwards a request to a nameservers and returns the response.
+func (s *Server) ServeDNSForward(w dns.ResponseWriter, req *dns.Msg) {
+	if len(s.nameservers) == 0 {
+		log.Printf("Error: Failure to Forward DNS Request, no servers configured %q", dns.ErrServ)
+		m := new(dns.Msg)
+		m.SetReply(req)
+		m.SetRcode(req, dns.RcodeServerFailure)
+		m.Authoritative = false     // no matter what set to false
+		m.RecursionAvailable = true // and this is still true
+		w.WriteMsg(m)
+		return
+	}
+	network := "udp"
+	if _, ok := w.RemoteAddr().(*net.TCPAddr); ok {
+		network = "tcp"
+	}
+	c := &dns.Client{Net: network, ReadTimeout: 5 * time.Second}
+
+	// Use request Id for "random" nameserver selection
+	nsid := int(req.Id) % len(s.nameservers)
+	try := 0
+Redo:
+	r, _, err := c.Exchange(req, s.nameservers[nsid])
+	if err == nil {
+		log.Printf("Forwarded DNS Request %q to %q", req.Question[0].Name, s.nameservers[nsid])
+		w.WriteMsg(r)
+		return
+	}
+	// Seen an error, this can only mean, "server not reached", try again
+	// but only if we have not exausted our nameservers
+	if try < len(s.nameservers) {
+		log.Printf("Error: Failure to Forward DNS Request %q to %q", err, s.nameservers[nsid])
+		try++
+		nsid = (nsid + 1) % len(s.nameservers)
+		goto Redo
+	}
+
+	log.Printf("Error: Failure to Forward DNS Request %q", err)
+	m := new(dns.Msg)
+	m.SetReply(req)
+	m.SetRcode(req, dns.RcodeServerFailure)
+	w.WriteMsg(m)
 }
 
 func (s *Server) getARecords(q dns.Question) (records []dns.RR, err error) {
 	var h string
 	name := strings.TrimSuffix(q.Name, ".")
-
-	// Leader should always be listed
-	if name == "leader."+s.domain || name == "master."+s.domain || name == s.domain {
-		h, _, err = net.SplitHostPort(s.Leader())
-
-		if err != nil {
-			return
-		}
-
-		records = append(records, &dns.A{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 15}, A: net.ParseIP(h)})
-	}
 
 	if name == s.domain {
 		for _, m := range s.Members() {
@@ -409,11 +430,44 @@ func (s *Server) getARecords(q dns.Question) (records []dns.RR, err error) {
 			if err != nil {
 				return
 			}
-
-			records = append(records, &dns.A{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 15}, A: net.ParseIP(h)})
+			if q.Qtype == dns.TypeA {
+				records = append(records, &dns.A{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 15}, A: net.ParseIP(h)})
+			}
 		}
 	}
+	// Leader should always be listed
+	if name == "leader."+s.domain || name == "master."+s.domain || name == s.domain {
+		h, _, err = net.SplitHostPort(s.Leader())
+		if err != nil {
+			return
+		}
+		if q.Qtype == dns.TypeA {
+			records = append(records, &dns.A{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: 15}, A: net.ParseIP(h)})
+		}
+		return
+	}
 
+	var (
+		services []msg.Service
+		key      = strings.TrimSuffix(q.Name, s.domain+".")
+	)
+
+	services, err = s.registry.Get(key)
+	if err != nil {
+		return
+	}
+
+	for _, serv := range services {
+		ip := net.ParseIP(serv.Host)
+		switch {
+		case ip == nil:
+			continue
+		case ip.To4() != nil && q.Qtype == dns.TypeA:
+			records = append(records, &dns.A{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeA, Class: dns.ClassINET, Ttl: serv.TTL}, A: ip.To4()})
+		case ip.To4() == nil && q.Qtype == dns.TypeAAAA:
+			records = append(records, &dns.AAAA{Hdr: dns.RR_Header{Name: q.Name, Rrtype: dns.TypeAAAA, Class: dns.ClassINET, Ttl: serv.TTL}, AAAA: ip.To16()})
+		}
+	}
 	return
 }
 
@@ -557,20 +611,11 @@ func (s *Server) authenticate(secret string) (err error) {
 
 // Handle API add service requests
 func (s *Server) addServiceHTTPHandler(w http.ResponseWriter, req *http.Request) {
-	addServiceCount.Inc(1)
+	stats.AddServiceCount.Inc(1)
 	vars := mux.Vars(req)
 
 	var uuid string
 	var ok bool
-	var secret string
-
-	//read the authorization header to get the secret.
-	secret = req.Header.Get("Authorization")
-
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	if uuid, ok = vars["uuid"]; !ok {
 		http.Error(w, "UUID required", http.StatusBadRequest)
@@ -610,20 +655,11 @@ func (s *Server) addServiceHTTPHandler(w http.ResponseWriter, req *http.Request)
 
 // Handle API remove service requests
 func (s *Server) removeServiceHTTPHandler(w http.ResponseWriter, req *http.Request) {
-	removeServiceCount.Inc(1)
+	stats.RemoveServiceCount.Inc(1)
 	vars := mux.Vars(req)
 
 	var uuid string
 	var ok bool
-	var secret string
-
-	//read the authorization header to get the secret.
-	secret = req.Header.Get("Authorization")
-
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	if uuid, ok = vars["uuid"]; !ok {
 		http.Error(w, "UUID required", http.StatusBadRequest)
@@ -646,20 +682,11 @@ func (s *Server) removeServiceHTTPHandler(w http.ResponseWriter, req *http.Reque
 
 // Handle API update service requests
 func (s *Server) updateServiceHTTPHandler(w http.ResponseWriter, req *http.Request) {
-	updateTTLCount.Inc(1)
+	stats.UpdateTTLCount.Inc(1)
 	vars := mux.Vars(req)
 
 	var uuid string
 	var ok bool
-	var secret string
-
-	//read the authorization header to get the secret.
-	secret = req.Header.Get("Authorization")
-
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	if uuid, ok = vars["uuid"]; !ok {
 		http.Error(w, "UUID required", http.StatusBadRequest)
@@ -687,20 +714,11 @@ func (s *Server) updateServiceHTTPHandler(w http.ResponseWriter, req *http.Reque
 
 // Handle API get service requests
 func (s *Server) getServiceHTTPHandler(w http.ResponseWriter, req *http.Request) {
-	getServiceCount.Inc(1)
+	stats.GetServiceCount.Inc(1)
 	vars := mux.Vars(req)
 
 	var uuid string
 	var ok bool
-	var secret string
-
-	//read the authorization header to get the secret.
-	secret = req.Header.Get("Authorization")
-
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	if uuid, ok = vars["uuid"]; !ok {
 		http.Error(w, "UUID required", http.StatusBadRequest)
@@ -722,7 +740,40 @@ func (s *Server) getServiceHTTPHandler(w http.ResponseWriter, req *http.Request)
 		return
 	}
 
-	var b bytes.Buffer
-	json.NewEncoder(&b).Encode(serv)
-	w.Write(b.Bytes())
+	if err := json.NewEncoder(w).Encode(serv); err != nil {
+		log.Println("Error: ", err)
+	}
+}
+
+// secrethttphandlerwrapper will wrap a standard handler
+// if the secret is specified for the server
+func (s *Server) authHTTPWrapper(handler http.HandlerFunc) http.HandlerFunc {
+	if s.secret != "" {
+		return func(w http.ResponseWriter, req *http.Request) {
+			//read the authorization header to get the secret.
+			secret := req.Header.Get("Authorization")
+
+			if err := s.authenticate(secret); err != nil {
+				http.Error(w, err.Error(), http.StatusForbidden)
+				return
+			}
+			handler(w, req)
+		}
+	}
+	return handler
+}
+
+// Return a SOA record for this SkyDNS instance
+func (s *Server) createSOA() []dns.RR {
+	dom := dns.Fqdn(s.domain)
+	soa := &dns.SOA{Hdr: dns.RR_Header{Name: dom, Rrtype: dns.TypeSOA, Class: dns.ClassINET, Ttl: 3600},
+		Ns:      "master." + dom,
+		Mbox:    "hostmaster." + dom,
+		Serial:  uint32(time.Now().Unix()),
+		Refresh: 28800,
+		Retry:   7200,
+		Expire:  604800,
+		Minttl:  3600,
+	}
+	return []dns.RR{soa}
 }

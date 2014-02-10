@@ -1,3 +1,7 @@
+// Copyright (c) 2013 The SkyDNS Authors. All rights reserved.
+// Use of this source code is governed by The MIT License (MIT) that can be
+// found in the LICENSE file.
+
 package server
 
 import (
@@ -17,13 +21,6 @@ func (s *Server) addCallbackHTTPHandler(w http.ResponseWriter, req *http.Request
 
 	var uuid string
 	var ok bool
-	var secret string
-
-	secret = req.Header.Get("Authorization")
-	if err := s.authenticate(secret); err != nil {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	if uuid, ok = vars["uuid"]; !ok {
 		http.Error(w, "UUID required", http.StatusBadRequest)
