@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -54,6 +54,7 @@ func RunServer(dry bool) {
 	m.Put("/services", authorizationRequiredHandler(serviceUpdate))
 	m.Del("/services/:name", authorizationRequiredHandler(serviceDelete))
 	m.Get("/services/:name", authorizationRequiredHandler(serviceInfo))
+	m.Get("/services/:name/plans", authorizationRequiredHandler(servicePlans))
 	m.Get("/services/:name/doc", authorizationRequiredHandler(serviceDoc))
 	m.Put("/services/:name/doc", authorizationRequiredHandler(serviceAddDoc))
 	m.Put("/services/:service/:team", authorizationRequiredHandler(grantServiceAccess))

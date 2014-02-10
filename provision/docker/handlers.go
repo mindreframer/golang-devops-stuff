@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,7 +6,6 @@ package docker
 
 import (
 	"encoding/json"
-	"github.com/globocom/docker-cluster/cluster"
 	"github.com/globocom/tsuru/api"
 	"io"
 	"io/ioutil"
@@ -14,8 +13,8 @@ import (
 )
 
 func init() {
-	api.RegisterHandler("/node/add", "POST", api.Handler(addNodeHandler))
-	api.RegisterHandler("/node/remove", "DELETE", api.Handler(removeNodeHandler))
+	api.RegisterAdminHandler("/node/add", "POST", api.Handler(addNodeHandler))
+	api.RegisterAdminHandler("/node/remove", "DELETE", api.Handler(removeNodeHandler))
 }
 
 // AddNodeHandler calls scheduler.Register registering a node into it.
@@ -24,11 +23,7 @@ func addNodeHandler(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	scheduler := getScheduler()
-	if r, ok := scheduler.(cluster.Registrable); ok {
-		return r.Register(params)
-	}
-	return nil
+	return dockerCluster().Register(params)
 }
 
 func removeNodeHandler(w http.ResponseWriter, r *http.Request) error {
@@ -36,11 +31,7 @@ func removeNodeHandler(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	scheduler := getScheduler()
-	if r, ok := scheduler.(cluster.Registrable); ok {
-		return r.Unregister(params)
-	}
-	return nil
+	return dockerCluster().Unregister(params)
 }
 
 func unmarshal(body io.ReadCloser) (map[string]string, error) {

@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -164,6 +164,11 @@ func (s *Storage) Services() *Collection {
 // ServiceInstances returns the services_instances collection from MongoDB.
 func (s *Storage) ServiceInstances() *Collection {
 	return s.Collection("service_instances")
+}
+
+// Plans returns the plans collection.
+func (s *Storage) Plans() *Collection {
+	return s.Collection("plans")
 }
 
 // Users returns the users collection from MongoDB.

@@ -1,4 +1,4 @@
-.. Copyright 2013 tsuru authors. All rights reserved.
+.. Copyright 2014 tsuru authors. All rights reserved.
    Use of this source code is governed by a BSD-style
    license that can be found in the LICENSE file.
 
@@ -20,6 +20,8 @@ Application Deployment
 * :doc:`python/django </apps/quickstart/python>`
 * :doc:`ruby/rails </apps/quickstart/ruby>`
 * :doc:`php </apps/quickstart/php>`
+* :doc:`go </apps/quickstart/go>`
+
 * :doc:`understanding deployment hooks </apps/deploy-hooks>`
 * :doc:`recovery and troubleshooting </apps/recovery>`
 
