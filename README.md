@@ -8,10 +8,7 @@ It can be used both as a command line utility and a library.
 
 ## Install
 ### Pre-compiled executables
-* [Mac OSX 64 bit](https://dl.dropboxusercontent.com/u/83217940/vegeta-darwin-amd64-1517f2d.tar.gz)
-* [Mac OSX 32 bit](https://dl.dropboxusercontent.com/u/83217940/vegeta-darwin-386-1517f2d.tar.gz)
-* [Linux 64 bit](https://dl.dropboxusercontent.com/u/83217940/vegeta-linux-amd64-1517f2d.tar.gz)
-* [Linux 32 bit](https://dl.dropboxusercontent.com/u/83217940/vegeta-linux-386-1517f2d.tar.gz)
+Get them [here](http://github.com/tsenart/vegeta/releases).
 
 ### Source
 You need go installed and `GOBIN` in your `PATH`. Once that is done, run the
@@ -55,7 +52,9 @@ Usage of attack:
   -ordering="random": Attack ordering [sequential, random]
   -output="stdout": Output file
   -rate=50: Requests per second
+  -redirects=10: Number of redirects to follow
   -targets="stdin": Targets file
+  -timeout=0: Requests timeout
 ```
 
 #### -duration
@@ -84,6 +83,10 @@ Specifies the requests per second rate to issue against
 the targets. The actual request rate can vary slightly due to things like
 garbage collection, but overall it should stay very close to the specified.
 
+#### -redirects
+Specifies the max number of redirects followed on each request. The
+default is 10.
+
 #### -targets
 Specifies the attack targets in a line separated file, defaulting to stdin.
 The format should be as follows.
@@ -94,6 +97,9 @@ HEAD http://goku:9090/path/to/success
 ...
 ```
 
+#### -timeout
+Specifies the timeout for each request. The default is 0 which disables
+timeouts.
 ### report
 ```
 $ vegeta report -h
@@ -117,13 +123,13 @@ Specifies the kind of report to be generated. It defaults to text.
 
 ##### text
 ```
-Requests      [total]               1200
-Duration      [total]               1.998307684s
-Latencies     [mean, 95, 99, max]   223.340085ms, 326.913687ms, 416.537743ms, 7.788103259s
-Bytes In      [total, mean]         3714690, 3095.57
-Bytes Out     [total, mean]         0, 0.00
-Success       [ratio]               55.42%
-Status Codes  [code:count]          0:535  200:665
+Requests      [total]                   1200
+Duration      [total]                   1.998307684s
+Latencies     [mean, 50, 95, 99, max]   223.340085ms, 240.12234ms, 326.913687ms, 416.537743ms, 7.788103259s
+Bytes In      [total, mean]             3714690, 3095.57
+Bytes Out     [total, mean]             0, 0.00
+Success       [ratio]                   55.42%
+Status Codes  [code:count]              0:535  200:665
 Error Set:
 Get http://localhost:6060: dial tcp 127.0.0.1:6060: connection refused
 Get http://localhost:6060: read tcp 127.0.0.1:6060: connection reset by peer
@@ -138,6 +144,7 @@ Get http://localhost:6060: http: can't write HTTP request on broken connection
 {
   "latencies": {
     "mean": 9093653647,
+    "50th": 2401223400,
     "95th": 12553709381,
     "99th": 12604629125,
     "max": 12604629125
@@ -215,7 +222,7 @@ Just pass a new number as the argument to change it.
 ```
 The MIT License (MIT)
 
-Copyright (c) 2013 Tomás Senart
+Copyright (c) 2013, 2014 Tomás Senart
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
