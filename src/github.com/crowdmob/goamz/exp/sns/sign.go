@@ -50,6 +50,9 @@ func sign(auth aws.Auth, method, path string, params url.Values, headers http.He
 
 func sign(auth aws.Auth, method, path string, params map[string]string, host string) {
 	params["AWSAccessKeyId"] = auth.AccessKey
+	if auth.Token() != "" {
+		params["SecurityToken"] = auth.Token()
+	}
 	params["SignatureVersion"] = "2"
 	params["SignatureMethod"] = "HmacSHA256"
 

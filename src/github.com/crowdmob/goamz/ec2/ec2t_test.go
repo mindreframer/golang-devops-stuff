@@ -397,7 +397,7 @@ func (s *ServerTests) TestInstanceFiltering(c *gocheck.C) {
 				f.Add(spec.name, spec.values...)
 			}
 		}
-		resp, err := s.ec2.Instances(t.instanceIds, f)
+		resp, err := s.ec2.DescribeInstances(t.instanceIds, f)
 		if t.err != "" {
 			c.Check(err, gocheck.ErrorMatches, t.err)
 			continue

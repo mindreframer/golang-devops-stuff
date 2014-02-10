@@ -85,7 +85,7 @@ func (s *S) TestRunInstancesExample(c *gocheck.C) {
 		UserData:              []byte("1234"),
 		KernelId:              "kernel-id",
 		RamdiskId:             "ramdisk-id",
-		AvailZone:             "zone",
+		AvailabilityZone:      "zone",
 		PlacementGroupName:    "group",
 		Monitoring:            true,
 		SubnetId:              "subnet-id",
@@ -131,7 +131,7 @@ func (s *S) TestRunInstancesExample(c *gocheck.C) {
 	c.Assert(i0.Monitoring, gocheck.Equals, "enabled")
 	c.Assert(i0.KeyName, gocheck.Equals, "example-key-name")
 	c.Assert(i0.AMILaunchIndex, gocheck.Equals, 0)
-	c.Assert(i0.VirtType, gocheck.Equals, "paravirtual")
+	c.Assert(i0.VirtualizationType, gocheck.Equals, "paravirtual")
 	c.Assert(i0.Hypervisor, gocheck.Equals, "xen")
 
 	i1 := resp.Instances[1]
@@ -141,7 +141,7 @@ func (s *S) TestRunInstancesExample(c *gocheck.C) {
 	c.Assert(i1.Monitoring, gocheck.Equals, "enabled")
 	c.Assert(i1.KeyName, gocheck.Equals, "example-key-name")
 	c.Assert(i1.AMILaunchIndex, gocheck.Equals, 1)
-	c.Assert(i1.VirtType, gocheck.Equals, "paravirtual")
+	c.Assert(i1.VirtualizationType, gocheck.Equals, "paravirtual")
 	c.Assert(i1.Hypervisor, gocheck.Equals, "xen")
 
 	i2 := resp.Instances[2]
@@ -151,7 +151,7 @@ func (s *S) TestRunInstancesExample(c *gocheck.C) {
 	c.Assert(i2.Monitoring, gocheck.Equals, "enabled")
 	c.Assert(i2.KeyName, gocheck.Equals, "example-key-name")
 	c.Assert(i2.AMILaunchIndex, gocheck.Equals, 2)
-	c.Assert(i2.VirtType, gocheck.Equals, "paravirtual")
+	c.Assert(i2.VirtualizationType, gocheck.Equals, "paravirtual")
 	c.Assert(i2.Hypervisor, gocheck.Equals, "xen")
 }
 
@@ -192,7 +192,7 @@ func (s *S) TestDescribeInstancesExample1(c *gocheck.C) {
 	filter.Add("key1", "value1")
 	filter.Add("key2", "value2", "value3")
 
-	resp, err := s.ec2.Instances([]string{"i-1", "i-2"}, nil)
+	resp, err := s.ec2.DescribeInstances([]string{"i-1", "i-2"}, nil)
 
 	req := testServer.WaitRequest()
 	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"DescribeInstances"})
@@ -214,7 +214,7 @@ func (s *S) TestDescribeInstancesExample1(c *gocheck.C) {
 	c.Assert(r0i.InstanceId, gocheck.Equals, "i-c5cd56af")
 	c.Assert(r0i.PrivateDNSName, gocheck.Equals, "domU-12-31-39-10-56-34.compute-1.internal")
 	c.Assert(r0i.DNSName, gocheck.Equals, "ec2-174-129-165-232.compute-1.amazonaws.com")
-	c.Assert(r0i.AvailZone, gocheck.Equals, "us-east-1b")
+	c.Assert(r0i.AvailabilityZone, gocheck.Equals, "us-east-1b")
 	c.Assert(r0i.IPAddress, gocheck.Equals, "174.129.165.232")
 	c.Assert(r0i.PrivateIPAddress, gocheck.Equals, "10.198.85.190")
 }
@@ -226,7 +226,7 @@ func (s *S) TestDescribeInstancesExample2(c *gocheck.C) {
 	filter.Add("key1", "value1")
 	filter.Add("key2", "value2", "value3")
 
-	resp, err := s.ec2.Instances([]string{"i-1", "i-2"}, filter)
+	resp, err := s.ec2.DescribeInstances([]string{"i-1", "i-2"}, filter)
 
 	req := testServer.WaitRequest()
 	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"DescribeInstances"})
@@ -254,6 +254,150 @@ func (s *S) TestDescribeInstancesExample2(c *gocheck.C) {
 	c.Assert(r0t0.Value, gocheck.Equals, "")
 	c.Assert(r0t1.Key, gocheck.Equals, "stack")
 	c.Assert(r0t1.Value, gocheck.Equals, "Production")
+}
+
+func (s *S) TestDescribeAddressesPublicIPExample(c *gocheck.C) {
+	testServer.Response(200, nil, DescribeAddressesExample)
+
+	filter := ec2.NewFilter()
+	filter.Add("key1", "value1")
+	filter.Add("key2", "value2", "value3")
+
+	resp, err := s.ec2.DescribeAddresses([]string{"192.0.2.1", "198.51.100.2", "203.0.113.41"}, []string{}, nil)
+
+	req := testServer.WaitRequest()
+	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"DescribeAddresses"})
+	c.Assert(req.Form["PublicIp.1"], gocheck.DeepEquals, []string{"192.0.2.1"})
+	c.Assert(req.Form["PublicIp.2"], gocheck.DeepEquals, []string{"198.51.100.2"})
+	c.Assert(req.Form["PublicIp.3"], gocheck.DeepEquals, []string{"203.0.113.41"})
+
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.RequestId, gocheck.Equals, "59dbff89-35bd-4eac-99ed-be587EXAMPLE")
+	c.Assert(resp.Addresses, gocheck.HasLen, 3)
+
+	r0 := resp.Addresses[0]
+	c.Assert(r0.PublicIp, gocheck.Equals, "192.0.2.1")
+	c.Assert(r0.Domain, gocheck.Equals, "standard")
+	c.Assert(r0.InstanceId, gocheck.Equals, "i-f15ebb98")
+
+	r0i := resp.Addresses[1]
+	c.Assert(r0i.PublicIp, gocheck.Equals, "198.51.100.2")
+	c.Assert(r0i.Domain, gocheck.Equals, "standard")
+	c.Assert(r0i.InstanceId, gocheck.Equals, "")
+
+	r0ii := resp.Addresses[2]
+	c.Assert(r0ii.PublicIp, gocheck.Equals, "203.0.113.41")
+	c.Assert(r0ii.Domain, gocheck.Equals, "vpc")
+	c.Assert(r0ii.InstanceId, gocheck.Equals, "i-64600030")
+	c.Assert(r0ii.AssociationId, gocheck.Equals, "eipassoc-f0229899")
+	c.Assert(r0ii.AllocationId, gocheck.Equals, "eipalloc-08229861")
+	c.Assert(r0ii.NetworkInterfaceOwnerId, gocheck.Equals, "053230519467")
+	c.Assert(r0ii.NetworkInterfaceId, gocheck.Equals, "eni-ef229886")
+	c.Assert(r0ii.PrivateIpAddress, gocheck.Equals, "10.0.0.228")
+}
+
+func (s *S) TestDescribeAddressesAllocationIDExample(c *gocheck.C) {
+	testServer.Response(200, nil, DescribeAddressesAllocationIdExample)
+
+	filter := ec2.NewFilter()
+	filter.Add("key1", "value1")
+	filter.Add("key2", "value2", "value3")
+
+	resp, err := s.ec2.DescribeAddresses([]string{}, []string{"eipalloc-08229861", "eipalloc-08364752"}, nil)
+
+	req := testServer.WaitRequest()
+	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"DescribeAddresses"})
+	c.Assert(req.Form["AllocationId.1"], gocheck.DeepEquals, []string{"eipalloc-08229861"})
+	c.Assert(req.Form["AllocationId.2"], gocheck.DeepEquals, []string{"eipalloc-08364752"})
+
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.RequestId, gocheck.Equals, "59dbff89-35bd-4eac-99ed-be587EXAMPLE")
+	c.Assert(resp.Addresses, gocheck.HasLen, 2)
+
+	r0 := resp.Addresses[0]
+	c.Assert(r0.PublicIp, gocheck.Equals, "203.0.113.41")
+	c.Assert(r0.AllocationId, gocheck.Equals, "eipalloc-08229861")
+	c.Assert(r0.Domain, gocheck.Equals, "vpc")
+	c.Assert(r0.InstanceId, gocheck.Equals, "i-64600030")
+	c.Assert(r0.AssociationId, gocheck.Equals, "eipassoc-f0229899")
+	c.Assert(r0.NetworkInterfaceId, gocheck.Equals, "eni-ef229886")
+	c.Assert(r0.NetworkInterfaceOwnerId, gocheck.Equals, "053230519467")
+	c.Assert(r0.PrivateIpAddress, gocheck.Equals, "10.0.0.228")
+
+	r1 := resp.Addresses[1]
+	c.Assert(r1.PublicIp, gocheck.Equals, "146.54.2.230")
+	c.Assert(r1.AllocationId, gocheck.Equals, "eipalloc-08364752")
+	c.Assert(r1.Domain, gocheck.Equals, "vpc")
+	c.Assert(r1.InstanceId, gocheck.Equals, "i-64693456")
+	c.Assert(r1.AssociationId, gocheck.Equals, "eipassoc-f0348693")
+	c.Assert(r1.NetworkInterfaceId, gocheck.Equals, "eni-da764039")
+	c.Assert(r1.NetworkInterfaceOwnerId, gocheck.Equals, "053230519467")
+	c.Assert(r1.PrivateIpAddress, gocheck.Equals, "10.0.0.102")
+}
+
+func (s *S) TestAllocateAddressExample(c *gocheck.C) {
+	testServer.Response(200, nil, AllocateAddressExample)
+
+	resp, err := s.ec2.AllocateAddress("vpc")
+
+	req := testServer.WaitRequest()
+	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"AllocateAddress"})
+	c.Assert(req.Form["Domain"], gocheck.DeepEquals, []string{"vpc"})
+
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.RequestId, gocheck.Equals, "59dbff89-35bd-4eac-99ed-be587EXAMPLE")
+	c.Assert(resp.PublicIp, gocheck.Equals, "198.51.100.1")
+	c.Assert(resp.Domain, gocheck.Equals, "vpc")
+	c.Assert(resp.AllocationId, gocheck.Equals, "eipalloc-5723d13e")
+}
+
+func (s *S) TestReleaseAddressExample(c *gocheck.C) {
+	testServer.Response(200, nil, ReleaseAddressExample)
+
+	resp, err := s.ec2.ReleaseAddress("192.0.2.1", "")
+
+	req := testServer.WaitRequest()
+	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"ReleaseAddress"})
+	c.Assert(req.Form["PublicIp"], gocheck.DeepEquals, []string{"192.0.2.1"})
+
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.RequestId, gocheck.Equals, "59dbff89-35bd-4eac-99ed-be587EXAMPLE")
+	c.Assert(resp.Return, gocheck.Equals, true)
+}
+
+func (s *S) TestAssociateAddressExample(c *gocheck.C) {
+	testServer.Response(200, nil, AssociateAddressExample)
+
+	options := ec2.AssociateAddressOptions{
+		PublicIp:   "192.0.2.1",
+		InstanceId: "i-2ea64347",
+	}
+
+	resp, err := s.ec2.AssociateAddress(&options)
+
+	req := testServer.WaitRequest()
+	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"AssociateAddress"})
+	c.Assert(req.Form["PublicIp"], gocheck.DeepEquals, []string{"192.0.2.1"})
+	c.Assert(req.Form["InstanceId"], gocheck.DeepEquals, []string{"i-2ea64347"})
+
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.RequestId, gocheck.Equals, "59dbff89-35bd-4eac-99ed-be587EXAMPLE")
+	c.Assert(resp.Return, gocheck.Equals, true)
+	c.Assert(resp.AssociationId, gocheck.Equals, "eipassoc-fc5ca095")
+}
+
+func (s *S) TestDiassociateAddressExample(c *gocheck.C) {
+	testServer.Response(200, nil, DiassociateAddressExample)
+
+	resp, err := s.ec2.DiassociateAddress("192.0.2.1", "")
+
+	req := testServer.WaitRequest()
+	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"DiassociateAddress"})
+	c.Assert(req.Form["PublicIp"], gocheck.DeepEquals, []string{"192.0.2.1"})
+
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.RequestId, gocheck.Equals, "59dbff89-35bd-4eac-99ed-be587EXAMPLE")
+	c.Assert(resp.Return, gocheck.Equals, true)
 }
 
 func (s *S) TestDescribeImagesExample(c *gocheck.C) {

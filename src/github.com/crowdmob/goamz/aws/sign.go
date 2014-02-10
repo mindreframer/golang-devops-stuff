@@ -9,7 +9,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 	"time"
@@ -35,6 +35,9 @@ func (s *V2Signer) Sign(method, path string, params map[string]string) {
 	params["AWSAccessKeyId"] = s.auth.AccessKey
 	params["SignatureVersion"] = "2"
 	params["SignatureMethod"] = "HmacSHA256"
+	if s.auth.Token() != "" {
+		params["SecurityToken"] = s.auth.Token()
+	}
 
 	// AWS specifies that the parameters in a signed request must
 	// be provided in the natural order of the keys. This is distinct
@@ -63,6 +66,49 @@ const (
 	ISO8601BasicFormat      = "20060102T150405Z"
 	ISO8601BasicFormatShort = "20060102"
 )
+
+type Route53Signer struct {
+	auth Auth
+}
+
+func NewRoute53Signer(auth Auth) *Route53Signer {
+	return &Route53Signer{auth: auth}
+}
+
+// getCurrentDate fetches the date stamp from the aws servers to
+// ensure the auth headers are within 5 minutes of the server time
+func (s *Route53Signer) getCurrentDate() string {
+	response, err := http.Get("https://route53.amazonaws.com/date")
+	if err != nil {
+		fmt.Print("Unable to get date from amazon: ", err)
+		return ""
+	}
+
+	response.Body.Close()
+	return response.Header.Get("Date")
+}
+
+// Creates the authorize signature based on the date stamp and secret key
+func (s *Route53Signer) getHeaderAuthorize(message string) string {
+	hmacSha256 := hmac.New(sha256.New, []byte(s.auth.SecretKey))
+	hmacSha256.Write([]byte(message))
+	cryptedString := hmacSha256.Sum(nil)
+
+	return base64.StdEncoding.EncodeToString(cryptedString)
+}
+
+// Adds all the required headers for AWS Route53 API to the request
+// including the authorization
+func (s *Route53Signer) Sign(req *http.Request) {
+	date := s.getCurrentDate()
+	authHeader := fmt.Sprintf("AWS3-HTTPS AWSAccessKeyId=%s,Algorithm=%s,Signature=%s",
+		s.auth.AccessKey, "HmacSHA256", s.getHeaderAuthorize(date))
+
+	req.Header.Set("Host", req.Host)
+	req.Header.Set("X-Amzn-Authorization", authHeader)
+	req.Header.Set("X-Amz-Date", date)
+	req.Header.Set("Content-Type", "application/xml")
+}
 
 /*
 The V4Signer encapsulates all of the functionality to sign a request with the AWS
@@ -166,16 +212,16 @@ func (s *V4Signer) canonicalRequest(req *http.Request) string {
 }
 
 func (s *V4Signer) canonicalURI(u *url.URL) string {
-	path := u.RequestURI()
+	canonicalPath := u.RequestURI()
 	if u.RawQuery != "" {
-		path = path[:len(path)-len(u.RawQuery)-1]
+		canonicalPath = canonicalPath[:len(canonicalPath)-len(u.RawQuery)-1]
 	}
-	slash := strings.HasSuffix(path, "/")
-	path = filepath.Clean(path)
-	if path != "/" && slash {
-		path += "/"
+	slash := strings.HasSuffix(canonicalPath, "/")
+	canonicalPath = path.Clean(canonicalPath)
+	if canonicalPath != "/" && slash {
+		canonicalPath += "/"
 	}
-	return path
+	return canonicalPath
 }
 
 func (s *V4Signer) canonicalQueryString(u *url.URL) string {

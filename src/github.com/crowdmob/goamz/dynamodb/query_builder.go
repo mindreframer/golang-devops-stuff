@@ -195,8 +195,10 @@ func (q *Query) AddExpected(attributes []Attribute) {
 		if a.Exists != "" {
 			value["Exists"] = a.Exists
 		}
-		//UGH!!  (I miss the query operator)
-		value["Value"] = msi{a.Type: map[bool]interface{}{true: a.SetValues, false: a.Value}[a.SetType()]}
+		// If set Exists to false, we must remove Value
+		if value["Exists"] != "false" {
+			value["Value"] = msi{a.Type: map[bool]interface{}{true: a.SetValues, false: a.Value}[a.SetType()]}
+		}
 		expected[a.Name] = value
 	}
 	q.buffer["Expected"] = expected
@@ -212,7 +214,11 @@ func attributeList(attributes []Attribute) msi {
 }
 
 func (q *Query) addTable(t *Table) {
-	q.buffer["TableName"] = t.Name
+	q.addTableByName(t.Name)
+}
+
+func (q *Query) addTableByName(tableName string) {
+	q.buffer["TableName"] = tableName
 }
 
 func (q *Query) String() string {

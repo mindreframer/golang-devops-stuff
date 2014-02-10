@@ -23,8 +23,8 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 func (s *S) TestCreateLoadBalancer(c *gocheck.C) {
 	testServer.PrepareResponse(200, nil, CreateLoadBalancer)
 	createLB := &elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a", "us-east-1b"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a", "us-east-1b"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -90,8 +90,8 @@ func (s *S) TestCreateLoadBalancerWithSubnetsAndMoreListeners(c *gocheck.C) {
 func (s *S) TestCreateLoadBalancerWithWrongParamsCombination(c *gocheck.C) {
 	testServer.PrepareResponse(400, nil, CreateLoadBalancerBadRequest)
 	createLB := &elb.CreateLoadBalancer{
-		Name:       "testlb",
-		AvailZones: []string{"us-east-1a", "us-east-1b"},
+		Name:              "testlb",
+		AvailabilityZones: []string{"us-east-1a", "us-east-1b"},
 		Listeners: []elb.Listener{
 			{
 				InstancePort:     80,
@@ -189,7 +189,7 @@ func (s *S) TestDescribeLoadBalancers(c *gocheck.C) {
 	expected := &elb.DescribeLoadBalancerResp{
 		[]elb.LoadBalancerDescription{
 			{
-				AvailZones:                []string{"us-east-1a"},
+				AvailabilityZones:         []string{"us-east-1a"},
 				BackendServerDescriptions: []elb.BackendServerDescriptions(nil),
 				CanonicalHostedZoneName:   "testlb-2087227216.us-east-1.elb.amazonaws.com",
 				CanonicalHostedZoneNameId: "Z3DZXE0Q79N41H",

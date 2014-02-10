@@ -22,6 +22,7 @@ import (
 	//"net/http/httputil"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,10 +31,14 @@ type MTurk struct {
 	URL *url.URL
 }
 
-func New(auth aws.Auth) *MTurk {
+func New(auth aws.Auth, sandbox bool) *MTurk {
 	mt := &MTurk{Auth: auth}
 	var err error
-	mt.URL, err = url.Parse("http://mechanicalturk.amazonaws.com/")
+	if sandbox {
+		mt.URL, err = url.Parse("https://mechanicalturk.sandbox.amazonaws.com/")
+	} else {
+		mt.URL, err = url.Parse("https://mechanicalturk.amazonaws.com/")
+	}
 	if err != nil {
 		panic(err.Error())
 	}
@@ -94,6 +99,20 @@ type ExternalQuestion struct {
 	FrameHeight int
 }
 
+// Holds the html content of the HTMLQuestion.
+type HTMLContent struct {
+	Content string `xml:",innerxml"`
+}
+
+// Data structure holding the contents of an "html"
+// question. http://goo.gl/hQn5An
+type HTMLQuestion struct {
+	XMLName     xml.Name `xml:"http://mechanicalturk.amazonaws.com/AWSMechanicalTurkDataSchemas/2011-11-11/HTMLQuestion.xsd HTMLQuestion"`
+	HTMLContent HTMLContent
+
+	FrameHeight int
+}
+
 // The data structure representing a "human interface task" (HIT)
 // Currently only supports "external" questions, because Go
 // structs don't support union types.  http://goo.gl/NP8Aa
@@ -115,7 +134,7 @@ type HIT struct {
 	MaxAssignments               uint
 	AutoApprovalDelayInSeconds   uint
 	QualificationRequirement     QualificationRequirement
-	Question                     ExternalQuestion
+	Question                     interface{}
 	RequesterAnnotation          string
 	NumberofSimilarHITs          uint
 	HITReviewStatus              string
@@ -147,12 +166,72 @@ type CreateHITResponse struct {
 	HIT       HIT
 }
 
+type Assignment struct {
+	AssignmentId     string
+	WorkerId         string
+	HITId            string
+	AssignmentStatus string
+	AutoApprovalTime string
+	AcceptTime       string
+	SubmitTime       string
+	ApprovalTime     string
+	Answer           string
+}
+
+func (a Assignment) Answers() (answers map[string]string) {
+	answers = make(map[string]string)
+
+	decoder := xml.NewDecoder(strings.NewReader(a.Answer))
+
+	for {
+		token, _ := decoder.Token()
+		if token == nil {
+			break
+		}
+		switch startElement := token.(type) {
+		case xml.StartElement:
+			if startElement.Name.Local == "Answer" {
+				var answer struct {
+					QuestionIdentifier string
+					FreeText           string
+				}
+
+				decoder.DecodeElement(&answer, &startElement)
+				answers[answer.QuestionIdentifier] = answer.FreeText
+			}
+		}
+	}
+
+	return
+}
+
+type GetAssignmentsForHITResponse struct {
+	RequestId                  string `xml:"OperationRequest>RequestId"`
+	GetAssignmentsForHITResult struct {
+		Request         xmlRequest
+		NumResults      uint
+		TotalNumResults uint
+		PageNumber      uint
+		Assignment      Assignment
+	}
+}
+
 // Corresponds to the "CreateHIT" operation of the Mechanical Turk
 // API.  http://goo.gl/cDBRc Currently only supports "external"
 // questions (see "HIT" struct above).  If "keywords", "maxAssignments",
 // "qualificationRequirement" or "requesterAnnotation" are the zero
 // value for their types, they will not be included in the request.
-func (mt *MTurk) CreateHIT(title, description string, question ExternalQuestion, reward Price, assignmentDurationInSeconds, lifetimeInSeconds uint, keywords string, maxAssignments uint, qualificationRequirement *QualificationRequirement, requesterAnnotation string) (h *HIT, err error) {
+func (mt *MTurk) CreateHIT(
+	title, description string,
+	question interface{},
+	reward Price,
+	assignmentDurationInSeconds,
+	lifetimeInSeconds uint,
+	keywords string,
+	maxAssignments uint,
+	qualificationRequirement *QualificationRequirement,
+	requesterAnnotation string) (h *HIT, err error) {
+
 	params := make(map[string]string)
 	params["Title"] = title
 	params["Description"] = description
@@ -213,6 +292,18 @@ func (mt *MTurk) CreateHITOfType(hitTypeId string, q ExternalQuestion, lifetimeI
 	err = mt.query(params, "CreateHIT", &response)
 	if err == nil {
 		h = &response.HIT
+	}
+	return
+}
+
+// Get the Assignments for a HIT.
+func (mt *MTurk) GetAssignmentsForHIT(hitId string) (r *Assignment, err error) {
+	params := make(map[string]string)
+	params["HITId"] = hitId
+	var response GetAssignmentsForHITResponse
+	err = mt.query(params, "GetAssignmentsForHIT", &response)
+	if err == nil {
+		r = &response.GetAssignmentsForHITResult.Assignment
 	}
 	return
 }

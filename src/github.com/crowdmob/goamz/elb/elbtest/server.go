@@ -286,7 +286,7 @@ func (srv *Server) makeLoadBalancerDescription(value url.Values) *elb.LoadBalanc
 	}
 	sourceSecGroup := srv.makeSourceSecGroup(value)
 	lbDesc := elb.LoadBalancerDescription{
-		AvailZones:           srv.getParameters("AvailabilityZones.member.", value),
+		AvailabilityZones:    srv.getParameters("AvailabilityZones.member.", value),
 		Subnets:              srv.getParameters("Subnets.member.", value),
 		SecurityGroups:       srv.getParameters("SecurityGroups.member.", value),
 		HealthCheck:          srv.makeHealthCheck(value),

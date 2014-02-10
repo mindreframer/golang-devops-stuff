@@ -422,7 +422,7 @@ func (srv *Server) runInstances(w http.ResponseWriter, req *http.Request, reqId 
 	//    InstanceType              ?
 	//    KernelId                  ?
 	//    RamdiskId                 ?
-	//    AvailZone                 ?
+	//    AvailabilityZone          ?
 	//    GroupName                 tag
 	//    Monitoring                ignore?
 	//    SubnetId                  ?
@@ -650,7 +650,7 @@ func (srv *Server) describeInstances(w http.ResponseWriter, req *http.Request, r
 
 	f := newFilter(req.Form)
 
-	var resp ec2.InstancesResp
+	var resp ec2.DescribeInstancesResp
 	resp.RequestId = reqId
 	for _, r := range srv.reservations {
 		var instances []ec2.Instance

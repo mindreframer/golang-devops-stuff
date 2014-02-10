@@ -25,12 +25,12 @@ func New(auth aws.Auth, region aws.Region) *ELB {
 //
 // See http://goo.gl/4QFKi for more details.
 type CreateLoadBalancer struct {
-	Name           string
-	AvailZones     []string
-	Listeners      []Listener
-	Scheme         string
-	SecurityGroups []string
-	Subnets        []string
+	Name              string
+	AvailabilityZones []string
+	Listeners         []Listener
+	Scheme            string
+	SecurityGroups    []string
+	Subnets           []string
 }
 
 // Listener to configure in Load Balancer.
@@ -131,7 +131,7 @@ type DescribeLoadBalancerResp struct {
 }
 
 type LoadBalancerDescription struct {
-	AvailZones                []string                    `xml:"AvailabilityZones>member"`
+	AvailabilityZones         []string                    `xml:"AvailabilityZones>member"`
 	BackendServerDescriptions []BackendServerDescriptions `xml:"BackendServerDescriptions>member"`
 	CanonicalHostedZoneName   string                      `xml:"CanonicalHostedZoneName"`
 	CanonicalHostedZoneNameId string                      `xml:"CanonicalHostedZoneNameID"`
@@ -360,7 +360,7 @@ func makeCreateParams(createLB *CreateLoadBalancer) map[string]string {
 		params[fmt.Sprintf(key, index, "Protocol")] = l.Protocol
 		params[fmt.Sprintf(key, index, "LoadBalancerPort")] = strconv.Itoa(l.LoadBalancerPort)
 	}
-	for i, az := range createLB.AvailZones {
+	for i, az := range createLB.AvailabilityZones {
 		key := fmt.Sprintf("AvailabilityZones.member.%d", i+1)
 		params[key] = az
 	}
