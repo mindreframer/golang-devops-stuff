@@ -1,4 +1,19 @@
-# 0.6.0 (1/13/2013)
+# 0.7.1 (2/8/2014)
+
+* Corrected a bug in fs\_usage percentage: was not accounting for the reserved
+  space root gets.
+
+# 0.7.0 (2/7/2014)
+
+* Graphite support! Via a bridge called `gollector-graphite`, emits stats to
+  graphite collected from gollector.
+
+# 0.6.1 (2/2/2014)
+
+* Fix a bug where json\_poll would keep sockets open forever, causing FD
+  leakage.
+
+# 0.6.0 (1/13/2014)
 
 Three new plugins:
 
@@ -6,7 +21,7 @@ Three new plugins:
 * `process_count`: count the number of command lines that are running
 * `process_mem_usage`: count the amount of memory a given command line is using across all processes
 
-# 0.5.0 (1/4/2013)
+# 0.5.0 (1/4/2014)
 
 Many Refactors. All Bugs & Features (below) are covered in the wiki. This is
 the first release with the name "Gollector", as well.

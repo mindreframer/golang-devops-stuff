@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"logger"
+	"math"
 	"os"
 	"regexp"
 	"strings"
@@ -94,15 +95,24 @@ func GetMetric(params interface{}, log *logger.Logger) interface{} {
 
 	log.Log("debug", fmt.Sprintf("blocks size on %s: %v", string(*path), stat.f_bsize))
 	log.Log("debug", fmt.Sprintf("blocks total on %s: %v", string(*path), stat.f_blocks))
-	log.Log("debug", fmt.Sprintf("blocks free on %s: %v", string(*path), stat.f_bfree))
+	log.Log("debug", fmt.Sprintf("blocks free on %s: %v", string(*path), stat.f_bavail))
 
 	defer C.free(unsafe.Pointer(stat))
 	defer C.free(unsafe.Pointer(path))
 
+	blocks := uint64(stat.f_blocks)
+	avail := uint64(stat.f_bavail)
+
+	free := float64(0)
+
+	if avail != 0 {
+		free = math.Ceil(((float64(blocks) - float64(avail)) / float64(blocks)) * 100)
+	}
+
 	return [4]interface{}{
-		(uint64(((float64(stat.f_blocks - stat.f_bfree)) / float64(stat.f_blocks)) * 100)),
-		(uint64(stat.f_bfree) * uint64(stat.f_bsize)),
-		(uint64(stat.f_blocks) * uint64(stat.f_bsize)),
+		free,
+		avail * uint64(stat.f_frsize),
+		blocks * uint64(stat.f_frsize),
 		readonly == 1,
 	}
 }
