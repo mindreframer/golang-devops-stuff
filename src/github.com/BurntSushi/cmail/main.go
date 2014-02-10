@@ -120,9 +120,10 @@ func main() {
 		outlines = append(outlines, []string{"\n", "\n", msg + "\n"}...)
 	}
 	killed := false // set if user interrupted
+	ticker := time.Tick(period)
 	for {
 		select {
-		case <-time.After(period):
+		case <-ticker:
 			if !flagNoPeriod {
 				send <- outlines
 				outlines = outlines[:0]

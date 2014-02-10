@@ -39,7 +39,7 @@ when EOF is reached. If no command is given, data is read from stdin.
     The amount of time to wait between sending data gathered from
     stdin. Value should be a duration defined by Go's
     time.ParseDuration. e.g., '300ms', '1.5h', '1m'.
--sendmail (default: msmtp)
+-sendmail (default: sendmail)
     The command to use to send mail. The email content and headers
     will be sent to stdin.
 -subj (default: [cmail] )
