@@ -48,7 +48,7 @@ of the event handlers, so we can see them being run:
 $ serf agent -log-level=debug -event-handler=handler.sh
 ==> Starting Serf agent...
 ==> Serf agent running!
-    Node name: ''
+    Node name: 'foobar'
     Bind addr: '0.0.0.0:7946'
      RPC addr: '127.0.0.1:7373'
 
@@ -80,6 +80,8 @@ There are currently four types of events that Serf invokes:
 * `member-leave` - One or more members have gracefully left the cluster.
 * `member-failed` - One or more members have failed, meaning that they
   didn't properly respond to ping requests.
+* `member-update` - One or members have updated, likely to update the
+  associated tags
 * `user` - A custom user event, covered later in this guide.
 
 ## Multiple Event Scripts, Filtering, And More

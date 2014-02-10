@@ -104,15 +104,15 @@ func TestDecodeConfig(t *testing.T) {
 		t.Fatalf("bad: %#v", config)
 	}
 
-	if config.Protocol != DefaultConfig.Protocol {
+	if config.Protocol != 0 {
 		t.Fatalf("bad: %#v", config)
 	}
 
-	if config.SkipLeaveOnInt != DefaultConfig.SkipLeaveOnInt {
+	if config.SkipLeaveOnInt != DefaultConfig().SkipLeaveOnInt {
 		t.Fatalf("bad: %#v", config)
 	}
 
-	if config.LeaveOnTerm != DefaultConfig.LeaveOnTerm {
+	if config.LeaveOnTerm != DefaultConfig().LeaveOnTerm {
 		t.Fatalf("bad: %#v", config)
 	}
 
@@ -174,6 +174,31 @@ func TestDecodeConfig(t *testing.T) {
 	if config.SkipLeaveOnInt != true {
 		t.Fatalf("bad: %#v", config)
 	}
+
+	// tags
+	input = `{"tags": {"foo": "bar", "role": "test"}}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.Tags["foo"] != "bar" {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.Tags["role"] != "test" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Discover
+	input = `{"discover": "foobar"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.Discover != "foobar" {
+		t.Fatalf("bad: %#v", config)
+	}
 }
 
 func TestMergeConfig(t *testing.T) {
@@ -194,6 +219,7 @@ func TestMergeConfig(t *testing.T) {
 		StartJoin:      []string{"bar"},
 		LeaveOnTerm:    true,
 		SkipLeaveOnInt: true,
+		Discover:       "tubez",
 	}
 
 	c := MergeConfig(a, b)
@@ -224,6 +250,10 @@ func TestMergeConfig(t *testing.T) {
 
 	if !c.SkipLeaveOnInt {
 		t.Fatalf("bad: %#v", c.SkipLeaveOnInt)
+	}
+
+	if c.Discover != "tubez" {
+		t.Fatalf("Bad: %v", c.Discover)
 	}
 
 	expected := []string{"foo", "bar"}

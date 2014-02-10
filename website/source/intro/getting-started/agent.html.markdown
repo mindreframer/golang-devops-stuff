@@ -28,7 +28,7 @@ For simplicity, we'll run a single Serf agent right now:
 $ serf agent
 ==> Starting Serf agent...
 ==> Serf agent running!
-    Node name: ''
+    Node name: 'foobar'
     Bind addr: '0.0.0.0:7946'
      RPC addr: '127.0.0.1:7373'
 
@@ -48,7 +48,7 @@ This member is yourself.
 
 If you run `serf members` in another terminal, you can see the members of
 the Serf cluster. You should only see one member (yourself). We'll cover
-joining cluters in the next section.
+joining clusters in the next section.
 
 ```
 $ serf members

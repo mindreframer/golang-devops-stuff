@@ -56,6 +56,11 @@ The options below are all specified on the command-line.
   in alphabetical order. For more information on the format of the configuration
   files, see the "Configuration Files" section below.
 
+* `-discover` - Discover provides a cluster name, which is used with mDNS to
+  automatically discover Serf peers. When provided, Serf will respond to mDNS
+  queries and periodically poll for new peers. This feature requires a network
+  environment that supports multicasting.
+
 * `-encrypt` - Specifies the secret key to use for encryption of Serf
   network traffic. This key must be 16-bytes that are base64 encoded. The
   easiest way to create an encryption key is to use `serf keygen`. All
@@ -101,12 +106,14 @@ The options below are all specified on the command-line.
   version. This should be set only when [upgrading](/docs/upgrading.html).
   You can view the protocol versions supported by Serf by running `serf -v`.
 
-* `-role` - The role of this node, if any. By default this is blank or empty.
+* `-role` - **Deprecated** The role of this node, if any. By default this is blank or empty.
   The role can be used by events in order to differentiate members of a
   cluster that may have different functional roles. For example, if you're
   using Serf in a load balancer and web server setup, you only want to add
   web servers to the load balancers, so the role of web servers may be "web"
-  and the event handlers can filter on that.
+  and the event handlers can filter on that. This has been deprecated as of
+  version 0.4. Instead "-tag role=foo" should be used. The role can be changed
+  during a config reload
 
 * `-rpc-addr` - The address that Serf will bind to for the agent's  RPC server.
   By default this is "127.0.0.1:7373", allowing only loopback connections.
@@ -119,6 +126,13 @@ The options below are all specified on the command-line.
   re-join the cluster, and avoid replay of events it has already seen. The path
   must be read/writable by Serf, and the directory must allow Serf to create
   other files, so that it can periodically compact the snapshot file.
+
+* `-tag` - The tag flag is used to associate a new key/value pair with the
+  agent. The tags are gossiped and can be used to provide additional information
+  such as roles, ports, and configuration values to other nodes. Multiple tags
+  can be specified per agent. There is a byte size limit for the maximum number
+  of tags, but in practice dozens of tags may be used. Tags can be changed during
+  a config reload.
 
 ## Configuration Files
 
@@ -134,7 +148,10 @@ at a single JSON object with configuration within it.
 
 <pre class="prettyprint lang-json">
 {
-  "role": "load-balancer",
+  "tags": {
+        "role": "load-balancer",
+        "datacenter": "east"
+  },
 
   "event_handlers": [
     "handle.sh",
@@ -147,11 +164,16 @@ at a single JSON object with configuration within it.
 
 * `node_name` - Equivalent to the `-node` command-line flag.
 
-* `role` - Equivalent to the `-role` command-line flag.
+* `role` - **Deprecated**. Equivalent to the `-role` command-line flag.
+
+* `tags` - This is a dictionary of tag values. It is the same as specifying
+  the `tag` command-line flag once per tag.
 
 * `bind` - Equivalent to the `-bind` command-line flag.
 
 * `advertise` - Equivalent to the `-advertise` command-line flag.
+
+* `discover` - Equivalent to the `-discover` command-line flag.
 
 * `encrypt_key` - Equivalent to the `-encrypt` command-line flag.
 

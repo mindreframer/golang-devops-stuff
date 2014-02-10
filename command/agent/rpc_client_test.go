@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"github.com/hashicorp/serf/client"
 	"github.com/hashicorp/serf/serf"
 	"github.com/hashicorp/serf/testutil"
 	"io"
@@ -14,7 +15,7 @@ import (
 
 // testRPCClient returns an RPCClient connected to an RPC server that
 // serves only this connection.
-func testRPCClient(t *testing.T) (*RPCClient, *Agent, *AgentIPC) {
+func testRPCClient(t *testing.T) (*client.RPCClient, *Agent, *AgentIPC) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("err: %s", err)
@@ -26,7 +27,7 @@ func testRPCClient(t *testing.T) (*RPCClient, *Agent, *AgentIPC) {
 	agent := testAgent(mult)
 	ipc := NewAgentIPC(agent, l, mult, lw)
 
-	rpcClient, err := NewRPCClient(l.Addr().String())
+	rpcClient, err := client.NewRPCClient(l.Addr().String())
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -363,7 +364,7 @@ func TestRPCClientStream_Member(t *testing.T) {
 		if _, ok := member["Port"].(uint64); !ok {
 			t.Fatalf("bad event: %#v", e)
 		}
-		if _, ok := member["Role"].(string); !ok {
+		if _, ok := member["Tags"].(map[interface{}]interface{}); !ok {
 			t.Fatalf("bad event: %#v", e)
 		}
 		if stat, _ := member["Status"].(string); stat != "alive" {

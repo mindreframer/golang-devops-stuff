@@ -1,19 +1,69 @@
-## 0.3.1 (Unreleased)
+## 0.4.2 (Unreleased)
+
+IMPROVEMENTS:
+
+ * Upstart receipe logs output thanks to @breerly [GH-128]
+
+ * `members` can filter on any tag thanks to @hmrm [GH-124]
+
+BUG FIXES:
+
+ * -config-dir would cause protocol to be set to 0 if there are no
+ configuration files in the directory [GH-129]
+
+## 0.4.1 (Febuary 3, 2014)
+
+IMPROVEMENTS:
+
+ * mDNS service uses the advertise address instead of bind address
+
+## 0.4.0 (January 31, 2014)
 
 FEATURES:
 
- * `advertise` flag can be used to set a advertise address different
+ * Static `role` has been replaced with dynamic tags. Each agent can have
+ multiple key/value tags associated using `-tag`. Tags can be updated using
+ a SIGHUP and are advertised to the cluster, causing the `member-update` event
+ to be triggered. [GH-111] [GH-98]
+
+ * Serf can automatically discover peers uing mDNS when provided the `-discover`
+ flag. In network environments supporting multicast, no explicit join is needed
+ to find peers. [GH-53]
+
+ * Serf collects telemetry information and simple runtime profiling. Stats can
+ be dumped to stderr by sending a `USR1` signal to Serf. Windows users must use
+ the `BREAK` signal instead. [GH-103]
+
+ * `advertise` flag can be used to set an advertise address different
  from the bind address. Used for NAT traversal. Thanks to @benagricola [GH-93]
+
+ * `members` command now takes `-format` flag to specify either text or JSON
+ output. Fixed by @ryanuber [GH-97]
 
 IMPROVEMENTS:
 
  * User payload always appends a newline when invoking a shell script
 
+ * Severity of "Potential blocking operation" reduced to debug to prevent
+ spurious messages on slow or busy machines.
+
 BUG FIXES:
+
+ * If an agent is restarted with the same bind address but new name, it
+ will not respond to the old name, causing the old name to enter the
+ `failed` state, instead of having duplicate entries in the `alive` state.
 
  * `leave_on_interrupt` set to false when not specified, if
  any config file is provided. This flag is deprecated for
  `skip_leave_on_interrupt` instead. [GH-94]
+
+MISC:
+
+  * `-role` configuration has been deprecated in favor of `-tag role=foo`.
+  The flag is still supported but will generate warnings.
+
+  * Support for protocol version 0 (Serf 0.1) has been removed. Serf 0.4 cannot
+  join a cluster that has members running version 0.1.
 
 ## 0.3.0 (December 5, 2013)
 
