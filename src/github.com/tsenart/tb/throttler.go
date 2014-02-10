@@ -119,7 +119,7 @@ func (t *Throttler) Close() error {
 	return nil
 }
 
-func (t Throttler) fill(freq time.Duration) {
+func (t *Throttler) fill(freq time.Duration) {
 	ticker := time.NewTicker(freq)
 	defer ticker.Stop()
 
