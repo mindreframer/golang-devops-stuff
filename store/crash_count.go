@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 	"github.com/cloudfoundry/hm9000/models"
-	"github.com/cloudfoundry/hm9000/storeadapter"
+	"github.com/cloudfoundry/storeadapter"
 	"strconv"
 	"time"
 )
@@ -24,7 +24,7 @@ func (store *RealStore) SaveCrashCounts(crashCounts ...models.CrashCount) error 
 		}
 	}
 
-	err := store.adapter.Set(nodes)
+	err := store.adapter.SetMulti(nodes)
 
 	store.logger.Debug(fmt.Sprintf("Save Duration Crash Counts"), map[string]string{
 		"Number of Items": fmt.Sprintf("%d", len(crashCounts)),

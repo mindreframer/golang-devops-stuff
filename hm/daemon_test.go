@@ -3,21 +3,21 @@ package hm_test
 import (
 	"errors"
 	. "github.com/cloudfoundry/hm9000/hm"
-	"github.com/cloudfoundry/hm9000/testhelpers/fakelocker"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
+	"github.com/cloudfoundry/storeadapter/fakestoreadapter"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"time"
 )
 
 var _ = Describe("Daemon", func() {
-	var fakeLocker *fakelocker.FakeLocker
+	var adapter *fakestoreadapter.FakeStoreAdapter
 
 	BeforeEach(func() {
-		fakeLocker = fakelocker.New()
+		adapter = fakestoreadapter.New()
 	})
 
-	It("should call the function every PERIOD seconds, unless the function takes *longer* than PERIOD, and it should timeout when the function takes *too* long", func() {
+	It("should call the function every PERIOD seconds, unless the function takes *longer* than PERIOD, and it should timeout when the function takes *too* long", func(done Done) {
 		callTimes := []float64{}
 		startTime := time.Now()
 		i := 0
@@ -26,7 +26,7 @@ var _ = Describe("Daemon", func() {
 			i += 1
 			time.Sleep(time.Duration(i*10) * time.Millisecond)
 			return nil
-		}, 20*time.Millisecond, 35*time.Millisecond, fakelogger.NewFakeLogger(), fakeLocker)
+		}, 20*time.Millisecond, 35*time.Millisecond, fakelogger.NewFakeLogger(), adapter)
 
 		Ω(callTimes).Should(HaveLen(4))
 
@@ -35,26 +35,27 @@ var _ = Describe("Daemon", func() {
 		Ω(callTimes[2]).Should(BeNumerically("~", 0.04, 0.005), "The third call happens after PERIOD and sleeps for 30 seconds")
 		Ω(callTimes[3]).Should(BeNumerically("~", 0.07, 0.005), "The fourth call waits for function to finish and happens after 30 seconds (> PERIOD) and sleeps for 40 seconds which...")
 		Ω(err).Should(Equal(errors.New("Daemon timed out. Aborting!")), "..causes a timeout")
+		close(done)
 	})
 
 	It("acquires the lock once", func() {
 		go Daemonize(
-			"Daemon Test",
+			"ComponentName",
 			func() error { return nil },
 			20*time.Millisecond,
 			35*time.Millisecond,
 			fakelogger.NewFakeLogger(),
-			fakeLocker,
+			adapter,
 		)
 
-		Eventually(func() bool { return fakeLocker.GotAndMaintainedLock }).Should(BeTrue())
+		Eventually(func() string { return adapter.MaintainedLockName }).Should(Equal("ComponentName"))
 	})
 
 	Context("when the locker fails", func() {
 		disaster := errors.New("oh no!")
 
 		BeforeEach(func() {
-			fakeLocker.GetAndMaintainLockError = disaster
+			adapter.GetAndMaintainLockError = disaster
 		})
 
 		It("returns the error", func() {
@@ -64,7 +65,7 @@ var _ = Describe("Daemon", func() {
 				20*time.Millisecond,
 				35*time.Millisecond,
 				fakelogger.NewFakeLogger(),
-				fakeLocker,
+				adapter,
 			)
 
 			Ω(err).Should(Equal(disaster))
@@ -79,10 +80,10 @@ var _ = Describe("Daemon", func() {
 				20*time.Millisecond,
 				35*time.Millisecond,
 				fakelogger.NewFakeLogger(),
-				fakeLocker,
+				adapter,
 			)
 
-			Ω(fakeLocker.ReleasedLock).Should(BeTrue())
+			Ω(<-adapter.ReleaseLockChannel).Should(BeTrue())
 		})
 	})
 })

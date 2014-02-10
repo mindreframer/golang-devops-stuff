@@ -2,7 +2,7 @@ package store
 
 import (
 	"fmt"
-	"github.com/cloudfoundry/hm9000/storeadapter"
+	"github.com/cloudfoundry/storeadapter"
 	"regexp"
 	"strconv"
 	"strings"

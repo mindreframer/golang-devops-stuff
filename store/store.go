@@ -6,7 +6,7 @@ import (
 	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/helpers/logger"
 	"github.com/cloudfoundry/hm9000/models"
-	"github.com/cloudfoundry/hm9000/storeadapter"
+	"github.com/cloudfoundry/storeadapter"
 	"reflect"
 	"strconv"
 	"sync"
@@ -112,7 +112,7 @@ func (store *RealStore) save(stuff interface{}, root string, ttl uint64) error {
 		}
 	}
 
-	err := store.adapter.Set(nodes)
+	err := store.adapter.SetMulti(nodes)
 
 	store.logger.Debug(fmt.Sprintf("Save Duration %s", root), map[string]string{
 		"Number of Items": fmt.Sprintf("%d", arrValue.Len()),

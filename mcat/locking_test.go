@@ -79,10 +79,12 @@ var _ = Describe("Locking", func() {
 					Ω(listenerA).Should(Say("Acquired lock"))
 
 					coordinator.StoreAdapter.Delete("/hm/locks")
+
+					Ω(listenerA).Should(Say("Lost the lock"))
 					status, err := listenerA.Wait(20 * time.Second)
 
 					Ω(err).ShouldNot(HaveOccurred())
-					Ω(status).Should(Equal(17))
+					Ω(status).Should(Equal(197))
 				}
 			})
 		})
@@ -96,10 +98,12 @@ var _ = Describe("Locking", func() {
 					Ω(analyzerA).Should(Say("Acquired lock"))
 
 					coordinator.StoreAdapter.Delete("/hm/locks")
+
+					Ω(analyzerA).Should(Say("Lost the lock"))
 					status, err := analyzerA.Wait(20 * time.Second)
 
 					Ω(err).ShouldNot(HaveOccurred())
-					Ω(status).Should(Equal(17))
+					Ω(status).Should(Equal(197))
 				}
 			})
 		})

@@ -5,20 +5,20 @@ import (
 	"github.com/onsi/ginkgo/config"
 	. "github.com/onsi/gomega"
 
-	"github.com/cloudfoundry/hm9000/testhelpers/storerunner"
+	"github.com/cloudfoundry/storeadapter/storerunner/etcdstorerunner"
 	"os"
 	"os/signal"
 
 	"testing"
 )
 
-var etcdRunner *storerunner.ETCDClusterRunner
+var etcdRunner *etcdstorerunner.ETCDClusterRunner
 
 func TestStore(t *testing.T) {
 	registerSignalHandler()
 	RegisterFailHandler(Fail)
 
-	etcdRunner = storerunner.NewETCDClusterRunner(5001+config.GinkgoConfig.ParallelNode, 1)
+	etcdRunner = etcdstorerunner.NewETCDClusterRunner(5001+config.GinkgoConfig.ParallelNode, 1)
 
 	etcdRunner.Start()
 

@@ -15,10 +15,10 @@ func Analyze(l logger.Logger, conf *config.Config, poll bool) {
 	if poll {
 		l.Info("Starting Analyze Daemon...")
 
-		locker := buildLocker(l, conf, "analyzer")
+		adapter, _ := connectToStoreAdapter(l, conf)
 		err := Daemonize("Analyzer", func() error {
 			return analyze(l, conf, store)
-		}, conf.AnalyzerPollingInterval(), conf.AnalyzerTimeout(), l, locker)
+		}, conf.AnalyzerPollingInterval(), conf.AnalyzerTimeout(), l, adapter)
 
 		if err != nil {
 			l.Error("Analyze Daemon Errored", err)

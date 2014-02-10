@@ -3,7 +3,7 @@ package store
 import (
 	"encoding/json"
 	"github.com/cloudfoundry/hm9000/models"
-	"github.com/cloudfoundry/hm9000/storeadapter"
+	"github.com/cloudfoundry/storeadapter"
 	"time"
 )
 
@@ -29,7 +29,7 @@ func (store *RealStore) bumpFreshness(key string, ttl uint64, timestamp time.Tim
 		jsonTimestamp, _ = json.Marshal(models.FreshnessTimestamp{Timestamp: timestamp.Unix()})
 	}
 
-	return store.adapter.Set([]storeadapter.StoreNode{
+	return store.adapter.SetMulti([]storeadapter.StoreNode{
 		{
 			Key:   key,
 			Value: jsonTimestamp,

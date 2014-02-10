@@ -1,14 +1,15 @@
 package store_test
 
 import (
-	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	. "github.com/cloudfoundry/hm9000/store"
+	"github.com/cloudfoundry/storeadapter/workerpool"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
 	"github.com/cloudfoundry/hm9000/config"
-	"github.com/cloudfoundry/hm9000/storeadapter"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
+	"github.com/cloudfoundry/storeadapter"
+	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
 )
 
 var _ = Describe("Compact", func() {
@@ -23,7 +24,7 @@ var _ = Describe("Compact", func() {
 		conf, err = config.DefaultConfig()
 		conf.StoreSchemaVersion = 17
 		Ω(err).ShouldNot(HaveOccurred())
-		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
+		storeAdapter = etcdstoreadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
 		err = storeAdapter.Connect()
 		Ω(err).ShouldNot(HaveOccurred())
 		store = NewStore(conf, storeAdapter, fakelogger.NewFakeLogger())
@@ -31,7 +32,7 @@ var _ = Describe("Compact", func() {
 
 	Describe("Deleting old schema version", func() {
 		BeforeEach(func() {
-			storeAdapter.Set([]storeadapter.StoreNode{
+			storeAdapter.SetMulti([]storeadapter.StoreNode{
 				{Key: "/hm/v3/delete/me", Value: []byte("abc")},
 				{Key: "/hm/v16/delete/me", Value: []byte("abc")},
 				{Key: "/hm/v17/leave/me/alone", Value: []byte("abc")},
@@ -101,7 +102,7 @@ var _ = Describe("Compact", func() {
 
 	Describe("Recursively deleting empty directories", func() {
 		BeforeEach(func() {
-			storeAdapter.Set([]storeadapter.StoreNode{
+			storeAdapter.SetMulti([]storeadapter.StoreNode{
 				{Key: "/hm/v17/pokemon/geodude", Value: []byte("foo")},
 				{Key: "/hm/v17/deep-pokemon/abra/kadabra/alakazam", Value: []byte{}},
 				{Key: "/hm/v17/pokemonCount", Value: []byte("151")},

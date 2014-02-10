@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func NewHttpClient(timeout time.Duration) HttpClient {
+func NewHttpClient(skipSSLVerification bool, timeout time.Duration) HttpClient {
 	dialFunc := func(network, addr string) (net.Conn, error) {
 		conn, err := net.DialTimeout(network, addr, timeout)
 		if err != nil {
@@ -20,7 +20,7 @@ func NewHttpClient(timeout time.Duration) HttpClient {
 	transport := &http.Transport{
 		Dial: dialFunc,
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: true,
+			InsecureSkipVerify: skipSSLVerification,
 		},
 	}
 

@@ -2,13 +2,14 @@ package store_test
 
 import (
 	"github.com/cloudfoundry/hm9000/config"
-	"github.com/cloudfoundry/hm9000/helpers/workerpool"
 	"github.com/cloudfoundry/hm9000/models"
 	. "github.com/cloudfoundry/hm9000/store"
-	"github.com/cloudfoundry/hm9000/storeadapter"
 	"github.com/cloudfoundry/hm9000/testhelpers/appfixture"
 	. "github.com/cloudfoundry/hm9000/testhelpers/custommatchers"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
+	"github.com/cloudfoundry/storeadapter"
+	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
+	"github.com/cloudfoundry/storeadapter/workerpool"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -30,7 +31,7 @@ var _ = Describe("Apps", func() {
 	conf, _ = config.DefaultConfig()
 
 	BeforeEach(func() {
-		storeAdapter = storeadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
+		storeAdapter = etcdstoreadapter.NewETCDStoreAdapter(etcdRunner.NodeURLS(), workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests))
 		err := storeAdapter.Connect()
 		Ω(err).ShouldNot(HaveOccurred())
 
@@ -128,7 +129,7 @@ var _ = Describe("Apps", func() {
 
 		Context("when there is an empty app directory", func() {
 			It("should ignore that app directory", func() {
-				storeAdapter.Set([]storeadapter.StoreNode{{
+				storeAdapter.SetMulti([]storeadapter.StoreNode{{
 					Key:   "/hm/v1/apps/actual/foo-bar",
 					Value: []byte("foo"),
 				}})
@@ -195,7 +196,7 @@ var _ = Describe("Apps", func() {
 
 			Context("when the app directory is empty", func() {
 				It("should return the app not found error", func() {
-					storeAdapter.Set([]storeadapter.StoreNode{{
+					storeAdapter.SetMulti([]storeadapter.StoreNode{{
 						Key:   "/hm/v1/apps/actual/foo-bar/baz",
 						Value: []byte("foo"),
 					}})

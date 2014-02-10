@@ -13,7 +13,7 @@ type Config struct {
 	HeartbeatPeriod                 uint64 `json:"heartbeat_period_in_seconds"`
 	HeartbeatTTLInHeartbeats        uint64 `json:"heartbeat_ttl_in_heartbeats"`
 	ActualFreshnessTTLInHeartbeats  uint64 `json:"actual_freshness_ttl_in_heartbeats"`
-	GracePeriodInHeartbeats         int    `json:"grace_period_in_heartbeats"`
+	GracePeriodInHeartbeats         uint64 `json:"grace_period_in_heartbeats"`
 	DesiredFreshnessTTLInHeartbeats uint64 `json:"desired_freshness_ttl_in_heartbeats"`
 
 	SenderPollingIntervalInHeartbeats   int `json:"sender_polling_interval_in_heartbeats"`
@@ -35,6 +35,7 @@ type Config struct {
 	CCAuthUser                     string `json:"cc_auth_user"`
 	CCAuthPassword                 string `json:"cc_auth_password"`
 	CCBaseURL                      string `json:"cc_base_url"`
+	SkipSSLVerification            bool   `json:"skip_cert_verify"`
 
 	StoreSchemaVersion         int      `json:"store_schema_version"`
 	StoreType                  string   `json:"store_type"`
@@ -63,6 +64,46 @@ type Config struct {
 	} `json:"nats"`
 }
 
+func defaults() Config {
+	return Config{
+		HeartbeatPeriod: 10, // TODO: convert to time.Duration
+
+		HeartbeatTTLInHeartbeats:        3,
+		ActualFreshnessTTLInHeartbeats:  3,
+		GracePeriodInHeartbeats:         3,
+		DesiredFreshnessTTLInHeartbeats: 12,
+
+		StoreMaxConcurrentRequests: 30,
+
+		SenderNatsStartSubject: "hm9000.start",
+		SenderNatsStopSubject:  "hm9000.stop",
+		SenderMessageLimit:     60, // TODO: unit
+
+		SenderPollingIntervalInHeartbeats:   1,   // why?
+		SenderTimeoutInHeartbeats:           10,  // why?
+		FetcherPollingIntervalInHeartbeats:  6,   // why?
+		FetcherTimeoutInHeartbeats:          60,  // why?
+		ShredderPollingIntervalInHeartbeats: 360, // why?
+		ShredderTimeoutInHeartbeats:         6,   // why?
+		AnalyzerPollingIntervalInHeartbeats: 1,   // why?
+		AnalyzerTimeoutInHeartbeats:         10,  // why?
+
+		NumberOfCrashesBeforeBackoffBegins: 3,
+		StartingBackoffDelayInHeartbeats:   3,  // why?
+		MaximumBackoffDelayInHeartbeats:    96, // why?
+
+		ListenerHeartbeatSyncIntervalInMilliseconds:      1000,  // TODO: convert to time.Duration
+		StoreHeartbeatCacheRefreshIntervalInMilliseconds: 20000, // TODO: convert to time.Duration
+
+		MetricsServerPort: 7879,
+
+		LogLevelString: "INFO",
+
+		ActualFreshnessKey:  "/actual-fresh",
+		DesiredFreshnessKey: "/desired-fresh",
+	}
+}
+
 func (conf *Config) HeartbeatTTL() uint64 {
 	return conf.HeartbeatTTLInHeartbeats * conf.HeartbeatPeriod
 }
@@ -72,7 +113,7 @@ func (conf *Config) ActualFreshnessTTL() uint64 {
 }
 
 func (conf *Config) GracePeriod() int {
-	return conf.GracePeriodInHeartbeats * int(conf.HeartbeatPeriod)
+	return int(conf.GracePeriodInHeartbeats * conf.HeartbeatPeriod)
 }
 
 func (conf *Config) DesiredFreshnessTTL() uint64 {
@@ -159,7 +200,7 @@ func FromFile(path string) (*Config, error) {
 }
 
 func FromJSON(JSON []byte) (*Config, error) {
-	var config Config
+	config := defaults()
 	err := json.Unmarshal(JSON, &config)
 	if err == nil {
 		return &config, nil

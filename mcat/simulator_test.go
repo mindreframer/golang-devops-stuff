@@ -5,7 +5,7 @@ import (
 	"github.com/cloudfoundry/hm9000/models"
 	"github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/testhelpers/desiredstateserver"
-	"github.com/cloudfoundry/hm9000/testhelpers/storerunner"
+	"github.com/cloudfoundry/storeadapter/storerunner"
 	"github.com/cloudfoundry/yagnats"
 	. "github.com/onsi/gomega"
 )

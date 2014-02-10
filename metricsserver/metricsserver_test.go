@@ -2,6 +2,7 @@ package metricsserver_test
 
 import (
 	"errors"
+	"github.com/cloudfoundry/gunk/timeprovider/faketimeprovider"
 	"github.com/cloudfoundry/hm9000/config"
 	. "github.com/cloudfoundry/hm9000/metricsserver"
 	"github.com/cloudfoundry/hm9000/models"
@@ -9,9 +10,8 @@ import (
 	"github.com/cloudfoundry/hm9000/testhelpers/appfixture"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakemetricsaccountant"
-	"github.com/cloudfoundry/hm9000/testhelpers/fakestoreadapter"
-	"github.com/cloudfoundry/hm9000/testhelpers/faketimeprovider"
 	"github.com/cloudfoundry/loggregatorlib/cfcomponent/instrumentation"
+	"github.com/cloudfoundry/storeadapter/fakestoreadapter"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 	"time"

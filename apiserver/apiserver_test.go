@@ -2,14 +2,14 @@ package apiserver_test
 
 import (
 	"fmt"
+	"github.com/cloudfoundry/gunk/timeprovider/faketimeprovider"
 	"github.com/cloudfoundry/hm9000/apiserver"
 	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/models"
 	storepackage "github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/testhelpers/appfixture"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
-	"github.com/cloudfoundry/hm9000/testhelpers/fakestoreadapter"
-	"github.com/cloudfoundry/hm9000/testhelpers/faketimeprovider"
+	"github.com/cloudfoundry/storeadapter/fakestoreadapter"
 	"github.com/cloudfoundry/yagnats"
 	"github.com/cloudfoundry/yagnats/fakeyagnats"
 	. "github.com/onsi/ginkgo"
