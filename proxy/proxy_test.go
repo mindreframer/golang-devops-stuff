@@ -447,6 +447,44 @@ func (s *ProxySuite) TestXFFIsAppended(c *C) {
 	<-done
 }
 
+func (s *ProxySuite) TestXRequestStartIsAppended(c *C) {
+	done := make(chan bool)
+
+	s.RegisterHandler(c, "app", func(x *httpConn) {
+		req, _ := x.ReadRequest()
+		c.Check(req.Header.Get("X-Request-Start"), Matches, "^\\d{10}\\d{3}$") // unix timestamp millis
+		done <- true
+	})
+
+	x := s.DialProxy(c)
+
+	req := x.NewRequest("GET", "/", nil)
+	req.Host = "app"
+	x.WriteRequest(req)
+
+	<-done
+}
+
+func (s *ProxySuite) TestXRequestStartIsNotOverwritten(c *C) {
+	done := make(chan bool)
+
+	s.RegisterHandler(c, "app", func(x *httpConn) {
+		req, _ := x.ReadRequest()
+		c.Check(req.Header[http.CanonicalHeaderKey("X-Request-Start")], DeepEquals, []string{"", "user-set2"})
+		done <- true
+	})
+
+	x := s.DialProxy(c)
+
+	req := x.NewRequest("GET", "/", nil)
+	req.Host = "app"
+	req.Header.Add("X-Request-Start", "") // impl cannot just check for empty string
+	req.Header.Add("X-Request-Start", "user-set2")
+	x.WriteRequest(req)
+
+	<-done
+}
+
 func (s *ProxySuite) TestWebSocketUpgrade(c *C) {
 	s.RegisterHandler(c, "ws", func(x *httpConn) {
 		req, _ := x.ReadRequest()
