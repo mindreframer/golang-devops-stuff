@@ -29,6 +29,7 @@ type IdentifyDataV2 struct {
 	DeflateLevel        int    `json:"deflate_level"`
 	Snappy              bool   `json:"snappy"`
 	SampleRate          int32  `json:"sample_rate"`
+	UserAgent           string `json:"user_agent"`
 }
 
 type ClientV2 struct {
@@ -42,8 +43,9 @@ type ClientV2 struct {
 
 	sync.Mutex
 
-	ID      int64
-	context *Context
+	ID        int64
+	context   *Context
+	UserAgent string
 
 	// original connection
 	net.Conn
@@ -72,6 +74,11 @@ type ClientV2 struct {
 
 	SampleRate           int32
 	SampleRateUpdateChan chan int32
+
+	// states for exposing to nsqadmin
+	TLS     int32
+	Snappy  int32
+	Deflate int32
 
 	// re-usable buffer for reading the 4-byte lengths off the wire
 	lenBuf   [4]byte
@@ -115,8 +122,8 @@ func NewClientV2(id int64, conn net.Conn, context *Context) *ClientV2 {
 		SampleRateUpdateChan: make(chan int32, 1),
 
 		// heartbeats are client configurable but default to 30s
-		Heartbeat:           time.NewTicker(context.nsqd.options.clientTimeout / 2),
-		HeartbeatInterval:   context.nsqd.options.clientTimeout / 2,
+		Heartbeat:           time.NewTicker(context.nsqd.options.ClientTimeout / 2),
+		HeartbeatInterval:   context.nsqd.options.ClientTimeout / 2,
 		HeartbeatUpdateChan: make(chan time.Duration, 1),
 	}
 	c.lenSlice = c.lenBuf[:]
@@ -130,6 +137,7 @@ func (c *ClientV2) String() string {
 func (c *ClientV2) Identify(data IdentifyDataV2) error {
 	c.ShortIdentifier = data.ShortId
 	c.LongIdentifier = data.LongId
+	c.UserAgent = data.UserAgent
 	err := c.SetHeartbeatInterval(data.HeartbeatInterval)
 	if err != nil {
 		return err
@@ -150,6 +158,7 @@ func (c *ClientV2) Stats() ClientStats {
 		Version:       "V2",
 		RemoteAddress: c.RemoteAddr().String(),
 		Name:          c.ShortIdentifier,
+		UserAgent:     c.UserAgent,
 		State:         atomic.LoadInt32(&c.State),
 		ReadyCount:    atomic.LoadInt64(&c.ReadyCount),
 		InFlightCount: atomic.LoadInt64(&c.InFlightCount),
@@ -157,7 +166,10 @@ func (c *ClientV2) Stats() ClientStats {
 		FinishCount:   atomic.LoadUint64(&c.FinishCount),
 		RequeueCount:  atomic.LoadUint64(&c.RequeueCount),
 		ConnectTime:   c.ConnectTime.Unix(),
-		SampleRate:    c.SampleRate,
+		SampleRate:    atomic.LoadInt32(&c.SampleRate),
+		TLS:           atomic.LoadInt32(&c.TLS) == 1,
+		Deflate:       atomic.LoadInt32(&c.Deflate) == 1,
+		Snappy:        atomic.LoadInt32(&c.Snappy) == 1,
 	}
 }
 
@@ -251,7 +263,7 @@ func (c *ClientV2) SetHeartbeatInterval(desiredInterval int) error {
 	case desiredInterval == 0:
 		// do nothing (use default)
 	case desiredInterval >= 1000 &&
-		desiredInterval <= int(c.context.nsqd.options.maxHeartbeatInterval/time.Millisecond):
+		desiredInterval <= int(c.context.nsqd.options.MaxHeartbeatInterval/time.Millisecond):
 		interval = (time.Duration(desiredInterval) * time.Millisecond)
 	default:
 		return errors.New(fmt.Sprintf("heartbeat interval (%d) is invalid", desiredInterval))
@@ -281,7 +293,7 @@ func (c *ClientV2) SetOutputBufferSize(desiredSize int) error {
 		size = 1
 	case desiredSize == 0:
 		// do nothing (use default)
-	case desiredSize >= 64 && desiredSize <= int(c.context.nsqd.options.maxOutputBufferSize):
+	case desiredSize >= 64 && desiredSize <= int(c.context.nsqd.options.MaxOutputBufferSize):
 		size = desiredSize
 	default:
 		return errors.New(fmt.Sprintf("output buffer size (%d) is invalid", desiredSize))
@@ -308,7 +320,7 @@ func (c *ClientV2) SetOutputBufferTimeout(desiredTimeout int) error {
 	case desiredTimeout == 0:
 		// do nothing (use default)
 	case desiredTimeout >= 1 &&
-		desiredTimeout <= int(c.context.nsqd.options.maxOutputBufferTimeout/time.Millisecond):
+		desiredTimeout <= int(c.context.nsqd.options.MaxOutputBufferTimeout/time.Millisecond):
 		timeout = (time.Duration(desiredTimeout) * time.Millisecond)
 	default:
 		return errors.New(fmt.Sprintf("output buffer timeout (%d) is invalid", desiredTimeout))
@@ -330,7 +342,7 @@ func (c *ClientV2) SetSampleRate(sampleRate int32) error {
 	}
 
 	if sampleRate != 0 {
-		c.SampleRate = sampleRate
+		atomic.StoreInt32(&c.SampleRate, sampleRate)
 		select {
 		case c.SampleRateUpdateChan <- sampleRate:
 		default:
@@ -354,6 +366,8 @@ func (c *ClientV2) UpgradeTLS() error {
 	c.Reader = bufio.NewReaderSize(c.tlsConn, DefaultBufferSize)
 	c.Writer = bufio.NewWriterSize(c.tlsConn, c.OutputBufferSize)
 
+	atomic.StoreInt32(&c.TLS, 1)
+
 	return nil
 }
 
@@ -372,6 +386,8 @@ func (c *ClientV2) UpgradeDeflate(level int) error {
 	c.flateWriter = fw
 	c.Writer = bufio.NewWriterSize(fw, c.OutputBufferSize)
 
+	atomic.StoreInt32(&c.Deflate, 1)
+
 	return nil
 }
 
@@ -386,6 +402,8 @@ func (c *ClientV2) UpgradeSnappy() error {
 
 	c.Reader = bufio.NewReaderSize(snappystream.NewReader(conn, snappystream.SkipVerifyChecksum), DefaultBufferSize)
 	c.Writer = bufio.NewWriterSize(snappystream.NewWriter(conn), c.OutputBufferSize)
+
+	atomic.StoreInt32(&c.Snappy, 1)
 
 	return nil
 }

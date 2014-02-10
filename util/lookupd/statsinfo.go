@@ -56,6 +56,7 @@ type TopicStats struct {
 	ChannelCount int
 	Aggregate    bool
 	Channels     []*ChannelStats
+	Paused       bool
 
 	E2eProcessingLatency *util.E2eProcessingLatencyAggregate
 	numAggregates        int
@@ -70,6 +71,9 @@ func (t *TopicStats) Add(a *TopicStats) {
 	t.MessageCount += a.MessageCount
 	if a.ChannelCount > t.ChannelCount {
 		t.ChannelCount = a.ChannelCount
+	}
+	if a.Paused {
+		t.Paused = a.Paused
 	}
 	t.numAggregates += 1
 	t.E2eProcessingLatency = t.E2eProcessingLatency.Add(a.E2eProcessingLatency, t.numAggregates)
@@ -151,6 +155,7 @@ func (c *ChannelStats) Host() string {
 type ClientInfo struct {
 	HostAddress       string
 	ClientVersion     string
+	ClientUserAgent   string
 	ClientIdentifier  string
 	ConnectedDuration time.Duration
 	InFlightCount     int
@@ -158,6 +163,18 @@ type ClientInfo struct {
 	FinishCount       int64
 	RequeueCount      int64
 	MessageCount      int64
+	SampleRate        int32
+	TLS               bool
+	Deflate           bool
+	Snappy            bool
+}
+
+func (c *ClientInfo) HasUserAgent() bool {
+	return c.ClientUserAgent != ""
+}
+
+func (c *ClientInfo) HasSampleRate() bool {
+	return c.SampleRate > 0
 }
 
 type ChannelStatsList []*ChannelStats

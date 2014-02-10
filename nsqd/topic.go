@@ -26,6 +26,9 @@ type Topic struct {
 	waitGroup         util.WaitGroupWrapper
 	exitFlag          int32
 
+	paused    int32
+	pauseChan chan bool
+
 	options *nsqdOptions
 	context *Context
 }
@@ -33,20 +36,21 @@ type Topic struct {
 // Topic constructor
 func NewTopic(topicName string, context *Context) *Topic {
 	diskQueue := NewDiskQueue(topicName,
-		context.nsqd.options.dataPath,
-		context.nsqd.options.maxBytesPerFile,
-		context.nsqd.options.syncEvery,
-		context.nsqd.options.syncTimeout)
+		context.nsqd.options.DataPath,
+		context.nsqd.options.MaxBytesPerFile,
+		context.nsqd.options.SyncEvery,
+		context.nsqd.options.SyncTimeout)
 
 	t := &Topic{
 		name:              topicName,
 		channelMap:        make(map[string]*Channel),
 		backend:           diskQueue,
 		incomingMsgChan:   make(chan *nsq.Message, 1),
-		memoryMsgChan:     make(chan *nsq.Message, context.nsqd.options.memQueueSize),
+		memoryMsgChan:     make(chan *nsq.Message, context.nsqd.options.MemQueueSize),
 		exitChan:          make(chan int),
 		channelUpdateChan: make(chan int),
 		context:           context,
+		pauseChan:         make(chan bool),
 	}
 
 	t.waitGroup.Wrap(func() { t.router() })
@@ -199,7 +203,16 @@ func (t *Topic) messagePump() {
 				chans = append(chans, c)
 			}
 			t.RUnlock()
-			if len(chans) == 0 {
+			if len(chans) == 0 || t.IsPaused() {
+				memoryMsgChan = nil
+				backendChan = nil
+			} else {
+				memoryMsgChan = t.memoryMsgChan
+				backendChan = t.backend.ReadChan()
+			}
+			continue
+		case pause := <-t.pauseChan:
+			if pause || len(chans) == 0 {
 				memoryMsgChan = nil
 				backendChan = nil
 			} else {
@@ -357,10 +370,42 @@ func (t *Topic) AggregateChannelE2eProcessingLatency() *util.Quantile {
 		}
 		if latencyStream == nil {
 			latencyStream = util.NewQuantile(
-				t.context.nsqd.options.e2eProcessingLatencyWindowTime,
-				t.context.nsqd.options.e2eProcessingLatencyPercentiles)
+				t.context.nsqd.options.E2EProcessingLatencyWindowTime,
+				t.context.nsqd.options.E2EProcessingLatencyPercentiles)
 		}
 		latencyStream.Merge(c.e2eProcessingLatencyStream)
 	}
 	return latencyStream
+}
+
+func (t *Topic) Pause() error {
+	return t.doPause(true)
+}
+
+func (t *Topic) UnPause() error {
+	return t.doPause(false)
+}
+
+func (t *Topic) doPause(pause bool) error {
+	if pause {
+		atomic.StoreInt32(&t.paused, 1)
+	} else {
+		atomic.StoreInt32(&t.paused, 0)
+	}
+
+	select {
+	case t.pauseChan <- pause:
+		t.context.nsqd.Lock()
+		defer t.context.nsqd.Unlock()
+		// pro-actively persist metadata so in case of process failure
+		// nsqd won't suddenly (un)pause a topic
+		return t.context.nsqd.PersistMetadata()
+	case <-t.exitChan:
+	}
+
+	return nil
+}
+
+func (t *Topic) IsPaused() bool {
+	return atomic.LoadInt32(&t.paused) == 1
 }

@@ -1,3 +1,7 @@
+package templates
+
+func init() {
+	registerTemplate("topic.html", `
 {{template "header.html" .}}
 {{$g := .GraphOptions}}
 {{$gts := .GlobalTopicStats}}
@@ -28,6 +32,19 @@
             <input type="hidden" name="topic" value="{{.Topic}}">
             <button class="btn btn-medium btn-danger" type="submit">Delete Topic</button>
         </form>
+    </div>
+    <div class="span2">
+        {{if .GlobalTopicStats.Paused}}
+        <form action="/unpause_topic" method="POST">
+            <input type="hidden" name="topic" value="{{.Topic}}">
+            <button class="btn btn-medium btn-success" type="submit">UnPause Topic</button>
+        </form>
+        {{else}}
+        <form action="/pause_topic" method="POST">
+            <input type="hidden" name="topic" value="{{.Topic}}">
+            <button class="btn btn-medium btn-inverse" type="submit">Pause Topic</button>
+        </form>
+        {{end}}
     </div>
 </div>
 
@@ -69,6 +86,7 @@
                 <input type="hidden" name="topic" value="{{.TopicName}}">
                 <input type="hidden" name="node" value="{{.HostAddress}}">
                 <button class="btn btn-mini btn-link red" type="submit">✘</button> <a href="/node/{{.HostAddress}}">{{.HostAddress}}</a>
+                {{if $t.Paused}} <span class="label label-important">paused</span>{{end}}
             </form>
         </td>
         <td>
@@ -223,3 +241,5 @@
 
 {{template "js.html" .}}
 {{template "footer.html" .}}
+`)
+}

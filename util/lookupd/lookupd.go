@@ -352,6 +352,7 @@ func GetNSQDStats(nsqdHTTPAddrs []string, selectedTopic string) ([]*TopicStats, 
 					MemoryDepth:  depth - backendDepth,
 					MessageCount: t.Get("message_count").MustInt64(),
 					ChannelCount: len(channels),
+					Paused:       t.Get("paused").MustBool(),
 
 					E2eProcessingLatency: e2eProcessingLatency,
 				}
@@ -410,8 +411,9 @@ func GetNSQDStats(nsqdHTTPAddrs []string, selectedTopic string) ([]*TopicStats, 
 						connectedDuration := time.Now().Sub(connected).Seconds()
 
 						clientInfo := &ClientInfo{
-							HostAddress:   addr,
-							ClientVersion: client.Get("version").MustString(),
+							HostAddress:     addr,
+							ClientVersion:   client.Get("version").MustString(),
+							ClientUserAgent: client.Get("user_agent").MustString(),
 							ClientIdentifier: fmt.Sprintf("%s:%s", client.Get("name").MustString(),
 								strings.Split(client.Get("remote_address").MustString(), ":")[1]),
 							ConnectedDuration: time.Duration(int64(connectedDuration)) * time.Second, // truncate to second
@@ -420,6 +422,10 @@ func GetNSQDStats(nsqdHTTPAddrs []string, selectedTopic string) ([]*TopicStats, 
 							FinishCount:       client.Get("finish_count").MustInt64(),
 							RequeueCount:      client.Get("requeue_count").MustInt64(),
 							MessageCount:      client.Get("message_count").MustInt64(),
+							SampleRate:        int32(client.Get("sample_rate").MustInt()),
+							TLS:               client.Get("tls").MustBool(),
+							Deflate:           client.Get("deflate").MustBool(),
+							Snappy:            client.Get("snappy").MustBool(),
 						}
 						hostChannelStats.Clients = append(hostChannelStats.Clients, clientInfo)
 						channelStats.Clients = append(channelStats.Clients, clientInfo)

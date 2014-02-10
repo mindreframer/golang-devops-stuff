@@ -42,6 +42,10 @@ func (s *httpServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		s.emptyTopicHandler(w, req)
 	case "/delete_topic":
 		s.deleteTopicHandler(w, req)
+	case "/pause_topic":
+		s.pauseTopicHandler(w, req)
+	case "/unpause_topic":
+		s.pauseTopicHandler(w, req)
 	case "/empty_channel":
 		s.emptyChannelHandler(w, req)
 	case "/delete_channel":
@@ -118,14 +122,14 @@ func (s *httpServer) putHandler(w http.ResponseWriter, req *http.Request) {
 	// TODO: one day I'd really like to just error on chunked requests
 	// to be able to fail "too big" requests before we even read
 
-	if req.ContentLength > s.context.nsqd.options.maxMessageSize {
+	if req.ContentLength > s.context.nsqd.options.MaxMessageSize {
 		util.ApiResponse(w, 500, "MSG_TOO_BIG", nil)
 		return
 	}
 
 	// add 1 so that it's greater than our max when we test for it
 	// (LimitReader returns a "fake" EOF)
-	readMax := s.context.nsqd.options.maxMessageSize + 1
+	readMax := s.context.nsqd.options.MaxMessageSize + 1
 	body, err := ioutil.ReadAll(io.LimitReader(req.Body, readMax))
 	if err != nil {
 		util.ApiResponse(w, 500, "INVALID_REQUEST", nil)
@@ -170,7 +174,7 @@ func (s *httpServer) mputHandler(w http.ResponseWriter, req *http.Request) {
 	// TODO: one day I'd really like to just error on chunked requests
 	// to be able to fail "too big" requests before we even read
 
-	if req.ContentLength > s.context.nsqd.options.maxBodySize {
+	if req.ContentLength > s.context.nsqd.options.MaxBodySize {
 		util.ApiResponse(w, 500, "BODY_TOO_BIG", nil)
 		return
 	}
@@ -185,7 +189,7 @@ func (s *httpServer) mputHandler(w http.ResponseWriter, req *http.Request) {
 	if ok {
 		tmp := make([]byte, 4)
 		msgs, err = readMPUB(req.Body, tmp, s.context.nsqd.idChan,
-			s.context.nsqd.options.maxMessageSize)
+			s.context.nsqd.options.MaxMessageSize)
 		if err != nil {
 			util.ApiResponse(w, 500, err.(*util.FatalClientErr).Code[2:], nil)
 			return
@@ -193,7 +197,7 @@ func (s *httpServer) mputHandler(w http.ResponseWriter, req *http.Request) {
 	} else {
 		// add 1 so that it's greater than our max when we test for it
 		// (LimitReader returns a "fake" EOF)
-		readMax := s.context.nsqd.options.maxBodySize + 1
+		readMax := s.context.nsqd.options.MaxBodySize + 1
 		rdr := bufio.NewReader(io.LimitReader(req.Body, readMax))
 		total := 0
 		for !exit {
@@ -221,7 +225,7 @@ func (s *httpServer) mputHandler(w http.ResponseWriter, req *http.Request) {
 				continue
 			}
 
-			if int64(len(block)) > s.context.nsqd.options.maxMessageSize {
+			if int64(len(block)) > s.context.nsqd.options.MaxMessageSize {
 				util.ApiResponse(w, 500, "MSG_TOO_BIG", nil)
 				return
 			}
@@ -316,6 +320,38 @@ func (s *httpServer) deleteTopicHandler(w http.ResponseWriter, req *http.Request
 	if err != nil {
 		util.ApiResponse(w, 500, "INVALID_TOPIC", nil)
 		return
+	}
+
+	util.ApiResponse(w, 200, "OK", nil)
+}
+
+func (s *httpServer) pauseTopicHandler(w http.ResponseWriter, req *http.Request) {
+	reqParams, err := util.NewReqParams(req)
+	if err != nil {
+		log.Printf("ERROR: failed to parse request params - %s", err.Error())
+		util.ApiResponse(w, 500, "INVALID_REQUEST", nil)
+		return
+	}
+
+	topicName, err := reqParams.Get("topic")
+	if err != nil {
+		util.ApiResponse(w, 500, "MISSING_ARG_TOPIC", nil)
+		return
+	}
+
+	topic, err := s.context.nsqd.GetExistingTopic(topicName)
+	if err != nil {
+		util.ApiResponse(w, 500, "INVALID_TOPIC", nil)
+		return
+	}
+
+	if strings.HasPrefix(req.URL.Path, "/pause") {
+		err = topic.Pause()
+	} else {
+		err = topic.UnPause()
+	}
+	if err != nil {
+		log.Printf("ERROR: failure in %s - %s", req.URL.Path, err.Error())
 	}
 
 	util.ApiResponse(w, 200, "OK", nil)
@@ -475,18 +511,24 @@ func (s *httpServer) statsHandler(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		for _, t := range stats {
-			io.WriteString(w, fmt.Sprintf("\n[%-15s] depth: %-5d be-depth: %-5d msgs: %-8d e2e%%: %s\n",
+			var pausedPrefix string
+			if t.Paused {
+				pausedPrefix = "*P "
+			} else {
+				pausedPrefix = "   "
+			}
+			io.WriteString(w, fmt.Sprintf("\n%s[%-15s] depth: %-5d be-depth: %-5d msgs: %-8d e2e%%: %s\n",
+				pausedPrefix,
 				t.TopicName,
 				t.Depth,
 				t.BackendDepth,
 				t.MessageCount,
 				t.E2eProcessingLatency))
 			for _, c := range t.Channels {
-				var pausedPrefix string
 				if c.Paused {
-					pausedPrefix = " *P "
+					pausedPrefix = "   *P "
 				} else {
-					pausedPrefix = "    "
+					pausedPrefix = "      "
 				}
 				io.WriteString(w,
 					fmt.Sprintf("%s[%-25s] depth: %-5d be-depth: %-5d inflt: %-4d def: %-4d re-q: %-5d timeout: %-5d msgs: %-8d e2e%%: %s\n",
