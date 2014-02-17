@@ -59,3 +59,4 @@ https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/zimbatm/socketmaster.git
 https://github.com/happypancake/fsd.git
+https://github.com/abhishekkr/goshare.git
