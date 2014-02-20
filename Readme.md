@@ -41,6 +41,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       DNS server with per-client targeted responses
        241 commits, last change: 2014-01-08 05:50:49, 277 stars, 22 forks
 
+    abhishekkr/goshare:
+      Go Share your TimeSeries/NameSpace/KeyVal DataStore (using leveldb) over HTTP /or ZeroMQ
+       54 commits, last change: , 20 stars, 3 forks
+
     adnaan/hamster:
       A back end as a service based on MongoDB
        44 commits, last change: 2014-01-27 22:54:15, 51 stars, 2 forks
@@ -115,7 +119,7 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     dotcloud/docker:
       Docker - the open-source application container engine
-       6,124 commits, last change: 2014-02-10 12:10:38, 9,657 stars, 1,448 forks
+       6,269 commits, last change: 2014-02-17 12:28:05, 9,814 stars, 1,489 forks
 
     efficient/epaxos:
 
@@ -147,11 +151,15 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     globocom/tsuru:
       Open source Platform as a Service.
-       6,555 commits, last change: 2014-02-10 12:15:05, 785 stars, 70 forks
+       6,567 commits, last change: 2014-02-17 08:13:49, 791 stars, 71 forks
 
     golang/groupcache:
       groupcache is a caching and cache-filling library, intended as a replacement for memcached in many cases.
        21 commits, last change: 2013-10-30 09:55:26, 2,557 stars, 223 forks
+
+    happypancake/fsd:
+      Func based statsd client for golang, which returns more or less directly via using a buffered channel and reconnection establishment in case of failure of udp sending
+       15 commits, last change: 2014-02-17 13:08:59, 2 stars, 1 forks
 
     hashicorp/serf:
       Service orchestration and management tool.
@@ -221,6 +229,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Teleport Transport: End-to-end resilience to network outages
        6 commits, last change: , 99 stars, 1 forks
 
+    PuerkitoBio/throttled:
+      throttling strategies for HTTP handlers
+       38 commits, last change: 2014-02-19 05:16:15, 40 stars, 0 forks
+
     rackspace/gophercloud:
       The Go SDK for the Rackspace Cloud
        178 commits, last change: 2014-02-01 15:16:37, 182 stars, 22 forks
@@ -260,6 +272,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     uniqush/uniqush-push:
       Uniqush is a free and open source software which provides a unified push service for server-side notification to apps on mobile devices.
        406 commits, last change: 2013-11-07 12:23:32, 392 stars, 52 forks
+
+    vektra/tachyon:
+      A interesting port of ansible to golang
+       12 commits, last change: 2014-02-19 16:41:45, 13 stars, 3 forks
 
     vito/garden:
       Go Warden
