@@ -1,4 +1,5 @@
 https://github.com/abh/geodns.git
+https://github.com/abhishekkr/goshare.git
 https://github.com/adnaan/hamster.git
 https://github.com/apcera/gnatsd.git
 https://github.com/apcera/nats.git
@@ -27,6 +28,7 @@ https://github.com/flynn/rpcplus.git
 https://github.com/globocom/gandalf.git
 https://github.com/globocom/tsuru.git
 https://github.com/golang/groupcache.git
+https://github.com/happypancake/fsd.git
 https://github.com/hashicorp/serf.git
 https://github.com/inconshreveable/muxado.git
 https://github.com/inconshreveable/ngrok.git
@@ -44,6 +46,7 @@ https://github.com/necrogami/watchdog.git
 https://github.com/nf/gohttptun.git
 https://github.com/oleiade/trousseau.git
 https://github.com/petar/GoTeleport.git
+https://github.com/PuerkitoBio/throttled.git
 https://github.com/rackspace/gophercloud.git
 https://github.com/rcrowley/go-metrics.git
 https://github.com/Sendhub/shipbuilder.git
@@ -54,11 +57,8 @@ https://github.com/stripe-ctf/octopus.git
 https://github.com/tsenart/tb.git
 https://github.com/tsenart/vegeta.git
 https://github.com/uniqush/uniqush-push.git
+https://github.com/vektra/tachyon.git
 https://github.com/vito/garden.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/PuerkitoBio/throttled.git
-https://github.com/happypancake/fsd.git
-https://github.com/abhishekkr/goshare.git
-https://github.com/vektra/tachyon.git
