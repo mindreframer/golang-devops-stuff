@@ -1,0 +1,6 @@
+*swo
+*swp
+*~
+*.tmp
+temp/*
+.goenv
