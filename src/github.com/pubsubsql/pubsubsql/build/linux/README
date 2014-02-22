@@ -1,0 +1,24 @@
+﻿------------------------------------------------------------------------------------------
+ PubSubSQL Version-1.0.0
+ An open-source in-memory database integrated with Publish-Subscribe.
+------------------------------------------------------------------------------------------
+pubsubsql/
+    bin/
+        pubsubsql           # server and built-in cli
+        pubsubsqlsvc        # daemon (service) installer
+        pubsubgui.jar       # interactive query java gui
+    lib/
+        pubsubsql.jar       # client api java library
+        gson-2.4.1.jar      # third party gson java library
+    samples/                # sources for samples and client api
+        go/...               
+        java/...
+------------------------------------------------------------------------------------------
+Getting Started on Linux http://www.pubsubsql.com/runlinux.html 
+------------------------------------------------------------------------------------------
+Request a feature * Ask a question * Report a bug
+Forum http://groups.google.com/group/pubsubsql
+Twitter @PubSubSQL 
+Email oleg@pubsubsql.com
+------------------------------------------------------------------------------------------
+
