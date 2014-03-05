@@ -173,6 +173,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Introspected tunnels to localhost
        261 commits, last change: 2014-02-02 01:08:37, 1,401 stars, 86 forks
 
+    inconshreveable/slt:
+      A TLS reverse proxy with SNI multiplexing in Go
+       9 commits, last change: 2014-03-01 16:44:01, 77 stars, 1 forks
+
     influxdb/influxdb:
       Scalable datastore for metrics, events, and real-time analytics
        731 commits, last change: 2014-02-10 11:21:25, 1,372 stars, 62 forks
@@ -228,6 +232,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     petar/GoTeleport:
       Teleport Transport: End-to-end resilience to network outages
        6 commits, last change: , 99 stars, 1 forks
+
+    pubsubsql/pubsubsql:
+      An open-source distributed in-memory database integrated with Publish-Subscribe
+       423 commits, last change: 2014-03-04 11:28:00, 28 stars, 5 forks
 
     PuerkitoBio/throttled:
       throttling strategies for HTTP handlers
