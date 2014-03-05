@@ -54,6 +54,7 @@ https://github.com/rcrowley/go-metrics.git
 https://github.com/Sendhub/shipbuilder.git
 https://github.com/skydb/sky.git
 https://github.com/skynetservices/skydns.git
+https://github.com/smira/aptly.git
 https://github.com/spf13/nitro.git
 https://github.com/stripe-ctf/octopus.git
 https://github.com/tsenart/tb.git
@@ -64,4 +65,3 @@ https://github.com/vito/garden.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/smira/aptly.git
