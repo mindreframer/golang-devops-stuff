@@ -32,6 +32,7 @@ https://github.com/happypancake/fsd.git
 https://github.com/hashicorp/serf.git
 https://github.com/inconshreveable/muxado.git
 https://github.com/inconshreveable/ngrok.git
+https://github.com/inconshreveable/slt.git
 https://github.com/influxdb/influxdb.git
 https://github.com/jingweno/gotask.git
 https://github.com/joewalnes/websocketd.git
@@ -46,6 +47,7 @@ https://github.com/necrogami/watchdog.git
 https://github.com/nf/gohttptun.git
 https://github.com/oleiade/trousseau.git
 https://github.com/petar/GoTeleport.git
+https://github.com/pubsubsql/pubsubsql.git
 https://github.com/PuerkitoBio/throttled.git
 https://github.com/rackspace/gophercloud.git
 https://github.com/rcrowley/go-metrics.git
@@ -62,5 +64,3 @@ https://github.com/vito/garden.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/pubsubsql/pubsubsql.git
-https://github.com/inconshreveable/slt.git
