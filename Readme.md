@@ -261,6 +261,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       DNS for skynet or any other service discovery
        252 commits, last change: 2014-02-09 15:42:29, 304 stars, 24 forks
 
+    smira/aptly:
+      aptly - Debian repository management tool
+       456 commits, last change: 2014-03-05 04:15:31, 147 stars, 9 forks
+
     spf13/nitro:
       Quick and easy performance analyzer library for golang
        7 commits, last change: 2013-10-03 06:43:07, 84 stars, 4 forks
