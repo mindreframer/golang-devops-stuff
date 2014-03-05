@@ -1,0 +1,89 @@
+.\" generated with Ronn/v0.7.3
+.\" http://github.com/rtomayko/ronn/tree/0.7.3
+.
+.TH "SLT" "8" "March 2014" "" ""
+.
+.SH "NAME"
+\fBslt\fR \- multiplex a port for multiple TLS applications with SNI
+.
+.SH "SYNOPOSIS"
+\fBslt\fR \fIconfig\-file\fR
+.
+.SH "DESCRIPTION"
+\fBslt\fR is a TLS reverse\-proxy which allows an administrator to run multiple TLS applications on a single port\. \fBslt\fR multiplexes incoming connections by inspecting the Server Name Indication (\fBSNI\fR) extension data and appropriately forwarding the connection to the appropriate upstream server\.
+.
+.SH "CONFIGURATION FILE"
+Configure \fBslt\fR with a simple YAML file\. Specify a \fBbind_addr\fR to instuct \fBslt\fR where it should listen for incoming connections\. \fBslt\fR may listen for any number of \fBfrontends\fR\. Each frontend is identified by the name to match in the SNI data\. Each frontend forwards to any number of \fBbackends\fR\. You may specify each backend with a hash of values\. The only required attribute is \fBaddr\fR\. When more than one backend is enumerated, \fBslt\fR performs simple round\-robin load balancing among them\.
+.
+.P
+An example configuration follows for listening on port 443 of all local interfaces multiplexing traffic for two applications, \fIv1\.example\.com\fR and \fIv2\.example\.com\fR\. \fIv1\.example\.com\fR forwards to a single upstream server on port 1234\. \fIv2\.example\.com\fR forwards to two upstream hosts on different addresses:
+.
+.IP "" 4
+.
+.nf
+
+bind_addr: ":443"
+
+frontends:
+  v1\.example\.com:
+    backends:
+      \- addr: ":1234"
+
+  v2\.example\.com:
+    backends:
+      \- addr: "192\.168\.0\.2:443"
+      \- addr: "192\.168\.0\.1:443"
+.
+.fi
+.
+.IP "" 0
+.
+.P
+By default, \fBslt\fR does not terminate any TLS traffic\. \fBslt\fR only inspects connections for their SNI data before being forwarded upstream\. \fBslt\fR may terminate TLS traffic for any \fBfrontend\fR by providing paths to the TLS public certificate and private key files, like so:
+.
+.IP "" 4
+.
+.nf
+
+frontends:
+  v1\.example\.com:
+    tls_key: /path/to/v1\.example\.com\.key
+    tls_crt: /path/to/v1\.example\.com\.crt
+.
+.fi
+.
+.IP "" 0
+.
+.P
+Designate one \fBfrontend\fR to be the \fBdefault\fR in the case that no SNI data is present in the connection like so:
+.
+.IP "" 4
+.
+.nf
+
+frontends:
+  v1\.example\.com:
+    default: true
+.
+.fi
+.
+.IP "" 0
+.
+.SH "EXIT STATUS"
+Exit status is 0 on success, non\-zero on failure\.
+.
+.SH "LINKS"
+.
+.TP
+\fBSource code and documentation\fR
+https://github\.com/inconshreveable/slt \fI\fR
+.
+.TP
+\fBServer Name Indication\fR
+http://www\.ietf\.org/rfc/rfc3546\.txt \fI\fR
+.
+.SH "AUTHOR"
+Alan Shreve (@inconshreveable)
+.
+.SH "SEE ALSO"
+ssl(3) stunnel(8)

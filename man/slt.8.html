@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv='content-type' value='text/html;charset=utf8'>
+  <meta name='generator' value='Ronn/v0.7.3 (http://github.com/rtomayko/ronn/tree/0.7.3)'>
+  <title>slt(8) - multiplex a port for multiple TLS applications with SNI</title>
+  <style type='text/css' media='all'>
+  /* style: man */
+  body#manpage {margin:0}
+  .mp {max-width:100ex;padding:0 9ex 1ex 4ex}
+  .mp p,.mp pre,.mp ul,.mp ol,.mp dl {margin:0 0 20px 0}
+  .mp h2 {margin:10px 0 0 0}
+  .mp > p,.mp > pre,.mp > ul,.mp > ol,.mp > dl {margin-left:8ex}
+  .mp h3 {margin:0 0 0 4ex}
+  .mp dt {margin:0;clear:left}
+  .mp dt.flush {float:left;width:8ex}
+  .mp dd {margin:0 0 0 9ex}
+  .mp h1,.mp h2,.mp h3,.mp h4 {clear:left}
+  .mp pre {margin-bottom:20px}
+  .mp pre+h2,.mp pre+h3 {margin-top:22px}
+  .mp h2+pre,.mp h3+pre {margin-top:5px}
+  .mp img {display:block;margin:auto}
+  .mp h1.man-title {display:none}
+  .mp,.mp code,.mp pre,.mp tt,.mp kbd,.mp samp,.mp h3,.mp h4 {font-family:monospace;font-size:14px;line-height:1.42857142857143}
+  .mp h2 {font-size:16px;line-height:1.25}
+  .mp h1 {font-size:20px;line-height:2}
+  .mp {text-align:justify;background:#fff}
+  .mp,.mp code,.mp pre,.mp pre code,.mp tt,.mp kbd,.mp samp {color:#131211}
+  .mp h1,.mp h2,.mp h3,.mp h4 {color:#030201}
+  .mp u {text-decoration:underline}
+  .mp code,.mp strong,.mp b {font-weight:bold;color:#131211}
+  .mp em,.mp var {font-style:italic;color:#232221;text-decoration:none}
+  .mp a,.mp a:link,.mp a:hover,.mp a code,.mp a pre,.mp a tt,.mp a kbd,.mp a samp {color:#0000ff}
+  .mp b.man-ref {font-weight:normal;color:#434241}
+  .mp pre {padding:0 4ex}
+  .mp pre code {font-weight:normal;color:#434241}
+  .mp h2+pre,h3+pre {padding-left:0}
+  ol.man-decor,ol.man-decor li {margin:3px 0 10px 0;padding:0;float:left;width:33%;list-style-type:none;text-transform:uppercase;color:#999;letter-spacing:1px}
+  ol.man-decor {width:100%}
+  ol.man-decor li.tl {text-align:left}
+  ol.man-decor li.tc {text-align:center;letter-spacing:4px}
+  ol.man-decor li.tr {text-align:right;float:right}
+  </style>
+</head>
+<!--
+  The following styles are deprecated and will be removed at some point:
+  div#man, div#man ol.man, div#man ol.head, div#man ol.man.
+
+  The .man-page, .man-decor, .man-head, .man-foot, .man-title, and
+  .man-navigation should be used instead.
+-->
+<body id='manpage'>
+  <div class='mp' id='man'>
+
+  <div class='man-navigation' style='display:none'>
+    <a href="#NAME">NAME</a>
+    <a href="#SYNOPOSIS">SYNOPOSIS</a>
+    <a href="#DESCRIPTION">DESCRIPTION</a>
+    <a href="#CONFIGURATION-FILE">CONFIGURATION FILE</a>
+    <a href="#EXIT-STATUS">EXIT STATUS</a>
+    <a href="#LINKS">LINKS</a>
+    <a href="#AUTHOR">AUTHOR</a>
+    <a href="#SEE-ALSO">SEE ALSO</a>
+  </div>
+
+  <ol class='man-decor man-head man head'>
+    <li class='tl'>slt(8)</li>
+    <li class='tc'></li>
+    <li class='tr'>slt(8)</li>
+  </ol>
+
+  <h2 id="NAME">NAME</h2>
+<p class="man-name">
+  <code>slt</code> - <span class="man-whatis">multiplex a port for multiple TLS applications with SNI</span>
+</p>
+
+<h2 id="SYNOPOSIS">SYNOPOSIS</h2>
+
+<p><code>slt</code> <var>config-file</var></p>
+
+<h2 id="DESCRIPTION">DESCRIPTION</h2>
+
+<p><code>slt</code> is a TLS reverse-proxy which allows an administrator to run
+multiple TLS applications on a single port. <code>slt</code> multiplexes incoming
+connections by inspecting the Server Name Indication (<code>SNI</code>) extension
+data and appropriately forwarding the connection to the appropriate
+upstream server.</p>
+
+<h2 id="CONFIGURATION-FILE">CONFIGURATION FILE</h2>
+
+<p>Configure <code>slt</code> with a simple YAML file. Specify a <code>bind_addr</code> to instuct <code>slt</code>
+where it should listen for incoming connections. <code>slt</code> may listen for any number
+of <code>frontends</code>. Each frontend is identified by the name to match in the SNI
+data. Each frontend forwards to any number of <code>backends</code>. You may specify each
+backend with a hash of values. The only required attribute is <code>addr</code>. When
+more than one backend is enumerated, <code>slt</code> performs simple round-robin load
+balancing among them.</p>
+
+<p>An example configuration follows for listening on port 443 of all local
+interfaces multiplexing traffic for two applications, <em>v1.example.com</em>
+and <em>v2.example.com</em>. <em>v1.example.com</em> forwards to a single upstream
+server on port 1234. <em>v2.example.com</em> forwards to two upstream hosts
+on different addresses:</p>
+
+<pre><code>bind_addr: ":443"
+
+frontends:
+  v1.example.com:
+    backends:
+      - addr: ":1234"
+
+  v2.example.com:
+    backends:
+      - addr: "192.168.0.2:443"
+      - addr: "192.168.0.1:443"
+</code></pre>
+
+<p>By default, <code>slt</code> does not terminate any TLS traffic. <code>slt</code> only inspects
+connections for their SNI data before being forwarded upstream. <code>slt</code> may
+terminate TLS traffic for any <code>frontend</code> by providing paths to the TLS
+public certificate and private key files, like so:</p>
+
+<pre><code>frontends:
+  v1.example.com:
+    tls_key: /path/to/v1.example.com.key
+    tls_crt: /path/to/v1.example.com.crt
+</code></pre>
+
+<p>Designate one <code>frontend</code> to be the <code>default</code> in the case that no
+SNI data is present in the connection like so:</p>
+
+<pre><code>frontends:
+  v1.example.com:
+    default: true
+</code></pre>
+
+<h2 id="EXIT-STATUS">EXIT STATUS</h2>
+
+<p>Exit status is 0 on success, non-zero on failure.</p>
+
+<h2 id="LINKS">LINKS</h2>
+
+<dl>
+<dt><code>Source code and documentation</code></dt><dd><p><a href="">https://github.com/inconshreveable/slt</a></p></dd>
+<dt><code>Server Name Indication</code></dt><dd><p><a href="">http://www.ietf.org/rfc/rfc3546.txt</a></p></dd>
+</dl>
+
+
+<h2 id="AUTHOR">AUTHOR</h2>
+
+<p>Alan Shreve (@inconshreveable)</p>
+
+<h2 id="SEE-ALSO">SEE ALSO</h2>
+
+<p><span class="man-ref">ssl<span class="s">(3)</span></span> <span class="man-ref">stunnel<span class="s">(8)</span></span></p>
+
+
+  <ol class='man-decor man-foot man foot'>
+    <li class='tl'></li>
+    <li class='tc'>March 2014</li>
+    <li class='tr'>slt(8)</li>
+  </ol>
+
+  </div>
+</body>
+</html>
