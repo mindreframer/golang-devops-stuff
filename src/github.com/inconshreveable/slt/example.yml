@@ -1,0 +1,29 @@
+# bind to this address to accept new TLS connections
+bind_addr: ":443"
+
+frontends:
+  # connections with SNI of "v1.example.com" are handled by this block,
+  # they are proxied to port 4443 on localhost
+  v1.example.com:
+    backends:
+      -
+        addr: ":4443"
+
+        # 1000 ms timeout connecting to this backend
+        connect_timeout: 1000
+
+  v2.example.com:
+    # round robin between two backends
+    backends:
+      -
+        addr: "192.168.0.2:443"
+      -
+        addr: "192.168.0.1:443"
+
+  example.org:
+    # terminate TLS traffic for example.org
+    tls_crt: /etc/certs/example.org.pem
+    tls_key: /etc/certs/example.org.key
+    backends:
+      -
+        addr: ":4444"

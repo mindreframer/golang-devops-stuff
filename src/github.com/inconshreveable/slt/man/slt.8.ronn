@@ -1,0 +1,76 @@
+slt(8) - multiplex a port for multiple TLS applications with SNI
+================================================================
+
+## SYNOPOSIS
+
+`slt` <config-file>
+
+## DESCRIPTION
+
+`slt` is a TLS reverse-proxy which allows an administrator to run
+multiple TLS applications on a single port. `slt` multiplexes incoming
+connections by inspecting the Server Name Indication (`SNI`) extension
+data and appropriately forwarding the connection to the appropriate
+upstream server.
+
+## CONFIGURATION FILE
+
+Configure `slt` with a simple YAML file. Specify a `bind_addr` to instuct `slt`
+where it should listen for incoming connections. `slt` may listen for any number
+of `frontends`. Each frontend is identified by the name to match in the SNI
+data. Each frontend forwards to any number of `backends`. You may specify each
+backend with a hash of values. The only required attribute is `addr`. When
+more than one backend is enumerated, `slt` performs simple round-robin load
+balancing among them.
+
+An example configuration follows for listening on port 443 of all local
+interfaces multiplexing traffic for two applications, _v1.example.com_
+and _v2.example.com_. _v1.example.com_ forwards to a single upstream
+server on port 1234. _v2.example.com_ forwards to two upstream hosts
+on different addresses:
+
+    bind_addr: ":443"
+
+    frontends:
+      v1.example.com:
+        backends:
+          - addr: ":1234"
+
+      v2.example.com:
+        backends:
+          - addr: "192.168.0.2:443"
+          - addr: "192.168.0.1:443"
+
+By default, `slt` does not terminate any TLS traffic. `slt` only inspects
+connections for their SNI data before being forwarded upstream. `slt` may
+terminate TLS traffic for any `frontend` by providing paths to the TLS
+public certificate and private key files, like so:
+
+    frontends:
+      v1.example.com:
+        tls_key: /path/to/v1.example.com.key
+        tls_crt: /path/to/v1.example.com.crt
+
+Designate one `frontend` to be the `default` in the case that no
+SNI data is present in the connection like so:
+
+    frontends:
+      v1.example.com:
+        default: true
+
+## EXIT STATUS
+Exit status is 0 on success, non-zero on failure.
+
+## LINKS
+
+  * `Source code and documentation`:
+    [https://github.com/inconshreveable/slt]()
+
+  * `Server Name Indication`:
+    [http://www.ietf.org/rfc/rfc3546.txt]()
+
+## AUTHOR
+Alan Shreve (@inconshreveable)
+
+## SEE ALSO
+ssl(3) stunnel(8)
