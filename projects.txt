@@ -64,3 +64,4 @@ https://github.com/vito/garden.git
 https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/zimbatm/socketmaster.git
+https://github.com/smira/aptly.git
