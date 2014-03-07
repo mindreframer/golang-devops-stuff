@@ -201,6 +201,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Jaeger is a JSON encoded GPG encrypted key value store. It is useful for generating and keeping configuration files secure. Jaeger is written in Go.
        32 commits, last change: 2014-01-23 16:23:58, 7 stars, 2 forks
 
+    kelseyhightower/confd:
+      Manage local application configuration files using templates and data from etcd
+       199 commits, last change: 2014-03-05 07:21:20, 278 stars, 16 forks
+
     mailgun/vulcan:
       Programmatic HTTP rate limiting proxy for JSON based APIs.
        221 commits, last change: 2013-12-27 15:28:29, 163 stars, 5 forks
