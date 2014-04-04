@@ -1,0 +1,27 @@
+<table class="{{"table1"}} {{"stripe-table"}}">
+	<thead>
+		<tr>
+			<th class="{{"header"}} {{"digital"}}">{{$__amber_1 := .Data.ProcTable}}{{$__amber_2 := $__amber_1.Links}}{{$__amber_3 := $__amber_2.PID}}<a{{$__amber_3}}>PID</a></th>
+			<th class="{{"header"}} {{"digital"}}">{{$__amber_4 := .Data.ProcTable}}{{$__amber_5 := $__amber_4.Links}}{{$__amber_6 := $__amber_5.User}}<a{{$__amber_6}}>USER</a></th>
+			<th class="{{"header"}} {{"digital"}}">{{$__amber_7 := .Data.ProcTable}}{{$__amber_8 := $__amber_7.Links}}{{$__amber_9 := $__amber_8.Priority}}<a{{$__amber_9}}>PR</a></th>
+			<th class="{{"header"}} {{"digital"}}">{{$__amber_10 := .Data.ProcTable}}{{$__amber_11 := $__amber_10.Links}}{{$__amber_12 := $__amber_11.Nice}}<a{{$__amber_12}}>NI</a></th>
+			<th class="{{"header"}} {{"digital"}}">{{$__amber_13 := .Data.ProcTable}}{{$__amber_14 := $__amber_13.Links}}{{$__amber_15 := $__amber_14.Size}}<a{{$__amber_15}}>VIRT</a></th>
+			<th class="{{"header"}} {{"digital"}}">{{$__amber_16 := .Data.ProcTable}}{{$__amber_17 := $__amber_16.Links}}{{$__amber_18 := $__amber_17.Resident}}<a{{$__amber_18}}>RES</a></th>
+			<th class="{{"header"}} {{"center"}}">{{$__amber_19 := .Data.ProcTable}}{{$__amber_20 := $__amber_19.Links}}{{$__amber_21 := $__amber_20.Time}} <a{{$__amber_21}}>TIME</a></th>
+			<th class="{{"header"}}">{{$__amber_22 := .Data.ProcTable}}{{$__amber_23 := $__amber_22.Links}}{{$__amber_24 := $__amber_23.Name}}        <a{{$__amber_24}}>COMMAND</a></th>
+		</tr>
+	</thead>
+	<tbody id="{{"procrows"}}">{{$__amber_25 := .Data.ProcTable}}{{$__amber_26 := $__amber_25.TRHTMLAttr}}{{$tr_attr := $__amber_26}}{{$__amber_27 := .Data.ProcTable}}{{$__amber_28 := $__amber_27.List}}{{range $proc := $__amber_28}}
+		<tr{{$tr_attr}}>
+		<td class="{{"digital"}}">{{$__amber_29 := $proc.PID}}{{$__amber_29}}</td>
+		<td class="{{"digital"}}">{{$__amber_30 := $proc.User}}{{$__amber_30}}</td>
+		<td class="{{"digital"}}">{{$__amber_31 := $proc.Priority}}{{$__amber_31}}</td>
+		<td class="{{"digital"}}">{{$__amber_32 := $proc.Nice}}{{$__amber_32}}</td>
+		<td class="{{"digital"}}">{{$__amber_33 := $proc.Size}}{{$__amber_33}}</td>
+		<td class="{{"digital"}}">{{$__amber_34 := $proc.Resident}}{{$__amber_34}}</td>
+		<td class="{{"center"}}">{{$__amber_35 := $proc.Time}}{{$__amber_35}}</td>
+		<td>{{$__amber_36 := $proc.Name}}{{$__amber_36}}</td>
+		</tr>{{end}}
+		{{$__amber_37 := .Data.ProcTable}}{{$__amber_38 := $__amber_37.JS}}{{$__amber_38}}
+	</tbody>
+</table>
