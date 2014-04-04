@@ -263,6 +263,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Go port of Coda Hale's Metrics library
        186 commits, last change: 2014-01-27 10:15:57, 301 stars, 36 forks
 
+    rzab/ostent:
+      A drop-in system metrics inspector
+       14 commits, last change: 2014-04-03 14:29:36, 2 stars, 0 forks
+
     Sendhub/shipbuilder:
       The Open-source self-hosted Platform-as-a-Service written in Go
        139 commits, last change: 2013-08-29 02:59:20, 2 stars, 19 forks
