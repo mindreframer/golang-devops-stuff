@@ -53,6 +53,7 @@ https://github.com/pubsubsql/pubsubsql.git
 https://github.com/PuerkitoBio/throttled.git
 https://github.com/rackspace/gophercloud.git
 https://github.com/rcrowley/go-metrics.git
+https://github.com/rzab/ostent.git
 https://github.com/Sendhub/shipbuilder.git
 https://github.com/skydb/sky.git
 https://github.com/skynetservices/skydns.git
@@ -68,4 +69,3 @@ https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/rzab/ostent.git
