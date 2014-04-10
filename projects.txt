@@ -45,8 +45,10 @@ https://github.com/mailgun/vulcan.git
 https://github.com/mindreframer/emtail.git
 https://github.com/mitchellh/packer.git
 https://github.com/mozilla-services/heka.git
+https://github.com/mrwilson/helixdns.git
 https://github.com/necrogami/watchdog.git
 https://github.com/nf/gohttptun.git
+https://github.com/nuxeo/gogeta.git
 https://github.com/oleiade/trousseau.git
 https://github.com/petar/GoTeleport.git
 https://github.com/pubsubsql/pubsubsql.git
@@ -69,5 +71,3 @@ https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/mrwilson/helixdns.git
-https://github.com/nuxeo/gogeta.git
