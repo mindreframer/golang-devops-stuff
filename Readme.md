@@ -231,6 +231,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Data collection and processing made easy.
        2,262 commits, last change: 2014-03-31 15:59:50, 1,118 stars, 101 forks
 
+    mrwilson/helixdns:
+      A simple dns server that reads records from etcd.
+       41 commits, last change: 2014-04-06 20:01:23, 23 stars, 2 forks
+
     necrogami/watchdog:
       Watchdog
        7 commits, last change: 2012-12-06 03:30:13, 2 stars, 1 forks
@@ -238,6 +242,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     nf/gohttptun:
       A tool to tunnel TCP over HTTP, written in Go
        22 commits, last change: 2014-01-22 23:29:05, 87 stars, 15 forks
+
+    nuxeo/gogeta:
+      Reverse proxy based on etcd hierarchy
+       16 commits, last change: 2014-04-08 12:48:36, 35 stars, 3 forks
 
     oleiade/trousseau:
       Networked and encrypted key-value database
