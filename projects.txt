@@ -70,3 +70,4 @@ https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
 https://github.com/mrwilson/helixdns.git
+https://github.com/nuxeo/gogeta.git
