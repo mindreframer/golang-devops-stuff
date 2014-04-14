@@ -223,6 +223,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       extract whitebox monitoring data from logs and insert into a timeseries database - mirror for https://code.google.com/p/emtail/
        273 commits, last change: 2013-09-05 04:38:41, 1 stars, 0 forks
 
+    mitchellh/go-ps:
+      Find, list, and inspect processes from Go (golang).
+       19 commits, last change: 2014-04-08 01:34:48, 147 stars, 6 forks
+
     mitchellh/packer:
       Packer is a tool for creating identical machine images for multiple platforms from a single source configuration.
        2,739 commits, last change: 2014-03-22 04:11:26, 2,249 stars, 348 forks
