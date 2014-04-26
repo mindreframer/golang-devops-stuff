@@ -163,6 +163,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Open source Platform as a Service.
        6,792 commits, last change: 2014-04-03 15:04:26, 849 stars, 82 forks
 
+    gogits/gogs:
+      Gogs(Go Git Service) is a Self Hosted Git Service in the Go Programming Language.
+       908 commits, last change: , 1,650 stars, 97 forks
+
     golang/groupcache:
       groupcache is a caching and cache-filling library, intended as a replacement for memcached in many cases.
        21 commits, last change: 2013-10-30 17:55:26, 2,672 stars, 231 forks
@@ -282,6 +286,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     Sendhub/shipbuilder:
       The Open-source self-hosted Platform-as-a-Service written in Go
        139 commits, last change: 2014-01-07 00:41:48, 3 stars, 32 forks
+
+    shirkey/go-guerrilla:
+      Mini SMTP server written in golang
+       28 commits, last change: , 0 stars, 16 forks
 
     skydb/sky:
       Sky is an open source, behavioral analytics database.
