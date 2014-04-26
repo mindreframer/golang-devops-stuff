@@ -73,3 +73,4 @@ https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
 https://github.com/gogits/gogs.git
+https://github.com/shirkey/go-guerrilla.git
