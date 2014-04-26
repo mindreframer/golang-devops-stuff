@@ -28,6 +28,7 @@ https://github.com/flynn/go-discover.git
 https://github.com/flynn/rpcplus.git
 https://github.com/globocom/gandalf.git
 https://github.com/globocom/tsuru.git
+https://github.com/gogits/gogs.git
 https://github.com/golang/groupcache.git
 https://github.com/happypancake/fsd.git
 https://github.com/hashicorp/serf.git
@@ -58,6 +59,7 @@ https://github.com/rackspace/gophercloud.git
 https://github.com/rcrowley/go-metrics.git
 https://github.com/rzab/ostent.git
 https://github.com/Sendhub/shipbuilder.git
+https://github.com/shirkey/go-guerrilla.git
 https://github.com/skydb/sky.git
 https://github.com/skynetservices/skydns.git
 https://github.com/smira/aptly.git
@@ -72,5 +74,3 @@ https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/gogits/gogs.git
-https://github.com/shirkey/go-guerrilla.git
