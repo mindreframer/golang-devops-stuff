@@ -91,6 +91,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       cmail runs a command and sends the output to your email address at certain intervals.
        11 commits, last change: , 3 stars, 0 forks
 
+    calmh/syncthing:
+      Open Source Continuous Replication / Cluster Synchronization Thing
+       398 commits, last change: 2014-05-13 14:59:17, 2,123 stars, 68 forks
+
     ccding/go-stun:
       a go implementation of the STUN client (RFC 3489 and RFC 5389)
        4 commits, last change: , 15 stars, 2 forks
