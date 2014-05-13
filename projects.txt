@@ -10,6 +10,7 @@ https://github.com/bitly/nsq.git
 https://github.com/buger/cloud-ssh.git
 https://github.com/buger/gor.git
 https://github.com/BurntSushi/cmail.git
+https://github.com/calmh/syncthing.git
 https://github.com/ccding/go-stun.git
 https://github.com/cloudflare/redoctober.git
 https://github.com/cloudfoundry/gorouter.git
@@ -74,4 +75,3 @@ https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/calmh/syncthing.git
