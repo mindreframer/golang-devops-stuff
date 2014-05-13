@@ -1,0 +1,54 @@
+{
+	"ImportPath": "github.com/calmh/syncthing",
+	"GoVersion": "go1.2.1",
+	"Packages": [
+		"./cmd/syncthing",
+		"./cmd/assets",
+		"./cmd/stcli",
+		"./discover/cmd/discosrv"
+	],
+	"Deps": [
+		{
+			"ImportPath": "bitbucket.org/kardianos/osext",
+			"Comment": "null-9",
+			"Rev": "364fb577de68fb646c4cb39cc0e09c887ee16376"
+		},
+		{
+			"ImportPath": "code.google.com/p/go.crypto/bcrypt",
+			"Comment": "null-185",
+			"Rev": "6478cc9340cbbe6c04511280c5007722269108e9"
+		},
+		{
+			"ImportPath": "code.google.com/p/go.crypto/blowfish",
+			"Comment": "null-185",
+			"Rev": "6478cc9340cbbe6c04511280c5007722269108e9"
+		},
+		{
+			"ImportPath": "code.google.com/p/go.text/transform",
+			"Comment": "null-81",
+			"Rev": "9cbe983aed9b0dfc73954433fead5e00866342ac"
+		},
+		{
+			"ImportPath": "code.google.com/p/go.text/unicode/norm",
+			"Comment": "null-81",
+			"Rev": "9cbe983aed9b0dfc73954433fead5e00866342ac"
+		},
+		{
+			"ImportPath": "github.com/codegangsta/inject",
+			"Rev": "9aea7a2fa5b79ef7fc00f63a575e72df33b4e886"
+		},
+		{
+			"ImportPath": "github.com/codegangsta/martini",
+			"Comment": "v0.1-142-g8659df7",
+			"Rev": "8659df7a51aebe6c6120268cd5a8b4c34fa8441a"
+		},
+		{
+			"ImportPath": "github.com/golang/groupcache/lru",
+			"Rev": "d781998583680cda80cf61e0b37dd0cd8da2eb52"
+		},
+		{
+			"ImportPath": "github.com/juju/ratelimit",
+			"Rev": "cbaa435c80a9716e086f25d409344b26c4039358"
+		}
+	]
+}
