@@ -1,0 +1,60 @@
+# Allow custom transformations (width, height, etc) specified by URL parameters (default is true)
+allow-custom-transformations: No
+
+# Allow custom scale (e.g. @2x) in transformations (default is true)
+allow-custom-scale: No
+
+# Upload request returns straight after image is processed by the server (saving might still fail, default is false)
+async-uploads: Yes
+
+# Quality of JPEG files (1-100, 75 by default)
+jpeg-quality: 80
+
+# Number of allowed requests per IP per minute (0 = no limit, default is 60)
+throttling-rate: 10
+
+# Max file size for uploads in bytes (5 MB by default)
+upload-max-file-size: 10485760 # 10 MB
+
+# Max number of pixels an image can have (5 megapixels by default)
+upload-max-pixels: 8000000
+
+# Which operations need an API key with suitable permissions (none by default)
+authorisation:
+    get:    No
+    upload: Yes
+
+# Directory to store images if using local storage (local-images by default)
+local-path: images
+
+# Named transformations
+transformations:
+    - name:       sw-corner
+      parameters: w_100,h_50,c_k,g_sw
+    - name:       square
+      parameters: w_200,h_200
+      eager:      Yes # Run on every upload
+    - name:       watermarked
+      parameters: w_600
+      watermark:
+          source: watermark.png
+          gravity: se
+          x-pos:  50
+          y-pos:  5
+    - name:       withtext
+      parameters: w_600
+      text:
+          - content: This is text
+            gravity: ne
+            x-pos:   30
+            y-pos:   20
+            color:   "#fff"
+            font:    fonts/DejaVuSans.ttf
+            size:    12
+
+# Cache settings
+cache:
+    # Max. size of cache in bytes (0 = no limit, default)
+    limit: 104857600 # 100 MB
+    # Strategy to use for removing items (LRU or LFU, LRU is default)
+    strategy: LRU

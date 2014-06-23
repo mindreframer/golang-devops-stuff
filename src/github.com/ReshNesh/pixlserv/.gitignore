@@ -1,0 +1,11 @@
+*.swp
+*.swo
+*.swn
+*.swm
+.DS_Store
+.ctrlp-similar/
+local-images/
+test-config/
+Makefile
+/pixlserv
+/uuid/
