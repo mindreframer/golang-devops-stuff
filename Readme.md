@@ -79,6 +79,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       A realtime distributed messaging platform
        1,097 commits, last change: , 2,456 stars, 211 forks
 
+    bradfitz/runsit:
+      It runs it.
+       69 commits, last change: , 171 stars, 11 forks
+
     buger/cloud-ssh:
       Wrapper for ssh which enchance work with cloud providers
        11 commits, last change: , 21 stars, 1 forks
@@ -282,6 +286,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     rcrowley/go-metrics:
       Go port of Coda Hale's Metrics library
        207 commits, last change: , 381 stars, 50 forks
+
+    ReshNesh/pixlserv:
+      Go server for processing and serving of images
+       142 commits, last change: , 203 stars, 6 forks
 
     rzab/ostent:
       A drop-in system metrics inspector
