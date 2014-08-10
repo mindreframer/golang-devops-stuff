@@ -1,0 +1,7 @@
+set -e
+cd `dirname $0`
+go fmt ./...
+go vet ./...
+GINKGO="ginkgo -r --race --randomizeAllSpecs --failOnPending --skipMeasurements"
+export DROPSONDE_HEARTBEAT_INTERVAL_SECS=0.375
+$GINKGO -cover

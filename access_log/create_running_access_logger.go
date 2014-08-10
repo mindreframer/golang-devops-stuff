@@ -1,26 +1,43 @@
 package access_log
 
 import (
-	"os"
-
 	"github.com/cloudfoundry/gorouter/config"
+	steno "github.com/cloudfoundry/gosteno"
+	"github.com/cloudfoundry/loggregatorlib/emitter"
+
+	"os"
 )
 
-func CreateRunningAccessLogger(config *config.Config) (accessLogger AccessLogger) {
+func CreateRunningAccessLogger(config *config.Config) (AccessLogger, error) {
 	loggregatorUrl := config.LoggregatorConfig.Url
-	loggregatorSharedSecret := config.LoggregatorConfig.SharedSecret
 
-	if config.AccessLog != "" || loggregatorUrl != "" {
-		file, err := os.OpenFile(config.AccessLog, os.O_WRONLY | os.O_APPEND | os.O_CREATE, 0666)
-		if err != nil && config.AccessLog != "" {
-			panic(err)
-		}
-
-		accessLogger = NewFileAndLoggregatorAccessLogger(file, loggregatorUrl, loggregatorSharedSecret, config.Index)
-		go accessLogger.Run()
-	} else {
-		accessLogger = &NullAccessLogger{}
+	if config.AccessLog == "" && loggregatorUrl == "" {
+		return &NullAccessLogger{}, nil
 	}
 
-	return
+	logger := steno.NewLogger("access_log")
+
+	var err error
+	var file *os.File
+	if config.AccessLog != "" {
+		file, err = os.OpenFile(config.AccessLog, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0666)
+		if err != nil {
+			logger.Errorf("Error creating accesslog file, %s: (%s)", config.AccessLog, err.Error())
+			return nil, err
+		}
+	}
+
+	var e emitter.Emitter
+	if loggregatorUrl != "" {
+		loggregatorSharedSecret := config.LoggregatorConfig.SharedSecret
+		e, err = NewEmitter(loggregatorUrl, loggregatorSharedSecret, config.Index)
+		if err != nil {
+			logger.Errorf("Error creating loggregator emitter: (%s)", err.Error())
+			return nil, err
+		}
+	}
+
+	accessLogger := NewFileAndLoggregatorAccessLogger(file, e)
+	go accessLogger.Run()
+	return accessLogger, nil
 }

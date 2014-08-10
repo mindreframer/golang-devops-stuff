@@ -1,0 +1,16 @@
+language: go
+go:
+  - 1.2
+  - 1.3
+  - tip
+
+matrix:
+  allow_failures:
+    - go: tip
+
+install:
+  - export PATH=$HOME/gopath/bin:$PATH
+  - go get -v github.com/apcera/gnatsd
+  - go get -v launchpad.net/gocheck
+  - go get -v ./...
+  - go build -v ./...

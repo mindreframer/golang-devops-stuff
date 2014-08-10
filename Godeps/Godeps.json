@@ -1,0 +1,75 @@
+{
+	"ImportPath": "github.com/cloudfoundry/gorouter",
+	"GoVersion": "go1.3",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "code.google.com/p/gogoprotobuf/proto",
+			"Rev": "d228c1a206c3a756d7ec6cc3579d92d00c35a161"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry-incubator/candiedyaml",
+			"Rev": "9d6da703654a1d6897de218799c1ff4eccf49b85"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry-incubator/dropsonde",
+			"Rev": "126e9de704ff62ec474be824c249d1ddb85a5cac"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/gosteno",
+			"Comment": "scotty_09012012-41-g5c1406e",
+			"Rev": "5c1406e9ea0ab919f92e1b194169565def41147b"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/gunk/natsrunner",
+			"Rev": "64cdd7421c0413dc87e5fca2b254efbb4e7dd9d0"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/loggregatorlib/cfcomponent/instrumentation",
+			"Rev": "ff012ab02e67290e1036fe236e8aa99668f6935e"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/loggregatorlib/cfcomponent/localip",
+			"Rev": "ff012ab02e67290e1036fe236e8aa99668f6935e"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/loggregatorlib/emitter",
+			"Rev": "ff012ab02e67290e1036fe236e8aa99668f6935e"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/loggregatorlib/loggregatorclient",
+			"Rev": "ff012ab02e67290e1036fe236e8aa99668f6935e"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/loggregatorlib/logmessage",
+			"Rev": "ff012ab02e67290e1036fe236e8aa99668f6935e"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/loggregatorlib/signature",
+			"Rev": "ff012ab02e67290e1036fe236e8aa99668f6935e"
+		},
+		{
+			"ImportPath": "github.com/cloudfoundry/yagnats",
+			"Rev": "8e98f972ab3eabfb6d44065cd0b30f170d3db794"
+		},
+		{
+			"ImportPath": "github.com/nu7hatch/gouuid",
+			"Rev": "179d4d0c4d8d407a32af483c2354df1d2c91e6c3"
+		},
+		{
+			"ImportPath": "github.com/onsi/ginkgo",
+			"Comment": "v1.0.0-26-g34294d5",
+			"Rev": "34294d53b098180c6e983307c0439a6b30a16b43"
+		},
+		{
+			"ImportPath": "github.com/onsi/gomega",
+			"Rev": "28e5ce936abc528d8c6b5eb3dd5689e7e81e9272"
+		},
+		{
+			"ImportPath": "github.com/rcrowley/go-metrics",
+			"Rev": "3be59ceb5538550555459fb77d0efe0e218cdfc7"
+		}
+	]
+}

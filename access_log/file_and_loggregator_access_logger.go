@@ -1,52 +1,59 @@
 package access_log
 
 import (
+	"fmt"
 	"io"
 	"regexp"
 	"strconv"
 
-	"github.com/cloudfoundry/gorouter/log"
-
-	"github.com/cloudfoundry/loggregatorlib/emitter"
 	steno "github.com/cloudfoundry/gosteno"
+	"github.com/cloudfoundry/loggregatorlib/emitter"
 )
 
 type FileAndLoggregatorAccessLogger struct {
-	emitter  emitter.Emitter
-	channel  chan AccessLogRecord
-	writer   io.Writer
-	index    uint
+	emitter emitter.Emitter
+	channel chan AccessLogRecord
+	stopCh  chan struct{}
+	writer  io.Writer
 }
 
-func NewFileAndLoggregatorAccessLogger(f io.Writer, loggregatorUrl, loggregatorSharedSecret string, index uint) *FileAndLoggregatorAccessLogger {
-	a := &FileAndLoggregatorAccessLogger{
-		writer:     f,
-		channel:     make(chan AccessLogRecord, 128),
-		index: index,
+func NewEmitter(loggregatorUrl, loggregatorSharedSecret string, index uint) (emitter.Emitter, error) {
+	if !isValidUrl(loggregatorUrl) {
+		return nil, fmt.Errorf("Invalid loggregator url %s", loggregatorUrl)
 	}
+	return emitter.NewEmitter(loggregatorUrl, "RTR", strconv.FormatUint(uint64(index), 10), loggregatorSharedSecret,
+		steno.NewLogger("router.loggregator"))
+}
 
-	if isValidUrl(loggregatorUrl) {
-		a.emitter, _ = emitter.NewEmitter(loggregatorUrl, "RTR", strconv.FormatUint(uint64(index), 10), loggregatorSharedSecret, steno.NewLogger("router.loggregator"))
-	} else {
-		log.Errorf("Invalid loggregator url %s", loggregatorUrl)
+func NewFileAndLoggregatorAccessLogger(f io.Writer, e emitter.Emitter) *FileAndLoggregatorAccessLogger {
+	a := &FileAndLoggregatorAccessLogger{
+		emitter: e,
+		writer:  f,
+		channel: make(chan AccessLogRecord, 128),
+		stopCh:  make(chan struct{}),
 	}
 
 	return a
 }
 
 func (x *FileAndLoggregatorAccessLogger) Run() {
-	for access_record := range x.channel {
-		if x.writer != nil {
-			access_record.WriteTo(x.writer)
-		}
-		if x.emitter != nil {
-			access_record.Emit(x.emitter)
+	for {
+		select {
+		case record := <-x.channel:
+			if x.writer != nil {
+				record.WriteTo(x.writer)
+			}
+			if x.emitter != nil && record.ApplicationId() != "" {
+				x.emitter.Emit(record.ApplicationId(), record.LogMessage())
+			}
+		case <-x.stopCh:
+			return
 		}
 	}
 }
 
 func (x *FileAndLoggregatorAccessLogger) Stop() {
-	close(x.channel)
+	close(x.stopCh)
 }
 
 func (x *FileAndLoggregatorAccessLogger) Log(r AccessLogRecord) {

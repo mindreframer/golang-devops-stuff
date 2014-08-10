@@ -1,6 +1,6 @@
 language: go
 go:
-  - 1.1
+  - 1.2
   - tip
 
 matrix:
@@ -8,10 +8,7 @@ matrix:
     - go: tip
 
 install:
-  - go get github.com/apcera/gnatsd
-  - go get -v ./...
-  - go build -v ./...
+  - export PATH=$HOME/gopath/bin:$PATH
 
 script:
-  - export PATH=$HOME/gopath/bin:$PATH
-  - go test -v ./...
+  - ./scripts/test

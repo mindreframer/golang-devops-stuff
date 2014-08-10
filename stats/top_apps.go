@@ -217,12 +217,12 @@ func (x *TopApps) Trim(y time.Time) {
 	x.trim(y)
 }
 
-type topAppsTopEntry struct {
+type TopAppsTopEntry struct {
 	ApplicationId string
 	Requests      int64
 }
 
-func (x *TopApps) TopSince(y time.Time, n int) []topAppsTopEntry {
+func (x *TopApps) TopSince(y time.Time, n int) []TopAppsTopEntry {
 	x.Lock()
 
 	x.trim(y.Add(-1 * time.Second))
@@ -234,11 +234,11 @@ func (x *TopApps) TopSince(y time.Time, n int) []topAppsTopEntry {
 	x.Unlock()
 
 	// Collect the top N applications
-	s := make([]topAppsTopEntry, 0, n)
+	s := make([]TopAppsTopEntry, 0, n)
 	for a.Len() > 0 && len(s) < n {
 		z := heap.Pop(&a).(*topAppsEntry)
 
-		s = append(s, topAppsTopEntry{
+		s = append(s, TopAppsTopEntry{
 			ApplicationId: z.ApplicationId,
 			Requests:      z.n,
 		})

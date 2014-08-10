@@ -21,6 +21,8 @@ type Varz struct {
 	sync.Mutex
 	GenericVarz
 	UniqueVarz interface{} // Every component's unique metrics
+
+	component VcapComponent
 }
 
 func transform(x interface{}, y *map[string]interface{}) error {
@@ -55,7 +57,7 @@ func (v *Varz) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 
-	err = transform(Component, &r)
+	err = transform(v.component, &r)
 	if err != nil {
 		return nil, err
 	}

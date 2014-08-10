@@ -1,96 +1,97 @@
-package common
+package common_test
 
 import (
+	"fmt"
+	. "github.com/cloudfoundry/gorouter/common"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
 	"encoding/json"
 	steno "github.com/cloudfoundry/gosteno"
-	. "launchpad.net/gocheck"
 )
 
-type VarzSuite struct {
-}
+var _ = Describe("Varz", func() {
 
-var _ = Suite(&VarzSuite{})
+	It("contains expected keys", func() {
+		varz := &Varz{}
+		varz.LogCounts = NewLogCounter()
 
-func (s *VarzSuite) SetUpTest(c *C) {
-	Component = VcapComponent{
-		Credentials: []string{"foo", "bar"},
-		Config:      map[string]interface{}{"ip": "localhost", "port": 8080},
-	}
-}
+		bytes, err := json.Marshal(varz)
+		Ω(err).ShouldNot(HaveOccurred())
 
-func (s *VarzSuite) TearDownTest(c *C) {
-	Component = VcapComponent{}
-}
+		data := make(map[string]interface{})
+		err = json.Unmarshal(bytes, &data)
+		Ω(err).ShouldNot(HaveOccurred())
 
-func (s *VarzSuite) TestEmptyVarz(c *C) {
-	varz := &Varz{}
-	varz.LogCounts = NewLogCounter()
-
-	bytes, err := json.Marshal(varz)
-	c.Assert(err, IsNil)
-
-	data := make(map[string]interface{})
-	err = json.Unmarshal(bytes, &data)
-	c.Assert(err, IsNil)
-
-	members := []string{
-		"type",
-		"index",
-		"host",
-		"credentials",
-		"config",
-		"start",
-		"uuid",
-		"uptime",
-		"num_cores",
-		"mem",
-		"cpu",
-		"log_counts",
-	}
-
-	for _, key := range members {
-		if _, ok := data[key]; !ok {
-			c.Fatalf(`member "%s" not found`, key)
+		members := []string{
+			"type",
+			"index",
+			"host",
+			"credentials",
+			"start",
+			"uuid",
+			"uptime",
+			"num_cores",
+			"mem",
+			"cpu",
+			"log_counts",
 		}
-	}
-}
 
-func (s *VarzSuite) TestLogCounts(c *C) {
-	varz := &Varz{}
-	varz.LogCounts = NewLogCounter()
+		_, ok := data["config"]
+		Ω(ok).Should(BeFalse(), "config should be omitted from /varz")
 
-	varz.LogCounts.AddRecord(&steno.Record{Level: steno.LOG_INFO})
+		for _, key := range members {
+			_, ok = data[key]
+			Ω(ok).Should(BeTrue(), fmt.Sprintf("member %s not found", key))
+		}
+	})
 
-	bytes, _ := json.Marshal(varz)
-	data := make(map[string]interface{})
-	json.Unmarshal(bytes, &data)
+	It("contains Log counts", func() {
+		varz := &Varz{}
+		varz.LogCounts = NewLogCounter()
 
-	counts := data["log_counts"].(map[string]interface{})
-	count := counts["info"]
+		varz.LogCounts.AddRecord(&steno.Record{Level: steno.LOG_INFO})
 
-	c.Assert(count, Equals, 1.0)
-}
+		bytes, _ := json.Marshal(varz)
+		data := make(map[string]interface{})
+		json.Unmarshal(bytes, &data)
 
-func (s *VarzSuite) TestTransformStruct(c *C) {
-	component := struct {
-		Type  string `json:"type"`
-		Index int    `json:"index"`
-	}{
-		Type:  "Router",
-		Index: 1,
-	}
+		counts := data["log_counts"].(map[string]interface{})
+		count := counts["info"]
 
-	m := make(map[string]interface{})
-	transform(component, &m)
-	c.Assert(m["type"], Equals, "Router")
-	c.Assert(m["index"], Equals, float64(1))
-}
+		Ω(count).Should(Equal(float64(1)))
+	})
 
-func (s *VarzSuite) TestTransformMap(c *C) {
-	data := map[string]interface{}{"type": "Dea", "index": 1}
+	Context("UniqueVarz", func() {
+		It("marshals as a struct", func() {
+			varz := &Varz{
+				UniqueVarz: struct {
+					Type  string `json:"my_type"`
+					Index int    `json:"my_index"`
+				}{
+					Type:  "Router",
+					Index: 1,
+				},
+			}
 
-	m := make(map[string]interface{})
-	transform(data, &m)
-	c.Assert(m["type"], Equals, "Dea")
-	c.Assert(m["index"], Equals, float64(1))
-}
+			bytes, _ := json.Marshal(varz)
+			data := make(map[string]interface{})
+			json.Unmarshal(bytes, &data)
+
+			Ω(data["my_type"]).Should(Equal("Router"))
+			Ω(data["my_index"]).Should(Equal(float64(1)))
+		})
+
+		It("marshals as a map", func() {
+			varz := &Varz{
+				UniqueVarz: map[string]interface{}{"my_type": "Dea", "my_index": 1},
+			}
+			bytes, _ := json.Marshal(varz)
+			data := make(map[string]interface{})
+			json.Unmarshal(bytes, &data)
+
+			Ω(data["my_type"]).Should(Equal("Dea"))
+			Ω(data["my_index"]).Should(Equal(float64(1)))
+		})
+	})
+})

@@ -11,7 +11,7 @@ This router is now used on CloudFoundry.com, replacing the old implementation.
 
 The original router can be found at cloudfoundry/router. The original router is
 backed by nginx, that uses Lua code to connect to a Ruby server that -- based
-on the headers of a client's request -- will tell nginx whick backend it should
+on the headers of a client's request -- will tell nginx which backend it should
 use. The main limitations in this architecture are that nginx does not support
 non-HTTP (e.g. traffic to services) and non-request/response type traffic (e.g.
 to support WebSockets), and that it requires a round trip to a Ruby server for
@@ -28,40 +28,70 @@ removing unnecessary latency.
 The following instructions may help you get started with gorouter in a
 standalone environment.
 
-### Setup
+### External Dependencies
+
+- Go should be installed and in the PATH
+- GOPATH should be set as described in http://golang.org/doc/code.html
+- [gnatsd](https://github.com/apcera/gnatsd) installed and in the PATH
+
+### Development Setup
+
+Download gorouter:
+```bash
+go get -v github.com/cloudfoundry/gorouter
+cd $GOPATH/src/github.com/cloudfoundry/gorouter
+```
+
+To install exactly the dependecies vendored with gorouter, use [godep](https://github.com/tools/godep):
 
 ```bash
-export GOPATH=~/go # or wherever
-export PATH=$GOPATH/bin:$PATH
-
-cd $GOPATH
-
-mkdir -p src/github.com/cloudfoundry
-(
-  cd src/github.com/cloudfoundry
-  git clone https://github.com/cloudfoundry/gorouter.git
-)
-
-go get -v ./src/github.com/cloudfoundry/gorouter/...
-
-gem install nats
+go get -v github.com/tools/godep
+godep restore ./...
 ```
 
 ### Running Tests
 
-We are using Gocheck, to run tests
+We are using [Ginkgo](https://github.com/onsi/ginkgo), to run tests.
 
+Running `scripts/test` will:
+- Check for Go
+- Check that GOPATH is set
+- Download & Install gnatsd (or use the one already downloaded into the GOPATH)
+- Update the PATH to prepend the godep workspace
+- Install ginkgo (from the godep vendored sources into the godep workspace bin)
+- Run all the tests with ginkgo (in random order, without benchmarks, using the vendored godep dependencies)
+
+Any flags passed into `scripts/test` will be passed into ginkgo.
+
+```bash
+# run all the tests
+scripts/test
+
+# run only tests whose names match Registry
+scripts/test -focus=Registry
+
+# run only the tests in the registry package
+scripts/test registry
 ```
-go env
-go get -v ./...
-go build -v ./...
-go test -v ./...
 
-# just run tests whose names match Registry
-go test -v ./... -gocheck.f=Registry
+To run the tests using GOPATH dependency sources (bypassing vendored dependencies):
 
-# run the tests for only the registry package
-go test -v ./registry
+```bash
+ginkgo -r
+```
+
+### Building
+Building creates an executable in the gorouter/ dir:
+
+```bash
+go build
+```
+
+### Installing
+Installing creates an executable in the $GOPATH/bin dir:
+
+```bash
+go install
 ```
 
 ### Start
@@ -72,7 +102,7 @@ go get github.com/apcera/gnatsd
 gnatsd &
 
 # Start gorouter
-router
+gorouter
 ```
 
 ### Usage
@@ -130,9 +160,9 @@ Gorouter provides `/varz` and `/healthz` http endpoints for monitoring.
 
 The `/routes` endpoint returns the entire routing table as JSON. Each route has an associated array of host:port entries.
 
-All of the endpoints require http basic authentication, credentials for which
-can be acquired through NATS. The `port`, `user` and password (`pass` is the config attribute) can be explicitly set in the gorouter.yml config
-file's `status` section.
+Aside from the two monitoring http endpoints (which are only reachable via the status port), specifying the `User-Agent` header with a value of `HTTP-Monitor/1.1` also returns the current health of the router. This is particularly useful when performing healthchecks from a Load Balancer.
+
+Because of the nature of the data present in `/varz` and `/routes`, they require http basic authentication credentials which can be acquired through NATS. The `port`, `user` and password (`pass` is the config attribute) can be explicitly set in the gorouter.yml config file's `status` section.
 
 ```
 status:
@@ -144,6 +174,22 @@ status:
 Example interaction with curl:
 
 ```
+curl -vvv -A "HTTP-Monitor/1.1" http://127.0.0.1/
+* About to connect() to 127.0.0.1 port 80 (#0)
+*   Trying 127.0.0.1... connected
+> GET / HTTP/1.1
+> User-Agent: HTTP-Monitor/1.1
+> Host: 127.0.0.1
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< Date: Mon, 10 Feb 2014 00:55:25 GMT
+< Transfer-Encoding: chunked
+<
+ok
+* Connection #0 to host 127.0.0.1 left intact
+* Closing connection #0
+
 curl -vvv "http://someuser:somepass@127.0.0.1:8080/routes"
 * About to connect() to 127.0.0.1 port 8080 (#0)
 *   Trying 127.0.0.1...
@@ -155,12 +201,12 @@ curl -vvv "http://someuser:somepass@127.0.0.1:8080/routes"
 > User-Agent: curl/7.24.0 (x86_64-apple-darwin12.0) libcurl/7.24.0 OpenSSL/0.9.8r zlib/1.2.5
 > Host: 127.0.0.1:8080
 > Accept: */*
-> 
+>
 < HTTP/1.1 200 OK
 < Content-Type: application/json
 < Date: Mon, 25 Mar 2013 20:31:27 GMT
 < Transfer-Encoding: chunked
-< 
+<
 {"0295dd314aaf582f201e655cbd74ade5.cloudfoundry.me":["127.0.0.1:34567"],"03e316d6aa375d1dc1153700da5f1798.cloudfoundry.me":["127.0.0.1:34568"]}
 ```
 

@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,26 +11,35 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudfoundry/gorouter/access_log"
+	"github.com/cloudfoundry/gorouter/common"
+	router_http "github.com/cloudfoundry/gorouter/common/http"
 	"github.com/cloudfoundry/gorouter/route"
 	steno "github.com/cloudfoundry/gosteno"
 )
 
-const (
-	VcapBackendHeader     = "X-Vcap-Backend"
-	CfRouteEndpointHeader = "X-Cf-RouteEndpoint"
-	VcapRouterHeader      = "X-Vcap-Router"
-)
-
 type RequestHandler struct {
-	logger *steno.Logger
+	logger    *steno.Logger
+	reporter  ProxyReporter
+	logrecord *access_log.AccessLogRecord
 
 	request  *http.Request
 	response http.ResponseWriter
-
-	transport *http.Transport
 }
 
-func NewRequestHandler(request *http.Request, response http.ResponseWriter) RequestHandler {
+func NewRequestHandler(request *http.Request, response http.ResponseWriter, r ProxyReporter,
+	alr *access_log.AccessLogRecord) RequestHandler {
+	return RequestHandler{
+		logger:    createLogger(request),
+		reporter:  r,
+		logrecord: alr,
+
+		request:  request,
+		response: response,
+	}
+}
+
+func createLogger(request *http.Request) *steno.Logger {
 	logger := steno.NewLogger("router.proxy.request-handler")
 
 	logger.Set("RemoteAddr", request.RemoteAddr)
@@ -38,33 +48,37 @@ func NewRequestHandler(request *http.Request, response http.ResponseWriter) Requ
 	logger.Set("X-Forwarded-For", request.Header["X-Forwarded-For"])
 	logger.Set("X-Forwarded-Proto", request.Header["X-Forwarded-Proto"])
 
-	return RequestHandler{
-		logger: logger,
+	return logger
+}
 
-		request:  request,
-		response: response,
-	}
+func (h *RequestHandler) Logger() *steno.Logger {
+	return h.logger
 }
 
 func (h *RequestHandler) HandleHeartbeat() {
+	h.logrecord.StatusCode = http.StatusOK
 	h.response.WriteHeader(http.StatusOK)
 	h.response.Write([]byte("ok\n"))
+	h.request.Close = true
 }
 
 func (h *RequestHandler) HandleUnsupportedProtocol() {
-	client, connection, err := h.hijack()
+	// must be hijacked, otherwise no response is sent back
+	conn, buf, err := h.hijack()
 	if err != nil {
-		h.writeStatus(http.StatusBadRequest, "Unsupported protocol.")
+		h.writeStatus(http.StatusBadRequest, "Unsupported protocol")
 		return
 	}
 
-	fmt.Fprintf(connection, "HTTP/1.0 400 Bad Request\r\n\r\n")
-	connection.Flush()
-	client.Close()
+	h.logrecord.StatusCode = http.StatusBadRequest
+	fmt.Fprintf(buf, "HTTP/1.0 400 Bad Request\r\n\r\n")
+	buf.Flush()
+	conn.Close()
 }
 
 func (h *RequestHandler) HandleMissingRoute() {
 	h.logger.Warnf("proxy.endpoint.not-found")
+
 	h.response.Header().Set("X-Cf-RouterError", "unknown_route")
 	message := fmt.Sprintf("Requested route ('%s') does not exist.", h.request.Host)
 	h.writeStatus(http.StatusNotFound, message)
@@ -73,97 +87,149 @@ func (h *RequestHandler) HandleMissingRoute() {
 func (h *RequestHandler) HandleBadGateway(err error) {
 	h.logger.Set("Error", err.Error())
 	h.logger.Warnf("proxy.endpoint.failed")
+
 	h.response.Header().Set("X-Cf-RouterError", "endpoint_failure")
 	h.writeStatus(http.StatusBadGateway, "Registered endpoint failed to handle the request.")
 }
 
-func (h *RequestHandler) HandleTcpRequest(endpoint *route.Endpoint) {
+func (h *RequestHandler) HandleTcpRequest(iter route.EndpointIterator) {
 	h.logger.Set("Upgrade", "tcp")
 
-	err := h.serveTcp(endpoint)
+	err := h.serveTcp(iter)
 	if err != nil {
-		h.logger.Set("Error", err.Error())
-		h.logger.Warn("proxy.tcp.failed")
 		h.writeStatus(http.StatusBadRequest, "TCP forwarding to endpoint failed.")
 	}
 }
 
-func (h *RequestHandler) HandleWebSocketRequest(endpoint *route.Endpoint) {
-	h.setupRequest(endpoint)
-
+func (h *RequestHandler) HandleWebSocketRequest(iter route.EndpointIterator) {
 	h.logger.Set("Upgrade", "websocket")
 
-	err := h.serveWebSocket(endpoint)
+	err := h.serveWebSocket(iter)
 	if err != nil {
-		h.logger.Set("Error", err.Error())
-		h.logger.Warn("proxy.websocket.failed")
 		h.writeStatus(http.StatusBadRequest, "WebSocket request to endpoint failed.")
 	}
 }
 
-func (h *RequestHandler) HandleHttpRequest(transport *http.Transport, endpoint *route.Endpoint) (*http.Response, error) {
-	h.transport = transport
+func (h *RequestHandler) writeStatus(code int, message string) {
+	body := fmt.Sprintf("%d %s: %s", code, http.StatusText(code), message)
 
-	h.setupRequest(endpoint)
-	h.setupConnection()
+	h.logger.Warn(body)
+	h.logrecord.StatusCode = code
 
-	endpointResponse, err := transport.RoundTrip(h.request)
+	http.Error(h.response, body, code)
+	if code > 299 {
+		h.response.Header().Del("Connection")
+	}
+}
+
+func (h *RequestHandler) serveTcp(iter route.EndpointIterator) error {
+	var err error
+	var connection net.Conn
+
+	client, _, err := h.hijack()
 	if err != nil {
-		return endpointResponse, err
+		return err
 	}
 
-	h.forwardResponseHeaders(endpointResponse)
+	defer func() {
+		client.Close()
+		if connection != nil {
+			connection.Close()
+		}
+	}()
 
-	h.setupStickySession(endpointResponse, endpoint)
+	retry := 0
+	for {
+		endpoint := iter.Next()
+		if endpoint == nil {
+			h.reporter.CaptureBadGateway(h.request)
+			err = noEndpointsAvailable
+			h.HandleBadGateway(err)
+			return err
+		}
 
-	return endpointResponse, err
-}
+		connection, err = net.DialTimeout("tcp", endpoint.CanonicalAddr(), 5*time.Second)
+		if err == nil {
+			break
+		}
 
-func (h *RequestHandler) SetTraceHeaders(routerIp, addr string) {
-	h.response.Header().Set(VcapRouterHeader, routerIp)
-	h.response.Header().Set(VcapBackendHeader, addr)
-	h.response.Header().Set(CfRouteEndpointHeader, addr)
-}
+		iter.EndpointFailed()
 
-func (h *RequestHandler) WriteResponse(endpointResponse *http.Response) int64 {
-	h.response.WriteHeader(endpointResponse.StatusCode)
-
-	bytesSent, err := h.copyToResponse(endpointResponse.Body)
-	if err != nil {
 		h.logger.Set("Error", err.Error())
-		h.logger.Warnf("proxy.response.copy-failed")
+		h.logger.Warn("proxy.tcp.failed")
+
+		retry++
+		if retry == retries {
+			return err
+		}
 	}
 
-	return bytesSent
+	if connection != nil {
+		forwardIO(client, connection)
+	}
+
+	return nil
 }
 
-func (h *RequestHandler) copyToResponse(src io.ReadCloser) (int64, error) {
-	if src == nil {
-		return 0, nil
-	}
+func (h *RequestHandler) serveWebSocket(iter route.EndpointIterator) error {
+	var err error
+	var connection net.Conn
 
-	var dst io.Writer = h.response
-
-	// Use MaxLatencyFlusher if needed
-	if v, ok := h.response.(writeFlusher); ok {
-		u := NewMaxLatencyWriter(v, 50*time.Millisecond)
-		defer u.Stop()
-		dst = u
-	}
-
-	copied, err := io.Copy(dst, src)
+	client, _, err := h.hijack()
 	if err != nil {
-		h.transport.CancelRequest(h.request)
+		return err
 	}
 
-	return copied, err
+	defer func() {
+		client.Close()
+		if connection != nil {
+			connection.Close()
+		}
+	}()
 
+	retry := 0
+	for {
+		endpoint := iter.Next()
+		if endpoint == nil {
+			h.reporter.CaptureBadGateway(h.request)
+			err = noEndpointsAvailable
+			h.HandleBadGateway(err)
+			return err
+		}
+
+		connection, err = net.DialTimeout("tcp", endpoint.CanonicalAddr(), 5*time.Second)
+		if err == nil {
+			h.setupRequest(endpoint)
+			break
+		}
+
+		iter.EndpointFailed()
+
+		h.logger.Set("Error", err.Error())
+		h.logger.Warn("proxy.websocket.failed")
+
+		retry++
+		if retry == retries {
+			return err
+		}
+	}
+
+	if connection != nil {
+		err = h.request.Write(connection)
+		if err != nil {
+			return err
+		}
+
+		forwardIO(client, connection)
+	}
+	return nil
 }
 
 func (h *RequestHandler) setupRequest(endpoint *route.Endpoint) {
 	h.setRequestURL(endpoint.CanonicalAddr())
 	h.setRequestXForwardedFor()
-	h.setRequestXRequestStart()
+	setRequestXRequestStart(h.request)
+	setRequestXVcapRequestId(h.request, h.logger)
 }
 
 func (h *RequestHandler) setRequestURL(addr string) {
@@ -172,118 +238,46 @@ func (h *RequestHandler) setRequestURL(addr string) {
 }
 
 func (h *RequestHandler) setRequestXForwardedFor() {
-	if host, _, err := net.SplitHostPort(h.request.RemoteAddr); err == nil {
-		// We assume there is a trusted upstream (L7 LB) that properly
-		// strips client's XFF header
-
-		// This is sloppy but fine since we don't share this request or
-		// headers. Otherwise we should copy the underlying header and
-		// append
-		xForwardFor := append(h.request.Header["X-Forwarded-For"], host)
-		h.request.Header.Set("X-Forwarded-For", strings.Join(xForwardFor, ", "))
+	if clientIP, _, err := net.SplitHostPort(h.request.RemoteAddr); err == nil {
+		// If we aren't the first proxy retain prior
+		// X-Forwarded-For information as a comma+space
+		// separated list and fold multiple headers into one.
+		if prior, ok := h.request.Header["X-Forwarded-For"]; ok {
+			clientIP = strings.Join(prior, ", ") + ", " + clientIP
+		}
+		h.request.Header.Set("X-Forwarded-For", clientIP)
 	}
 }
 
-func (h *RequestHandler) setRequestXRequestStart() {
-	if _, ok := h.request.Header[http.CanonicalHeaderKey("X-Request-Start")]; !ok {
-		h.request.Header.Set("X-Request-Start", strconv.FormatInt(time.Now().UnixNano()/1e6, 10))
+func setRequestXRequestStart(request *http.Request) {
+	if _, ok := request.Header[http.CanonicalHeaderKey("X-Request-Start")]; !ok {
+		request.Header.Set("X-Request-Start", strconv.FormatInt(time.Now().UnixNano()/1e6, 10))
 	}
 }
 
-func (h *RequestHandler) setupConnection() {
-	// Use a new connection for every request
-	// Keep-alive can be bolted on later, if we want to
-	h.request.Close = true
-	h.request.Header.Del("Connection")
-}
-
-func (h *RequestHandler) serveTcp(endpoint *route.Endpoint) error {
-	var err error
-
-	client, _, err := h.hijack()
-	if err != nil {
-		return err
-	}
-
-	connection, err := net.Dial("tcp", endpoint.CanonicalAddr())
-	if err != nil {
-		return err
-	}
-
-	defer client.Close()
-	defer connection.Close()
-
-	forwardIO(client, connection)
-
-	return nil
-}
-
-func (h *RequestHandler) serveWebSocket(endpoint *route.Endpoint) error {
-	var err error
-
-	client, _, err := h.hijack()
-	if err != nil {
-		return err
-	}
-
-	connection, err := net.Dial("tcp", endpoint.CanonicalAddr())
-	if err != nil {
-		return err
-	}
-
-	defer client.Close()
-	defer connection.Close()
-
-	err = h.request.Write(connection)
-	if err != nil {
-		return err
-	}
-
-	forwardIO(client, connection)
-
-	return nil
-}
-
-func (h *RequestHandler) forwardResponseHeaders(endpointResponse *http.Response) {
-	for k, vv := range endpointResponse.Header {
-		for _, v := range vv {
-			h.response.Header().Add(k, v)
+func setRequestXVcapRequestId(request *http.Request, logger *steno.Logger) {
+	uuid, err := common.GenerateUUID()
+	if err == nil {
+		request.Header.Set(router_http.VcapRequestIdHeader, uuid)
+		if logger != nil {
+			logger.Set(router_http.VcapRequestIdHeader, uuid)
 		}
 	}
 }
 
-func (h *RequestHandler) setupStickySession(endpointResponse *http.Response, endpoint *route.Endpoint) {
-	needSticky := false
-	for _, v := range endpointResponse.Cookies() {
-		if v.Name == StickyCookieKey {
-			needSticky = true
-			break
-		}
+func setRequestXCfInstanceId(request *http.Request, endpoint *route.Endpoint) {
+	value := endpoint.PrivateInstanceId
+	if value == "" {
+		value = endpoint.CanonicalAddr()
 	}
 
-	if needSticky && endpoint.PrivateInstanceId != "" {
-		cookie := &http.Cookie{
-			Name:  VcapCookieId,
-			Value: endpoint.PrivateInstanceId,
-			Path:  "/",
-		}
-
-		http.SetCookie(h.response, cookie)
-	}
-}
-
-func (h *RequestHandler) writeStatus(code int, message string) {
-	body := fmt.Sprintf("%d %s: %s", code, http.StatusText(code), message)
-
-	h.logger.Warn(body)
-
-	http.Error(h.response, body, code)
+	request.Header.Set(router_http.CfInstanceIdHeader, value)
 }
 
 func (h *RequestHandler) hijack() (client net.Conn, io *bufio.ReadWriter, err error) {
 	hijacker, ok := h.response.(http.Hijacker)
 	if !ok {
-		panic("response writer cannot hijack")
+		return nil, nil, errors.New("response writer cannot hijack")
 	}
 
 	return hijacker.Hijack()

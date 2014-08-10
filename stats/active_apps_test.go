@@ -1,99 +1,89 @@
-package stats
+package stats_test
 
 import (
+	. "github.com/cloudfoundry/gorouter/stats"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
 	"fmt"
-	. "launchpad.net/gocheck"
 	"math/rand"
 	"time"
 )
 
-type ActiveAppsSuite struct {
-	*ActiveApps
-}
+var _ = Describe("ActiveApps", func() {
+	var activeApps *ActiveApps
 
-var _ = Suite(&ActiveAppsSuite{})
+	BeforeEach(func() {
+		activeApps = NewActiveApps()
+	})
 
-func (s *ActiveAppsSuite) SetUpTest(c *C) {
-	s.ActiveApps = NewActiveApps()
-}
+	It("marks application ids active", func() {
+		activeApps.Mark("a", time.Unix(1, 0))
+		apps := activeApps.ActiveSince(time.Unix(1, 0))
+		Ω(apps).To(HaveLen(1))
+	})
 
-func (s *ActiveAppsSuite) checkHeapLen(c *C, n int) {
-	c.Check(s.i.Len(), Equals, n)
-	c.Check(s.j.Len(), Equals, n)
-}
+	It("marks existing applications", func() {
+		activeApps.Mark("b", time.Unix(1, 0))
+		apps := activeApps.ActiveSince(time.Unix(1, 0))
+		Ω(apps).To(HaveLen(1))
 
-func (s *ActiveAppsSuite) TestMark(c *C) {
-	s.Mark("a", time.Unix(1, 0))
-	s.checkHeapLen(c, 1)
+		activeApps.Mark("b", time.Unix(2, 0))
+		apps = activeApps.ActiveSince(time.Unix(1, 0))
+		Ω(apps).To(HaveLen(1))
+	})
 
-	s.Mark("b", time.Unix(1, 0))
-	s.checkHeapLen(c, 2)
+	It("trims aging application ids", func() {
+		for i, x := range []string{"a", "b", "c"} {
+			activeApps.Mark(x, time.Unix(int64(i+1), 0))
+		}
+		apps := activeApps.ActiveSince(time.Unix(0, 0))
+		Ω(apps).To(HaveLen(3))
 
-	s.Mark("b", time.Unix(2, 0))
-	s.checkHeapLen(c, 2)
-}
+		activeApps.Trim(time.Unix(1, 0))
+		apps = activeApps.ActiveSince(time.Unix(0, 0))
+		Ω(apps).To(HaveLen(2))
 
-func (s *ActiveAppsSuite) TestTrim(c *C) {
-	for i, x := range []string{"a", "b", "c"} {
-		s.Mark(x, time.Unix(int64(i), 0))
+		activeApps.Trim(time.Unix(2, 0))
+		apps = activeApps.ActiveSince(time.Unix(0, 0))
+		Ω(apps).To(HaveLen(1))
+
+		activeApps.Trim(time.Unix(3, 0))
+		apps = activeApps.ActiveSince(time.Unix(0, 0))
+		Ω(apps).To(HaveLen(0))
+	})
+
+	It("returns application ids active since a point in time", func() {
+		activeApps.Mark("a", time.Unix(1, 0))
+		Ω(activeApps.ActiveSince(time.Unix(1, 0))).To(Equal([]string{"a"}))
+		Ω(activeApps.ActiveSince(time.Unix(3, 0))).To(Equal([]string{}))
+		Ω(activeApps.ActiveSince(time.Unix(5, 0))).To(Equal([]string{}))
+
+		activeApps.Mark("b", time.Unix(3, 0))
+		Ω(activeApps.ActiveSince(time.Unix(1, 0))).To(Equal([]string{"b", "a"}))
+		Ω(activeApps.ActiveSince(time.Unix(3, 0))).To(Equal([]string{"b"}))
+		Ω(activeApps.ActiveSince(time.Unix(5, 0))).To(Equal([]string{}))
+	})
+
+	benchmarkMark := func(b Benchmarker, apps int) {
+		var i int
+
+		x := make([]string, 0)
+		for i = 0; i < apps; i++ {
+			x = append(x, fmt.Sprintf("%d", i))
+		}
+
+		b.Time(fmt.Sprintf("Mark %d application ids", apps), func() {
+			for i = 0; i < apps; i++ {
+				activeApps.Mark(x[rand.Intn(len(x))], time.Unix(int64(i), 0))
+			}
+		})
 	}
 
-	s.checkHeapLen(c, 3)
-
-	s.Trim(time.Unix(0, 0))
-	s.checkHeapLen(c, 2)
-
-	s.Trim(time.Unix(1, 0))
-	s.checkHeapLen(c, 1)
-
-	s.Trim(time.Unix(2, 0))
-	s.checkHeapLen(c, 0)
-
-	s.Trim(time.Unix(3, 0))
-	s.checkHeapLen(c, 0)
-}
-
-func (s *ActiveAppsSuite) TestActiveSince(c *C) {
-	s.Mark("a", time.Unix(1, 0))
-	c.Check(s.ActiveSince(time.Unix(1, 0)), DeepEquals, []string{"a"})
-	c.Check(s.ActiveSince(time.Unix(3, 0)), DeepEquals, []string{})
-	c.Check(s.ActiveSince(time.Unix(5, 0)), DeepEquals, []string{})
-
-	s.Mark("b", time.Unix(3, 0))
-	c.Check(s.ActiveSince(time.Unix(1, 0)), DeepEquals, []string{"b", "a"})
-	c.Check(s.ActiveSince(time.Unix(3, 0)), DeepEquals, []string{"b"})
-	c.Check(s.ActiveSince(time.Unix(5, 0)), DeepEquals, []string{})
-}
-
-func (s *ActiveAppsSuite) benchmarkMark(c *C, apps int) {
-	var i int
-
-	s.SetUpTest(c)
-
-	x := make([]string, 0)
-	for i = 0; i < apps; i++ {
-		x = append(x, fmt.Sprintf("%d", i))
-	}
-
-	c.ResetTimer()
-
-	for i = 0; i < c.N; i++ {
-		s.Mark(x[rand.Intn(len(x))], time.Unix(int64(i), 0))
-	}
-}
-
-func (s *ActiveAppsSuite) BenchmarkMarkDifferent10(c *C) {
-	s.benchmarkMark(c, 10)
-}
-
-func (s *ActiveAppsSuite) BenchmarkMarkDifferent100(c *C) {
-	s.benchmarkMark(c, 100)
-}
-
-func (s *ActiveAppsSuite) BenchmarkMarkDifferent1000(c *C) {
-	s.benchmarkMark(c, 1000)
-}
-
-func (s *ActiveAppsSuite) BenchmarkMarkDifferent10000(c *C) {
-	s.benchmarkMark(c, 10000)
-}
+	Measure("Mark performance", func(b Benchmarker) {
+		benchmarkMark(b, 10)
+		benchmarkMark(b, 100)
+		benchmarkMark(b, 1000)
+		benchmarkMark(b, 10000)
+	}, 5)
+})

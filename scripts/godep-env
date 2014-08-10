@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -e -x -u
+
+GO_DEPS_PATH=$(cd $(dirname $0)/.. && pwd)/Godeps/_workspace
+
+mkdir -p $GO_DEPS_PATH/bin
+
+export GOPATH=$GO_DEPS_PATH:$GOPATH
+export PATH=$GO_DEPS_PATH/bin:$PATH

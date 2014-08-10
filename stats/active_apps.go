@@ -92,7 +92,7 @@ type ActiveApps struct {
 func NewActiveApps() *ActiveApps {
 	x := &ActiveApps{}
 
-	x.t = time.NewTicker(1 * time.Minute)
+	x.t = time.NewTicker(ActiveAppsTrimInterval)
 
 	x.m = make(map[string]*activeAppsEntry)
 	x.i.Init()
