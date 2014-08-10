@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -14,7 +14,7 @@ type AppCreationError struct {
 }
 
 func (e *AppCreationError) Error() string {
-	return fmt.Sprintf("Tsuru failed to create the app %q: %s", e.app, e.Err)
+	return fmt.Sprintf("tsuru failed to create the app %q: %s", e.app, e.Err)
 }
 
 // NoTeamsError is the error returned when one tries to create an app without
@@ -23,4 +23,12 @@ type NoTeamsError struct{}
 
 func (err NoTeamsError) Error() string {
 	return "Cannot create app without teams."
+}
+
+// ManyTeamsError is the error returned when the user has more than one team and tries to
+// create an app without specify a app team owner.
+type ManyTeamsError struct{}
+
+func (err ManyTeamsError) Error() string {
+	return "You belong to more than one team, choose one to be owner for this app."
 }

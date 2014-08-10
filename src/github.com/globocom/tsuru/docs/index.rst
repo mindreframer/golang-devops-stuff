@@ -2,82 +2,26 @@
    Use of this source code is governed by a BSD-style
    license that can be found in the LICENSE file.
 
-+++++++++++++
-Documentation
-+++++++++++++
+:title: tsuru an extensible and open source Platform as a Service.
+:description: Welcome to tsuru, an extensible and open source Platform as a Service (PaaS).
 
-Using Tsuru
------------
+Welcome
+=======
 
-* :doc:`Why Tsuru? </why>`.
-* :doc:`Overview </overview>`
-* :doc:`FAQ </faq>`.
+tsuru is an open source PaaS that makes it easy and fast to deploy and manage applications
+on your own servers. 
 
-Application Deployment
-++++++++++++++++++++++
-
-* :doc:`building your application </apps/quickstart>`
-* :doc:`python/django </apps/quickstart/python>`
-* :doc:`ruby/rails </apps/quickstart/ruby>`
-* :doc:`php </apps/quickstart/php>`
-* :doc:`go </apps/quickstart/go>`
-
-* :doc:`understanding deployment hooks </apps/deploy-hooks>`
-* :doc:`recovery and troubleshooting </apps/recovery>`
-
-CLI
-+++
-
-* :doc:`clients installation guide </install/client>`
-* :doc:`Tsuru client usage guide </apps/client/usage>`
-
-Services
-++++++++
-
-* :doc:`using services </apps/client/services>`
-
-Running Tsuru
--------------
-
-Deploy Tsuru
-++++++++++++
-
-* :doc:`Tsuru and juju </build>`
-
-* :doc:`docker provisioner architecture </provisioners/docker/architecture>`
-* :doc:`Tsuru and docker on ubuntu </docker>`
-* :doc:`Tsuru and docker on centos </docker-centos>`
-
-* :doc:`configuration </config>`
-* :doc:`backing up Tsuru </server/backup>`
-
-* :doc:`api reference </api>`
-
-Services
-++++++++
-
-* :doc:`building your service </services/build>`
-* :doc:`crane usage guide </services/usage>`
-* :doc:`services api workflow </services/api>`
-
-Installing services
-+++++++++++++++++++
-
-* :doc:`mysql </services/mysql-example>`
-
-Get Involved
-------------
-
-* :doc:`how to contribute </contribute>`
-* :doc:`coding style </contribute/coding-style>`
-* :doc:`setting up your development environment </contribute/setting-up-your-tsuru-development-environment>`
-* :doc:`community </community>`
-* :doc:`releases </releases/index>`
+To get started, first read :ref:`understanding tsuru <understanding>`.
 
 .. toctree::
-    :hidden:
-    :glob:
+    :maxdepth: 2
 
-    *
-    */*
-    */*/*
+    understanding/index
+    installing/index
+    managing/index
+    using/index
+    contributing/index
+    services/index
+    reference/index
+    faq
+    releases/index

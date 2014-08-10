@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,7 +6,7 @@ package cmd
 
 import (
 	"bytes"
-	"github.com/globocom/tsuru/fs/testing"
+	"github.com/tsuru/tsuru/fs/testing"
 	"io/ioutil"
 	"launchpad.net/gocheck"
 	"os"
@@ -51,7 +51,7 @@ func (s *S) TestReadTarget(c *gocheck.C) {
 	defer func() {
 		fsystem = nil
 	}()
-	target, err := readTarget()
+	target, err := ReadTarget()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(target, gocheck.Equals, "http://tsuru.google.com")
 }
@@ -61,7 +61,7 @@ func (s *S) TestReadTargetReturnsEmptyStringIfTheFileDoesNotExist(c *gocheck.C) 
 	defer func() {
 		fsystem = nil
 	}()
-	target, err := readTarget()
+	target, err := ReadTarget()
 	c.Assert(target, gocheck.Equals, "")
 	c.Assert(err, gocheck.NotNil)
 	_, ok := err.(undefinedTargetError)
@@ -73,7 +73,7 @@ func (s *S) TestReadTargetTrimsFileContent(c *gocheck.C) {
 	defer func() {
 		fsystem = nil
 	}()
-	target, err := readTarget()
+	target, err := ReadTarget()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(target, gocheck.Equals, "http://tsuru.io")
 }
@@ -85,7 +85,7 @@ func (s *S) TestDeleteTargetFile(c *gocheck.C) {
 		fsystem = nil
 	}()
 	deleteTargetFile()
-	targetFile := joinWithUserDir(".tsuru_target")
+	targetFile := JoinWithUserDir(".tsuru_target")
 	c.Assert(rfs.HasAction("remove "+targetFile), gocheck.Equals, true)
 }
 
@@ -196,7 +196,7 @@ func (s *S) TestTargetAddWithSet(c *gocheck.C) {
 	err := targetAdd.Run(context, nil)
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(context.Stdout.(*bytes.Buffer).String(), gocheck.Equals, "New target default -> http://tsuru.google.com added to target list and defined as the current target\n")
-	t, err := readTarget()
+	t, err := ReadTarget()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(t, gocheck.Equals, "http://tsuru.google.com")
 }
@@ -284,10 +284,10 @@ func (s *S) TestTargetRun(c *gocheck.C) {
 default	http://tsuru.google.com
 other	http://other.tsuru.io`
 	rfs := &testing.RecordingFs{}
-	f, _ := rfs.Create(joinWithUserDir(".tsuru_target"))
+	f, _ := rfs.Create(JoinWithUserDir(".tsuru_target"))
 	f.Write([]byte("http://tsuru.io"))
 	f.Close()
-	f, _ = rfs.Create(joinWithUserDir(".tsuru_targets"))
+	f, _ = rfs.Create(JoinWithUserDir(".tsuru_targets"))
 	f.Write([]byte(content))
 	f.Close()
 	fsystem = rfs
@@ -340,7 +340,7 @@ func (s *S) TestTargetRemoveInfo(c *gocheck.C) {
 
 func (s *S) TestTargetRemove(c *gocheck.C) {
 	rfs := &testing.RecordingFs{FileContent: "first\thttp://tsuru.io/\ndefault\thttp://tsuru.google.com"}
-	f, _ := rfs.Create(joinWithUserDir(".tsuru_target"))
+	f, _ := rfs.Create(JoinWithUserDir(".tsuru_target"))
 	f.Write([]byte("http://tsuru.google.com"))
 	f.Close()
 	fsystem = rfs
@@ -372,10 +372,10 @@ func (s *S) TestTargetRemove(c *gocheck.C) {
 
 func (s *S) TestTargetRemoveCurrentTarget(c *gocheck.C) {
 	rfs := &testing.RecordingFs{}
-	f, _ := rfs.Create(joinWithUserDir(".tsuru_targets"))
+	f, _ := rfs.Create(JoinWithUserDir(".tsuru_targets"))
 	f.Write([]byte("first\thttp://tsuru.io/\ndefault\thttp://tsuru.google.com"))
 	f.Close()
-	f, _ = rfs.Create(joinWithUserDir(".tsuru_target"))
+	f, _ = rfs.Create(JoinWithUserDir(".tsuru_target"))
 	f.Write([]byte("http://tsuru.google.com"))
 	f.Close()
 	fsystem = rfs
@@ -386,7 +386,7 @@ func (s *S) TestTargetRemoveCurrentTarget(c *gocheck.C) {
 	context := &Context{[]string{"default"}, manager.stdout, manager.stderr, manager.stdin}
 	err := targetRemove.Run(context, nil)
 	c.Assert(err, gocheck.IsNil)
-	_, err = readTarget()
+	_, err = ReadTarget()
 	c.Assert(err, gocheck.NotNil)
 }
 

@@ -7,15 +7,11 @@ package testing
 import (
 	"errors"
 	"fmt"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/provision"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/provision"
 	"io"
-	"sort"
-	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -25,70 +21,45 @@ func init() {
 	provision.Register("fake", &FakeProvisioner{})
 }
 
-// Fake implementation for provision.Unit.
-type FakeUnit struct {
-	Name       string
-	Ip         string
-	InstanceId string
-	Machine    int
-	Status     provision.Status
-}
-
-func (u *FakeUnit) GetName() string {
-	return u.Name
-}
-
-func (u *FakeUnit) GetMachine() int {
-	return u.Machine
-}
-
-func (u *FakeUnit) GetStatus() provision.Status {
-	return u.Status
-}
-
-func (u *FakeUnit) GetInstanceId() string {
-	return u.InstanceId
-}
-
-func (u *FakeUnit) Available() bool {
-	return u.Status == provision.StatusStarted || u.Status == provision.StatusUnreachable
-}
-
-func (u *FakeUnit) GetIp() string {
-	return u.Ip
-}
-
 // Fake implementation for provision.App.
 type FakeApp struct {
-	name     string
-	platform string
-	units    []provision.AppUnit
-	logs     []string
-	logMut   sync.Mutex
-	Commands []string
-	commMut  sync.Mutex
-	ready    bool
-	deploys  uint
-	env      map[string]bind.EnvVar
+	name           string
+	platform       string
+	units          []provision.Unit
+	logs           []string
+	logMut         sync.Mutex
+	Commands       []string
+	Memory         int
+	commMut        sync.Mutex
+	ready          bool
+	deploys        uint
+	env            map[string]bind.EnvVar
+	UpdatePlatform bool
 }
 
 func NewFakeApp(name, platform string, units int) *FakeApp {
 	app := FakeApp{
 		name:     name,
 		platform: platform,
-		units:    make([]provision.AppUnit, units),
+		units:    make([]provision.Unit, units),
 	}
 	namefmt := "%s/%d"
 	for i := 0; i < units; i++ {
-		app.units[i] = &FakeUnit{
-			Name:       fmt.Sprintf(namefmt, name, i),
-			Machine:    i + 1,
-			Status:     provision.StatusStarted,
-			Ip:         fmt.Sprintf("10.10.10.%d", i+1),
-			InstanceId: fmt.Sprintf("i-0%d", i+1),
+		app.units[i] = provision.Unit{
+			Name:   fmt.Sprintf(namefmt, name, i),
+			Status: provision.StatusStarted,
+			Ip:     fmt.Sprintf("10.10.10.%d", i+1),
 		}
 	}
 	return &app
+}
+
+func (a *FakeApp) GetMemory() int {
+	return a.Memory
+}
+
+func (a *FakeApp) GetSwap() int {
+	return a.Memory
 }
 
 func (a *FakeApp) Logs() []string {
@@ -99,8 +70,8 @@ func (a *FakeApp) Logs() []string {
 	return logs
 }
 
-func (a *FakeApp) HasLog(source, message string) bool {
-	log := source + message
+func (a *FakeApp) HasLog(source, unit, message string) bool {
+	log := source + unit + message
 	a.logMut.Lock()
 	defer a.logMut.Unlock()
 	for _, l := range a.logs {
@@ -126,9 +97,9 @@ func (a *FakeApp) Ready() error {
 	return nil
 }
 
-func (a *FakeApp) Log(message, source string) error {
+func (a *FakeApp) Log(message, source, unit string) error {
 	a.logMut.Lock()
-	a.logs = append(a.logs, source+message)
+	a.logs = append(a.logs, source+unit+message)
 	a.logMut.Unlock()
 	return nil
 }
@@ -145,36 +116,12 @@ func (a *FakeApp) GetDeploys() uint {
 	return a.deploys
 }
 
-func (a *FakeApp) ProvisionedUnits() []provision.AppUnit {
+func (a *FakeApp) Units() []provision.Unit {
 	return a.units
 }
 
-func (a *FakeApp) AddUnit(u *FakeUnit) {
+func (a *FakeApp) AddUnit(u provision.Unit) {
 	a.units = append(a.units, u)
-}
-
-func (a *FakeApp) RemoveUnit(id string) error {
-	index := -1
-	for i, u := range a.units {
-		if u.GetName() == id {
-			index = i
-			break
-		}
-	}
-	if index < 0 {
-		return errors.New("Unit not found")
-	}
-	if index < len(a.units)-1 {
-		a.units[index] = a.units[len(a.units)-1]
-	}
-	a.units = a.units[:len(a.units)-1]
-	return nil
-}
-
-func (a *FakeApp) SetUnitStatus(s provision.Status, index int) {
-	if index < len(a.units) {
-		a.units[index].(*FakeUnit).Status = s
-	}
 }
 
 func (a *FakeApp) SetEnv(env bind.EnvVar) {
@@ -205,7 +152,7 @@ func (a *FakeApp) GetIp() string {
 func (a *FakeApp) GetUnits() []bind.Unit {
 	units := make([]bind.Unit, len(a.units))
 	for i, unit := range a.units {
-		units[i] = unit.(bind.Unit)
+		units[i] = &unit
 	}
 	return units
 }
@@ -241,6 +188,10 @@ func (a *FakeApp) Run(cmd string, w io.Writer, once bool) error {
 	return nil
 }
 
+func (app *FakeApp) GetUpdatePlatform() bool {
+	return app.UpdatePlatform
+}
+
 type Cmd struct {
 	Cmd  string
 	Args []string
@@ -254,14 +205,12 @@ type failure struct {
 
 // Fake implementation for provision.Provisioner.
 type FakeProvisioner struct {
-	cmds             []Cmd
-	cmdMut           sync.Mutex
-	outputs          chan []byte
-	failures         chan failure
-	apps             map[string]provisionedApp
-	mut              sync.RWMutex
-	executedPipeline bool
-	CustomPipeline   bool
+	cmds     []Cmd
+	cmdMut   sync.Mutex
+	outputs  chan []byte
+	failures chan failure
+	apps     map[string]provisionedApp
+	mut      sync.RWMutex
 }
 
 func NewFakeProvisioner() *FakeProvisioner {
@@ -270,28 +219,6 @@ func NewFakeProvisioner() *FakeProvisioner {
 	p.failures = make(chan failure, 8)
 	p.apps = make(map[string]provisionedApp)
 	return &p
-}
-
-func (p *FakeProvisioner) ExecutedPipeline() bool {
-	return p.executedPipeline
-}
-
-func (p *FakeProvisioner) DeployPipeline() *action.Pipeline {
-	if p.CustomPipeline {
-		act := action.Action{
-			Name: "change-executed-pipeline",
-			Forward: func(ctx action.FWContext) (action.Result, error) {
-				p.executedPipeline = true
-				return nil, nil
-			},
-			Backward: func(ctx action.BWContext) {
-			},
-		}
-		actions := []*action.Action{&act}
-		pipeline := action.NewPipeline(actions...)
-		return pipeline
-	}
-	return nil
 }
 
 func (p *FakeProvisioner) getError(method string) error {
@@ -320,11 +247,11 @@ func (p *FakeProvisioner) Starts(app provision.App) int {
 	return p.apps[app.GetName()].starts
 }
 
-// InstalledDeps returns the number of InstallDeps calls for the given app.
-func (p *FakeProvisioner) InstalledDeps(app provision.App) int {
+// Stops returns the number of stops for a given app.
+func (p *FakeProvisioner) Stops(app provision.App) int {
 	p.mut.RLock()
 	defer p.mut.RUnlock()
-	return p.apps[app.GetName()].installDeps
+	return p.apps[app.GetName()].stops
 }
 
 // Returns the number of calls to restart.
@@ -376,10 +303,11 @@ func (p *FakeProvisioner) PrepareOutput(b []byte) {
 
 // PrepareFailure prepares a failure for the given method name.
 //
-// For instance, PrepareFailure("Deploy", errors.New("Deploy failed")) will
+// For instance, PrepareFailure("GitDeploy", errors.New("GitDeploy failed")) will
 // cause next Deploy call to return the given error. Multiple calls to this
 // method will enqueue failures, i.e. three calls to
-// PrepareFailure("Deploy"...) means that the three next Deploy call will fail.
+// PrepareFailure("GitDeploy"...) means that the three next GitDeploy call will
+// fail.
 func (p *FakeProvisioner) PrepareFailure(method string, err error) {
 	p.failures <- failure{method, err}
 }
@@ -406,12 +334,23 @@ func (p *FakeProvisioner) Reset() {
 	}
 }
 
-func (FakeProvisioner) Swap(app1, app2 provision.App) error {
+func (p *FakeProvisioner) Swap(app1, app2 provision.App) error {
+	pApp1, ok := p.apps[app1.GetName()]
+	if !ok {
+		return errNotProvisioned
+	}
+	pApp2, ok := p.apps[app2.GetName()]
+	if !ok {
+		return errNotProvisioned
+	}
+	pApp1.addr, pApp2.addr = pApp2.addr, pApp1.addr
+	p.apps[app1.GetName()] = pApp1
+	p.apps[app2.GetName()] = pApp2
 	return nil
 }
 
-func (p *FakeProvisioner) Deploy(app provision.App, version string, w io.Writer) error {
-	if err := p.getError("Deploy"); err != nil {
+func (p *FakeProvisioner) GitDeploy(app provision.App, version string, w io.Writer) error {
+	if err := p.getError("GitDeploy"); err != nil {
 		return err
 	}
 	p.mut.Lock()
@@ -420,8 +359,24 @@ func (p *FakeProvisioner) Deploy(app provision.App, version string, w io.Writer)
 	if !ok {
 		return errNotProvisioned
 	}
-	w.Write([]byte("Deploy called"))
+	w.Write([]byte("Git deploy called"))
 	pApp.version = version
+	p.apps[app.GetName()] = pApp
+	return nil
+}
+
+func (p *FakeProvisioner) ArchiveDeploy(app provision.App, archiveURL string, w io.Writer) error {
+	if err := p.getError("ArchiveDeploy"); err != nil {
+		return err
+	}
+	p.mut.Lock()
+	defer p.mut.Unlock()
+	pApp, ok := p.apps[app.GetName()]
+	if !ok {
+		return errNotProvisioned
+	}
+	w.Write([]byte("Archive deploy called"))
+	pApp.lastArchive = archiveURL
 	p.apps[app.GetName()] = pApp
 	return nil
 }
@@ -436,19 +391,8 @@ func (p *FakeProvisioner) Provision(app provision.App) error {
 	p.mut.Lock()
 	defer p.mut.Unlock()
 	p.apps[app.GetName()] = provisionedApp{
-		app:     app,
-		unitLen: 1,
-		units: []provision.Unit{
-			{
-				Name:       app.GetName() + "/0",
-				AppName:    app.GetName(),
-				Type:       app.GetPlatform(),
-				Status:     provision.StatusStarted,
-				InstanceId: "i-080",
-				Ip:         "10.10.10.1",
-				Machine:    1,
-			},
-		},
+		app:  app,
+		addr: fmt.Sprintf("%s.fake-lb.tsuru.io", app.GetName()),
 	}
 	return nil
 }
@@ -511,13 +455,11 @@ func (p *FakeProvisioner) AddUnits(app provision.App, n uint) ([]provision.Unit,
 	length := uint(len(pApp.units))
 	for i := uint(0); i < n; i++ {
 		unit := provision.Unit{
-			Name:       fmt.Sprintf("%s/%d", name, pApp.unitLen),
-			AppName:    name,
-			Type:       platform,
-			Status:     provision.StatusStarted,
-			InstanceId: fmt.Sprintf("i-08%d", length+i),
-			Ip:         fmt.Sprintf("10.10.10.%d", length+i),
-			Machine:    int(length + i),
+			Name:    fmt.Sprintf("%s/%d", name, pApp.unitLen),
+			AppName: name,
+			Type:    platform,
+			Status:  provision.StatusStarted,
+			Ip:      fmt.Sprintf("10.10.10.%d", length+i+1),
 		}
 		pApp.units = append(pApp.units, unit)
 		pApp.unitLen++
@@ -528,30 +470,48 @@ func (p *FakeProvisioner) AddUnits(app provision.App, n uint) ([]provision.Unit,
 	return result, nil
 }
 
-func (p *FakeProvisioner) RemoveUnit(app provision.App, name string) error {
-	if err := p.getError("RemoveUnit"); err != nil {
+func (p *FakeProvisioner) RemoveUnits(app provision.App, n uint) error {
+	if err := p.getError("RemoveUnits"); err != nil {
 		return err
 	}
-	index := -1
 	p.mut.Lock()
 	defer p.mut.Unlock()
 	pApp, ok := p.apps[app.GetName()]
 	if !ok {
 		return errNotProvisioned
 	}
-	for i, unit := range pApp.units {
-		if unit.Name == name {
+	if n >= uint(len(pApp.units)) {
+		return errors.New("too many units to remove")
+	}
+	pApp.units = pApp.units[int(n):]
+	pApp.unitLen -= int(n)
+	p.apps[app.GetName()] = pApp
+	return nil
+}
+
+func (p *FakeProvisioner) RemoveUnit(unit provision.Unit) error {
+	if err := p.getError("RemoveUnit"); err != nil {
+		return err
+	}
+	p.mut.Lock()
+	defer p.mut.Unlock()
+	app, ok := p.apps[unit.AppName]
+	if !ok {
+		return errNotProvisioned
+	}
+	index := -1
+	for i, u := range app.units {
+		if u.Name == unit.Name {
 			index = i
-			break
 		}
 	}
-	if index == -1 {
-		return errors.New("Unit not found.")
+	if index < 0 {
+		return errors.New("unit not found")
 	}
-	copy(pApp.units[index:], pApp.units[index+1:])
-	pApp.units = pApp.units[:len(pApp.units)-1]
-	pApp.unitLen--
-	p.apps[app.GetName()] = pApp
+	app.units[index] = app.units[len(app.units)-1]
+	app.units = app.units[:len(app.units)-1]
+	app.unitLen--
+	p.apps[unit.AppName] = app
 	return nil
 }
 
@@ -578,7 +538,7 @@ func (p *FakeProvisioner) ExecuteCommand(stdout, stderr io.Writer, app provision
 	p.cmdMut.Lock()
 	p.cmds = append(p.cmds, command)
 	p.cmdMut.Unlock()
-	for _ = range app.ProvisionedUnits() {
+	for _ = range app.Units() {
 		select {
 		case output = <-p.outputs:
 			select {
@@ -610,10 +570,7 @@ func (p *FakeProvisioner) ExecuteCommand(stdout, stderr io.Writer, app provision
 }
 
 func (p *FakeProvisioner) ExecuteCommandOnce(stdout, stderr io.Writer, app provision.App, cmd string, args ...string) error {
-	var (
-		output []byte
-		err    error
-	)
+	var output []byte
 	command := Cmd{
 		Cmd:  cmd,
 		Args: args,
@@ -624,81 +581,70 @@ func (p *FakeProvisioner) ExecuteCommandOnce(stdout, stderr io.Writer, app provi
 	p.cmdMut.Unlock()
 	select {
 	case output = <-p.outputs:
-		select {
-		case fail := <-p.failures:
-			if fail.method == "ExecuteCommandOnce" {
-				stderr.Write(output)
-				return fail.err
-			}
-			p.failures <- fail
-		default:
-			stdout.Write(output)
-		}
+		stdout.Write(output)
 	case fail := <-p.failures:
 		if fail.method == "ExecuteCommandOnce" {
-			err = fail.err
 			select {
 			case output = <-p.outputs:
 				stderr.Write(output)
 			default:
 			}
+			return fail.err
 		} else {
 			p.failures <- fail
 		}
 	case <-time.After(2e9):
 		return errors.New("FakeProvisioner timed out waiting for output.")
 	}
-	return err
+	return nil
 }
 
-func (p *FakeProvisioner) CollectStatus() ([]provision.Unit, error) {
-	if err := p.getError("CollectStatus"); err != nil {
-		return nil, err
+func (p *FakeProvisioner) AddUnit(app provision.App, unit provision.Unit) {
+	p.mut.Lock()
+	defer p.mut.Unlock()
+	a := p.apps[app.GetName()]
+	a.units = append(a.units, unit)
+	a.unitLen++
+	p.apps[app.GetName()] = a
+}
+
+func (p *FakeProvisioner) Units(app provision.App) []provision.Unit {
+	p.mut.Lock()
+	defer p.mut.Unlock()
+	return p.apps[app.GetName()].units
+}
+
+func (p *FakeProvisioner) SetUnitStatus(unit provision.Unit, status provision.Status) error {
+	p.mut.Lock()
+	defer p.mut.Unlock()
+	app, ok := p.apps[unit.AppName]
+	if !ok {
+		return errNotProvisioned
 	}
-	units := make([]provision.Unit, len(p.apps))
-	p.mut.RLock()
-	defer p.mut.RUnlock()
-	apps := make([]string, 0, len(p.apps))
-	for name := range p.apps {
-		apps = append(apps, name)
-	}
-	sort.Strings(apps)
-	for i, name := range apps {
-		a := p.apps[name]
-		unit := provision.Unit{
-			Name:       name + "/0",
-			AppName:    name,
-			Type:       a.app.GetPlatform(),
-			Status:     "started",
-			InstanceId: fmt.Sprintf("i-0%d", 800+i+1),
-			Ip:         "10.10.10." + strconv.Itoa(i+1),
-			Machine:    i + 1,
+	index := -1
+	for i, unt := range app.units {
+		if unt.Name == unit.Name {
+			index = i
+			break
 		}
-		units[i] = unit
 	}
-	return units, nil
+	if index < 0 {
+		return errors.New("unit not found")
+	}
+	app.units[index].Status = status
+	p.apps[unit.AppName] = app
+	return nil
 }
 
 func (p *FakeProvisioner) Addr(app provision.App) (string, error) {
 	if err := p.getError("Addr"); err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s.fake-lb.tsuru.io", app.GetName()), nil
-}
-
-func (p *FakeProvisioner) InstallDeps(app provision.App, w io.Writer) error {
-	if err := p.getError("InstallDeps"); err != nil {
-		return err
-	}
-	p.mut.Lock()
-	defer p.mut.Unlock()
 	pApp, ok := p.apps[app.GetName()]
 	if !ok {
-		return errNotProvisioned
+		return "", errNotProvisioned
 	}
-	pApp.installDeps++
-	p.apps[app.GetName()] = pApp
-	return nil
+	return pApp.addr, nil
 }
 
 func (p *FakeProvisioner) SetCName(app provision.App, cname string) error {
@@ -738,46 +684,130 @@ func (p *FakeProvisioner) HasCName(app provision.App, cname string) bool {
 	return ok && pApp.cname == cname
 }
 
+func (p *FakeProvisioner) Stop(app provision.App) error {
+	p.mut.Lock()
+	defer p.mut.Unlock()
+	pApp, ok := p.apps[app.GetName()]
+	if !ok {
+		return errNotProvisioned
+	}
+	pApp.stops++
+	for i, u := range pApp.units {
+		u.Status = provision.StatusStopped
+		pApp.units[i] = u
+	}
+	p.apps[app.GetName()] = pApp
+	return nil
+}
+
+type PipelineFakeProvisioner struct {
+	*FakeProvisioner
+	executedPipeline bool
+}
+
+func (p *PipelineFakeProvisioner) ExecutedPipeline() bool {
+	return p.executedPipeline
+}
+
+func (p *PipelineFakeProvisioner) DeployPipeline() *action.Pipeline {
+	act := action.Action{
+		Name: "change-executed-pipeline",
+		Forward: func(ctx action.FWContext) (action.Result, error) {
+			p.executedPipeline = true
+			return nil, nil
+		},
+		Backward: func(ctx action.BWContext) {
+		},
+	}
+	actions := []*action.Action{&act}
+	pipeline := action.NewPipeline(actions...)
+	return pipeline
+}
+
+type PipelineErrorFakeProvisioner struct {
+	*FakeProvisioner
+}
+
+func (p *PipelineErrorFakeProvisioner) DeployPipeline() *action.Pipeline {
+	act := action.Action{
+		Name: "error-pipeline",
+		Forward: func(ctx action.FWContext) (action.Result, error) {
+			return nil, errors.New("deploy error")
+		},
+		Backward: func(ctx action.BWContext) {
+		},
+	}
+	actions := []*action.Action{&act}
+	pipeline := action.NewPipeline(actions...)
+	return pipeline
+}
+
+type ExtensibleFakeProvisioner struct {
+	*FakeProvisioner
+	platforms []provisionedPlatform
+}
+
+func (p *ExtensibleFakeProvisioner) GetPlatform(name string) *provisionedPlatform {
+	_, platform := p.getPlatform(name)
+	return platform
+}
+
+func (p *ExtensibleFakeProvisioner) getPlatform(name string) (int, *provisionedPlatform) {
+	for i, platform := range p.platforms {
+		if platform.Name == name {
+			return i, &platform
+		}
+	}
+	return -1, nil
+}
+
+func (p *ExtensibleFakeProvisioner) PlatformAdd(name string, args map[string]string, w io.Writer) error {
+	if err := p.getError("PlatformAdd"); err != nil {
+		return err
+	}
+	if p.GetPlatform(name) != nil {
+		return errors.New("duplicate platform")
+	}
+	p.platforms = append(p.platforms, provisionedPlatform{Name: name, Args: args, Version: 1})
+	return nil
+}
+
+func (p *ExtensibleFakeProvisioner) PlatformUpdate(name string, args map[string]string, w io.Writer) error {
+	index, platform := p.getPlatform(name)
+	if platform == nil {
+		return errors.New("platform not found")
+	}
+	platform.Version += 1
+	platform.Args = args
+	p.platforms[index] = *platform
+	return nil
+}
+
+func (p *ExtensibleFakeProvisioner) PlatformRemove(name string) error {
+	index, _ := p.getPlatform(name)
+	if index < 0 {
+		return errors.New("platform not found")
+	}
+	p.platforms[index] = p.platforms[len(p.platforms)-1]
+	p.platforms = p.platforms[:len(p.platforms)-1]
+	return nil
+}
+
 type provisionedApp struct {
 	units       []provision.Unit
 	app         provision.App
 	restarts    int
 	starts      int
-	installDeps int
+	stops       int
 	version     string
+	lastArchive string
 	cname       string
+	addr        string
 	unitLen     int
 }
 
-type CommandableProvisioner struct {
-	FakeProvisioner
-	cmd *FakeCommand
-}
-
-func (p *CommandableProvisioner) Commands() []cmd.Command {
-	if p.cmd == nil {
-		p.cmd = &FakeCommand{}
-	}
-	return []cmd.Command{p.cmd}
-}
-
-type FakeCommand struct {
-	calls int32
-}
-
-func (c *FakeCommand) Calls() int32 {
-	return atomic.LoadInt32(&c.calls)
-}
-
-func (c *FakeCommand) Info() *cmd.Info {
-	return &cmd.Info{
-		Name:  "fake",
-		Usage: "fake fake",
-		Desc:  "do nothing",
-	}
-}
-
-func (c *FakeCommand) Run(*cmd.Context, *cmd.Client) error {
-	atomic.AddInt32(&c.calls, 1)
-	return nil
+type provisionedPlatform struct {
+	Name    string
+	Args    map[string]string
+	Version int
 }

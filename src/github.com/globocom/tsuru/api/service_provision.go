@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,23 +7,37 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/rec"
-	"github.com/globocom/tsuru/service"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/rec"
+	"github.com/tsuru/tsuru/service"
+	"gopkg.in/mgo.v2/bson"
+	"gopkg.in/v1/yaml"
 	"io/ioutil"
-	"labix.org/v2/mgo/bson"
-	"launchpad.net/goyaml"
 	"net/http"
 )
 
 type serviceYaml struct {
 	Id       string
+	Password string
 	Endpoint map[string]string
 }
 
-func serviceList(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func (sy *serviceYaml) validate() error {
+	if sy.Id == "" {
+		return &errors.HTTP{Code: http.StatusBadRequest, Message: "You must provide an id in the manifest file."}
+	}
+	if sy.Password == "" {
+		return &errors.HTTP{Code: http.StatusBadRequest, Message: "You must provide a password in the manifest file."}
+	}
+	if _, ok := sy.Endpoint["production"]; !ok {
+		return &errors.HTTP{Code: http.StatusBadRequest, Message: "You must provide a production endpoint in the manifest file."}
+	}
+	return nil
+}
+
+func serviceList(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -41,19 +55,20 @@ func serviceList(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return err
 }
 
-func serviceCreate(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceCreate(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	defer r.Body.Close()
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		return err
 	}
 	var sy serviceYaml
-	err = goyaml.Unmarshal(body, &sy)
+	err = yaml.Unmarshal(body, &sy)
 	if err != nil {
 		return err
 	}
-	if _, ok := sy.Endpoint["production"]; !ok {
-		return &errors.HTTP{Code: http.StatusBadRequest, Message: "You must provide a production endpoint in the manifest file."}
+	err = sy.validate()
+	if err != nil {
+		return err
 	}
 	u, err := t.User()
 	if err != nil {
@@ -80,11 +95,12 @@ func serviceCreate(w http.ResponseWriter, r *http.Request, t *auth.Token) error 
 	}
 	if n != 0 {
 		msg := fmt.Sprintf("Service with name %s already exists.", sy.Id)
-		return &errors.HTTP{Code: http.StatusInternalServerError, Message: msg}
+		return &errors.HTTP{Code: http.StatusConflict, Message: msg}
 	}
 	s := service.Service{
 		Name:       sy.Id,
 		Endpoint:   sy.Endpoint,
+		Password:   sy.Password,
 		OwnerTeams: auth.GetTeamsNames(teams),
 	}
 	err = s.Create()
@@ -95,24 +111,32 @@ func serviceCreate(w http.ResponseWriter, r *http.Request, t *auth.Token) error 
 	return nil
 }
 
-func serviceUpdate(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceUpdate(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	defer r.Body.Close()
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		return err
 	}
-	var yaml serviceYaml
-	goyaml.Unmarshal(body, &yaml)
+	var y serviceYaml
+	err = yaml.Unmarshal(body, &y)
+	if err != nil {
+		return err
+	}
+	err = y.validate()
+	if err != nil {
+		return err
+	}
 	u, err := t.User()
 	if err != nil {
 		return err
 	}
-	rec.Log(u.Email, "update-service", yaml.Id, yaml.Endpoint)
-	s, err := getServiceByOwner(yaml.Id, u)
+	rec.Log(u.Email, "update-service", y.Id, y.Endpoint)
+	s, err := getServiceByOwner(y.Id, u)
 	if err != nil {
 		return err
 	}
-	s.Endpoint = yaml.Endpoint
+	s.Endpoint = y.Endpoint
+	s.Password = y.Password
 	if err = s.Update(); err != nil {
 		return err
 	}
@@ -120,7 +144,7 @@ func serviceUpdate(w http.ResponseWriter, r *http.Request, t *auth.Token) error 
 	return nil
 }
 
-func serviceDelete(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceDelete(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -172,7 +196,7 @@ func getServiceAndTeam(serviceName string, teamName string, u *auth.User) (*serv
 	return service, t, nil
 }
 
-func grantServiceAccess(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func grantServiceAccess(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -195,7 +219,7 @@ func grantServiceAccess(w http.ResponseWriter, r *http.Request, t *auth.Token) e
 	return conn.Services().Update(bson.M{"_id": service.Name}, service)
 }
 
-func revokeServiceAccess(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func revokeServiceAccess(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -222,7 +246,7 @@ func revokeServiceAccess(w http.ResponseWriter, r *http.Request, t *auth.Token) 
 	return conn.Services().Update(bson.M{"_id": service.Name}, service)
 }
 
-func serviceAddDoc(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceAddDoc(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err

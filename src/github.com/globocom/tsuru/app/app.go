@@ -5,57 +5,90 @@
 package app
 
 import (
-	"bytes"
 	"encoding/json"
 	stderr "errors"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/go-gandalfclient"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/provision"
-	"github.com/globocom/tsuru/queue"
-	"github.com/globocom/tsuru/quota"
-	"github.com/globocom/tsuru/repository"
-	"github.com/globocom/tsuru/service"
+	"github.com/tsuru/config"
+	"github.com/tsuru/go-gandalfclient"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/provision"
+	"github.com/tsuru/tsuru/quota"
+	"github.com/tsuru/tsuru/repository"
+	"github.com/tsuru/tsuru/service"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"io"
-	"labix.org/v2/mgo"
-	"labix.org/v2/mgo/bson"
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
 var Provisioner provision.Provisioner
+var AuthScheme auth.Scheme
 
 var (
 	nameRegexp  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
-	cnameRegexp = regexp.MustCompile(`^[a-zA-Z0-9][\w-.]+$`)
+	cnameRegexp = regexp.MustCompile(`^(\*\.)?[a-zA-Z0-9][\w-.]+$`)
 )
+
+const (
+	InternalAppName = "tsr"
+)
+
+// AppLock stores information about a lock hold on the app
+type AppLock struct {
+	Locked      bool
+	Reason      string
+	Owner       string
+	AcquireDate time.Time
+}
+
+func (l *AppLock) String() string {
+	if !l.Locked {
+		return "Not locked"
+	}
+	return fmt.Sprintf("App locked by %s, running %s. Acquired in %s",
+		l.Owner,
+		l.Reason,
+		l.AcquireDate.Format(time.RFC3339),
+	)
+}
 
 // App is the main type in tsuru. An app represents a real world application.
 // This struct holds information about the app: its name, address, list of
 // teams that have access to it, used platform, etc.
 type App struct {
-	Env      map[string]bind.EnvVar
-	Platform string `bson:"framework"`
-	Name     string
-	Ip       string
-	CName    string
-	Units    []Unit
-	Teams    []string
-	Owner    string
-	State    string
-	Deploys  uint
-	quota.Quota
+	Env            map[string]bind.EnvVar
+	Platform       string `bson:"framework"`
+	Name           string
+	Ip             string
+	CName          string
+	Teams          []string
+	TeamOwner      string
+	Owner          string
+	State          string
+	Deploys        uint
+	Memory         int `json:",string"`
+	Swap           int `json:",string"`
+	UpdatePlatform bool
+	Lock           AppLock
 
+	quota.Quota
 	hr hookRunner
+}
+
+// Units returns the ilist of units.
+func (app *App) Units() []provision.Unit {
+	return Provisioner.Units(app)
 }
 
 // MarshalJSON marshals the app in json format. It returns a JSON object with
@@ -65,11 +98,18 @@ func (app *App) MarshalJSON() ([]byte, error) {
 	result["name"] = app.Name
 	result["platform"] = app.Platform
 	result["teams"] = app.Teams
-	result["units"] = app.Units
+	result["units"] = app.Units()
 	result["repository"] = repository.ReadWriteURL(app.Name)
 	result["ip"] = app.Ip
 	result["cname"] = app.CName
 	result["ready"] = app.State == "ready"
+	result["owner"] = app.Owner
+	result["deploys"] = app.Deploys
+	result["memory"] = strconv.Itoa(app.Memory)
+	result["swap"] = "0"
+	if app.Swap > 0 {
+		result["swap"] = strconv.Itoa(app.Swap - app.Memory)
+	}
 	return json.Marshal(&result)
 }
 
@@ -79,6 +119,45 @@ type Applog struct {
 	Message string
 	Source  string
 	AppName string
+	Unit    string
+}
+
+// Acquire an application lock by setting the lock field in the database.
+// This method is already called by a connection middleware on requests with
+// :app or :appname params that have side-effects.
+func AcquireApplicationLock(appName string, owner string, reason string) (bool, error) {
+	conn, err := db.Conn()
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+	appLock := AppLock{
+		Locked:      true,
+		Reason:      reason,
+		Owner:       owner,
+		AcquireDate: time.Now().In(time.UTC),
+	}
+	err = conn.Apps().Update(bson.M{"name": appName, "lock.locked": bson.M{"$in": []interface{}{false, nil}}}, bson.M{"$set": bson.M{"lock": appLock}})
+	if err == mgo.ErrNotFound {
+		// TODO(cezarsa): Maybe handle lock expiring by checking timestamp
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// Releases a lock hold on an app, currently it's called by a middleware,
+// however, ideally, it should be called individually by each handler since
+// they might be doing operations in background.
+func ReleaseApplicationLock(appName string) {
+	conn, err := db.Conn()
+	if err != nil {
+		log.Errorf("Error getting DB, couldn't unlock %s: %s", appName, err.Error())
+	}
+	defer conn.Close()
+	err = conn.Apps().Update(bson.M{"name": appName, "lock.locked": true}, bson.M{"$set": bson.M{"lock": AppLock{}}})
+	if err != nil {
+		log.Errorf("Error updating entry, couldn't unlock %s: %s", appName, err.Error())
+	}
 }
 
 // GetAppByName queries the database to find an app identified by the given
@@ -99,13 +178,11 @@ func GetByName(name string) (*App, error) {
 
 // CreateApp creates a new app.
 //
-// Creating a new app is a process composed of four steps:
+// Creating a new app is a process composed of the following steps:
 //
 //       1. Save the app in the database
-//       2. Create IAM credentials for the app
-//       3. Create S3 bucket for the app (if the bucket support is enabled)
-//       4. Create the git repository using gandalf
-//       5. Provision units within the provisioner
+//       2. Create the git repository using gandalf
+//       3. Provision the app using the provisioner
 func CreateApp(app *App, user *auth.User) error {
 	teams, err := user.Teams()
 	if err != nil {
@@ -117,6 +194,37 @@ func CreateApp(app *App, user *auth.User) error {
 	if _, err := getPlatform(app.Platform); err != nil {
 		return err
 	}
+	// app.Memory is empty, no custom memory passed from CLI
+	if app.Memory < 1 {
+		// get default memory limit from tsuru config
+		configMemory, err := config.GetInt("docker:memory")
+		if err != nil {
+			// no default memory set in config (or error when reading), set it as unlimited (0)
+			app.Memory = 0
+		} else {
+			// default memory set in config, use that.
+			app.Memory = configMemory
+		}
+	}
+	// app.Swap is empty, no custom swap passed from CLI
+	if app.Swap < 1 {
+		// get default swap limit from tsuru config
+		configSwap, err := config.GetInt("docker:swap")
+		if err != nil {
+			// no default swap set in config (or error when reading), set it as unlimited (0)
+			app.Swap = 0
+		} else {
+			// default swap set in config, use that.
+			app.Swap = configSwap
+		}
+	}
+	// Swap size must always be the sum of memory plus swap
+	if app.Swap > 0 {
+		app.Swap = app.Memory + app.Swap
+	}
+	if err := app.setTeamOwner(teams); err != nil {
+		return err
+	}
 	app.SetTeams(teams)
 	app.Owner = user.Email
 	if !app.isValid() {
@@ -125,15 +233,24 @@ func CreateApp(app *App, user *auth.User) error {
 			"starting with a letter."
 		return &errors.ValidationError{Message: msg}
 	}
-	actions := []*action.Action{&reserveUserApp, &insertApp}
-	useS3, _ := config.GetBool("bucket-support")
-	if useS3 {
-		actions = append(actions, &createIAMUserAction,
-			&createIAMAccessKeyAction,
-			&createBucketAction, &createUserPolicyAction)
+	if app.equalAppNameAndPlatformName() {
+		msg := "Invalid app name: platform name and app name " +
+			"can not be the same"
+		return &errors.ValidationError{Message: msg}
 	}
-	actions = append(actions, &exportEnvironmentsAction,
-		&createRepository, &provisionApp)
+	if app.equalToSomePlatformName() {
+		msg := "Invalid app name: platform name already exists " +
+			"with the same name"
+		return &errors.ValidationError{Message: msg}
+	}
+	actions := []*action.Action{
+		&reserveUserApp,
+		&insertApp,
+		&exportEnvironmentsAction,
+		&createRepository,
+		&provisionApp,
+		&setAppIp,
+	}
 	pipeline := action.NewPipeline(actions...)
 	err = pipeline.Execute(app, user)
 	if err != nil {
@@ -176,192 +293,72 @@ func (app *App) unbind() error {
 	return nil
 }
 
+func asyncDestroyAppProvisioner(app *App) *sync.WaitGroup {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		err := Provisioner.Destroy(app)
+		if err != nil {
+			log.Errorf("Unable to destroy app in provisioner: %s", err.Error())
+		}
+		err = app.unbind()
+		if err != nil {
+			log.Errorf("Unable to unbind app in provisioner: %s", err.Error())
+		}
+	}()
+	return &wg
+}
+
 // Delete deletes an app.
 //
-// Delete an app is a process composed of four steps:
+// Delete an app is a process composed of three steps:
 //
-//       1. Destroy the bucket and S3 credentials (if bucket-support is
-//       enabled).
-//       2. Destroy the app unit using juju
-//       3. Unbind all service instances from the app
-//       4. Remove the app from the database
+//       1. Destroy the app unit
+//       2. Unbind all service instances from the app
+//       3. Remove the app from the database
 func Delete(app *App) error {
-	gURL := repository.ServerURL()
-	(&gandalf.Client{Endpoint: gURL}).RemoveRepository(app.Name)
-	useS3, _ := config.GetBool("bucket-support")
-	if useS3 {
-		destroyBucket(app)
-	}
-	if len(app.Units) > 0 {
-		Provisioner.Destroy(app)
-		app.unbind()
-	}
+	appName := app.Name
+	wg := asyncDestroyAppProvisioner(app)
+	wg.Add(1)
+	defer wg.Done()
+	go func() {
+		defer ReleaseApplicationLock(appName)
+		wg.Wait()
+		conn, err := db.Conn()
+		if err != nil {
+			log.Errorf("Unable to delete app %s from db: %s", appName, err.Error())
+		}
+		defer conn.Close()
+		err = conn.Logs(appName).DropCollection()
+		if err != nil {
+			log.Errorf("Ignored error dropping logs collection for app %s: %s", appName, err.Error())
+		}
+		err = conn.Apps().Remove(bson.M{"name": appName})
+		if err != nil {
+			log.Errorf("Error trying to destroy app %s from db: %s", appName, err.Error())
+		}
+	}()
+	gandalfClient := gandalf.Client{Endpoint: repository.ServerURL()}
+	gandalfClient.RemoveRepository(appName)
 	token := app.Env["TSURU_APP_TOKEN"].Value
-	auth.DeleteToken(token)
-	if owner, err := auth.GetUserByEmail(app.Owner); err == nil {
-		auth.ReleaseApp(owner)
-	}
-	conn, err := db.Conn()
+	err := AuthScheme.Logout(token)
 	if err != nil {
-		return err
+		log.Errorf("Unable to remove app token in destroy: %s", err.Error())
 	}
-	defer conn.Close()
-	return conn.Apps().Remove(bson.M{"name": app.Name})
-}
-
-// AddUnit adds a new unit to the app (or update an existing unit). It just updates
-// the internal list of units, it does not talk to the provisioner. For
-// provisioning a new unit for the app, one should use AddUnits method, which
-// receives the number of units that you want to provision.
-func (app *App) AddUnit(u *Unit) {
-	for i, unt := range app.Units {
-		if unt.Name == u.Name {
-			app.Units[i] = *u
-			return
-		} else if unt.Name == "" {
-			app.Units[i] = *u
-			return
-		}
-	}
-	app.Units = append(app.Units, *u)
-}
-
-// AddUnits creates n new units within the provisioner, saves new units in the
-// database and enqueues the apprc serialization.
-func (app *App) AddUnits(n uint) error {
-	if n == 0 {
-		return stderr.New("Cannot add zero units.")
-	}
-	err := action.NewPipeline(
-		&reserveUnitsToAdd,
-		&provisionAddUnits,
-		&saveNewUnitsInDatabase,
-	).Execute(app, n)
-	return err
-}
-
-// RemoveUnit removes a unit by its InstanceId or Name.
-//
-// Will search first by InstanceId, if no instance is found, then tries to
-// search using the unit name, then calls the removal function from provisioner
-//
-// Returns an error in case of failure.
-func (app *App) RemoveUnit(id string) error {
-	var (
-		unit Unit
-		i    int
-		u    Unit
-	)
-	for i, u = range app.Units {
-		if u.InstanceId == id || u.Name == id {
-			unit = u
-			break
-		}
-	}
-	if unit.GetName() == "" {
-		return stderr.New("Unit not found.")
-	}
-	if err := Provisioner.RemoveUnit(app, unit.GetName()); err != nil {
-		log.Error(err.Error())
-	}
-	app.removeUnits([]int{i})
-	app.unbindUnit(&unit)
-	conn, err := db.Conn()
+	owner, err := auth.GetUserByEmail(app.Owner)
 	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	return conn.Apps().Update(
-		bson.M{"name": app.Name},
-		bson.M{"$set": bson.M{"units": app.Units}},
-	)
-}
-
-// removeUnits removes units identified by the given indices. The slice of
-// indices must be sorted in ascending order. If the slice is unsorted, the
-// behavior of the method is unknown.
-//
-// For example, if the app have the following units:
-//
-//     {"unit1", "unit2", "unit3", "unit4", "unit5"}
-//
-// Calling this method with with the slice []int{2, 4} would remove "unit3" and
-// "unit5" from the list.
-func (app *App) removeUnits(indices []int) {
-	prefix := true
-	for i := range indices {
-		if i != indices[i] {
-			prefix = false
-			break
-		}
-	}
-	if prefix {
-		app.Units = app.Units[len(indices):]
+		log.Errorf("Unable to get app owner in destroy: %s", err.Error())
 	} else {
-		for i, index := range indices {
-			index -= i
-			if index+1 < len(app.Units) {
-				copy(app.Units[index:], app.Units[index+1:])
-			}
-			app.Units = app.Units[:len(app.Units)-1]
+		err = auth.ReleaseApp(owner)
+		if err != nil {
+			log.Errorf("Unable to release app quota: %s", err.Error())
 		}
 	}
+	return nil
 }
 
-// RemoveUnits removes n units from the app. It's a process composed of x
-// steps:
-//
-//     1. Remove units from the provisioner
-//     2. Unbind units from service instances bound to the app
-//     3. Remove units from the app list
-//     4. Update the app in the database
-func (app *App) RemoveUnits(n uint) error {
-	if n == 0 {
-		return stderr.New("Cannot remove zero units.")
-	} else if l := uint(len(app.Units)); l == n {
-		return stderr.New("Cannot remove all units from an app.")
-	} else if n > l {
-		return fmt.Errorf("Cannot remove %d units from this app, it has only %d units.", n, l)
-	}
-	var (
-		removed []int
-		err     error
-	)
-	units := UnitSlice(app.Units)
-	sort.Sort(units)
-	for i := 0; i < int(n); i++ {
-		name := units[i].GetName()
-		go Provisioner.RemoveUnit(app, name)
-		removed = append(removed, i)
-		app.unbindUnit(&units[i])
-	}
-	if len(removed) == 0 {
-		return err
-	}
-	conn, err := db.Conn()
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	app.removeUnits(removed)
-	dbErr := conn.Apps().Update(
-		bson.M{"name": app.Name},
-		bson.M{
-			"$set": bson.M{
-				"units":       app.Units,
-				"quota.inuse": len(app.Units),
-			},
-		},
-	)
-	if err == nil {
-		return dbErr
-	}
-	return err
-}
-
-// unbindUnit unbinds a unit from all service instances that are bound to the
-// app. It is used by RemoveUnit and RemoveUnits methods.
-func (app *App) unbindUnit(unit provision.AppUnit) error {
+func (app *App) BindUnit(unit *provision.Unit) error {
 	conn, err := db.Conn()
 	if err != nil {
 		return err
@@ -374,19 +371,81 @@ func (app *App) unbindUnit(unit provision.AppUnit) error {
 		return err
 	}
 	for _, instance := range instances {
-		go func(instance service.ServiceInstance, unit provision.AppUnit) {
-			err = instance.UnbindUnit(unit)
-			if err != nil {
-				log.Errorf("Error unbinding the unit %s with the service instance %s.", unit.GetIp(), instance.Name)
-			}
-		}(instance, unit)
+		_, err = instance.BindUnit(app, unit)
+		if err != nil {
+			log.Errorf("Error binding the unit %s with the service instance %s: %s", unit.Name, instance.Name, err)
+		}
 	}
 	return nil
 }
 
+// AddUnits creates n new units within the provisioner, saves new units in the
+// database and enqueues the apprc serialization.
+func (app *App) AddUnits(n uint) error {
+	if n == 0 {
+		return stderr.New("Cannot add zero units.")
+	}
+	err := action.NewPipeline(
+		&reserveUnitsToAdd,
+		&provisionAddUnits,
+		&BindService,
+	).Execute(app, n)
+	return err
+}
+
+// RemoveUnits removes n units from the app. It's a process composed of
+// multiple steps:
+//
+//     1. Remove units from the provisioner
+//     2. Remove units from the app list
+//     3. Update quota
+func (app *App) RemoveUnits(n uint) error {
+	if n == 0 {
+		ReleaseApplicationLock(app.Name)
+		return stderr.New("Cannot remove zero units.")
+	} else if l := uint(len(app.Units())); l == n {
+		ReleaseApplicationLock(app.Name)
+		return stderr.New("Cannot remove all units from an app.")
+	} else if n > l {
+		ReleaseApplicationLock(app.Name)
+		return fmt.Errorf("Cannot remove %d units from this app, it has only %d units.", n, l)
+	}
+	go func() {
+		defer ReleaseApplicationLock(app.Name)
+		Provisioner.RemoveUnits(app, n)
+		conn, err := db.Conn()
+		if err != nil {
+			log.Errorf("Error: %s", err)
+		}
+		defer conn.Close()
+		dbErr := conn.Apps().Update(
+			bson.M{"name": app.Name},
+			bson.M{
+				"$set": bson.M{
+					"quota.inuse": len(app.Units()),
+				},
+			},
+		)
+		if dbErr != nil {
+			log.Errorf("Error: %s", dbErr)
+		}
+	}()
+	return nil
+}
+
+// SetUnitStatus changes the status of the given unit.
+func (app *App) SetUnitStatus(unitName string, status provision.Status) error {
+	for _, unit := range app.Units() {
+		if strings.HasPrefix(unit.Name, unitName) {
+			return Provisioner.SetUnitStatus(unit, status)
+		}
+	}
+	return stderr.New("unit not found")
+}
+
 // Available returns true if at least one of N units is started or unreachable.
 func (app *App) Available() bool {
-	for _, unit := range app.ProvisionedUnits() {
+	for _, unit := range app.Units() {
 		if unit.Available() {
 			return true
 		}
@@ -459,6 +518,24 @@ func (app *App) SetTeams(teams []auth.Team) {
 	sort.Strings(app.Teams)
 }
 
+// setTeamOwner sets the TeamOwner value.
+func (app *App) setTeamOwner(teams []auth.Team) error {
+	if app.TeamOwner == "" {
+		if len(teams) > 1 {
+			return ManyTeamsError{}
+		}
+		app.TeamOwner = teams[0].Name
+	} else {
+		for _, t := range teams {
+			if t.Name == app.TeamOwner {
+				return nil
+			}
+		}
+		return stderr.New("team not found.")
+	}
+	return nil
+}
+
 // setEnv sets the given environment variable in the app.
 func (app *App) setEnv(env bind.EnvVar) {
 	if app.Env == nil {
@@ -466,7 +543,7 @@ func (app *App) setEnv(env bind.EnvVar) {
 	}
 	app.Env[env.Name] = env
 	if env.Public {
-		app.Log(fmt.Sprintf("setting env %s with value %s", env.Name, env.Value), "tsuru")
+		app.Log(fmt.Sprintf("setting env %s with value %s", env.Name, env.Value), "tsuru", "api")
 	}
 }
 
@@ -486,7 +563,27 @@ func (app *App) getEnv(name string) (bind.EnvVar, error) {
 
 // isValid indicates whether the name of the app is valid.
 func (app *App) isValid() bool {
-	return nameRegexp.MatchString(app.Name)
+	return app.Name != InternalAppName && nameRegexp.MatchString(app.Name)
+}
+
+// equalAppNameAndPlatformName check if the app.Name and app.Platform have
+// same name
+func (app *App) equalAppNameAndPlatformName() bool {
+	return app.Name == app.GetPlatform()
+}
+
+// equalToSomePlatformName indicates if app.Name and some Platform are equals
+func (app *App) equalToSomePlatformName() bool {
+	platforms, err := Platforms()
+	if err != nil {
+		return false
+	}
+	for _, platform := range platforms {
+		if app.Name == platform.Name {
+			return true
+		}
+	}
+	return false
 }
 
 // InstanceEnv returns a map of environment variables that belongs to the given
@@ -509,7 +606,7 @@ func (app *App) Run(cmd string, w io.Writer, once bool) error {
 	if !app.Available() {
 		return stderr.New("App must be available to run commands")
 	}
-	app.Log(fmt.Sprintf("running '%s'", cmd), "tsuru")
+	app.Log(fmt.Sprintf("running '%s'", cmd), "tsuru", "api")
 	return app.sourced(cmd, w, once)
 }
 
@@ -562,6 +659,16 @@ func (app *App) hookRunner() hookRunner {
 	return app.hr
 }
 
+func (app *App) Stop(w io.Writer) error {
+	log.Write(w, []byte("\n ---> Stopping your app\n"))
+	err := Provisioner.Stop(app)
+	if err != nil {
+		log.Errorf("[stop] error on stop the app %s - %s", app.Name, err)
+		return err
+	}
+	return nil
+}
+
 func (app *App) Ready() error {
 	app.State = "ready"
 	conn, err := db.Conn()
@@ -575,10 +682,8 @@ func (app *App) Ready() error {
 // GetUnits returns the internal list of units converted to bind.Unit.
 func (app *App) GetUnits() []bind.Unit {
 	var units []bind.Unit
-	for _, unit := range app.Units {
-		copy := unit
-		copy.app = app
-		units = append(units, &copy)
+	for _, unit := range app.Units() {
+		units = append(units, &unit)
 	}
 	return units
 }
@@ -586,6 +691,16 @@ func (app *App) GetUnits() []bind.Unit {
 // GetName returns the name of the app.
 func (app *App) GetName() string {
 	return app.Name
+}
+
+// GetMemory returns the memory limit (in MB) for the app.
+func (app *App) GetMemory() int {
+	return app.Memory
+}
+
+// GetSwap returns the swap limit (in MB) for the app.
+func (app *App) GetSwap() int {
+	return app.Swap
 }
 
 // GetIp returns the ip of the app.
@@ -598,51 +713,9 @@ func (app *App) GetPlatform() string {
 	return app.Platform
 }
 
+//GetDeploys returns the amount of deploys of an app.
 func (app *App) GetDeploys() uint {
 	return app.Deploys
-}
-
-type Deploy struct {
-	App       string
-	Timestamp time.Time
-	Duration  time.Duration
-}
-
-func (app *App) ListDeploys() ([]Deploy, error) {
-	return listDeploys(app)
-}
-
-func ListDeploys() ([]Deploy, error) {
-	return listDeploys(nil)
-}
-
-func listDeploys(app *App) ([]Deploy, error) {
-	var list []Deploy
-	conn, err := db.Conn()
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	var qr interface{}
-	if app != nil {
-		qr = bson.M{"app": app.Name}
-	}
-	if err := conn.Deploys().Find(qr).Sort("-timestamp").All(&list); err != nil {
-		return nil, err
-	}
-	return list, err
-}
-
-// ProvisionedUnits returns the internal list of units converted to
-// provision.AppUnit.
-func (app *App) ProvisionedUnits() []provision.AppUnit {
-	units := make([]provision.AppUnit, len(app.Units))
-	for i, u := range app.Units {
-		other := u
-		other.app = app
-		units[i] = &other
-	}
-	return units
 }
 
 // Env returns app.Env
@@ -650,34 +723,11 @@ func (app *App) Envs() map[string]bind.EnvVar {
 	return app.Env
 }
 
-// SerializeEnvVars serializes the environment variables of the app. The
-// environment variables will be written the the file /home/application/apprc
-// in all units of the app.
-func (app *App) SerializeEnvVars() error {
-	var buf bytes.Buffer
-	cmd := "cat > /home/application/apprc <<END\n"
-	cmd += fmt.Sprintf("# generated by tsuru at %s\n", time.Now().Format(time.RFC822Z))
-	for k, v := range app.Env {
-		cmd += fmt.Sprintf(`export %s="%s"`+"\n", k, v.Value)
-	}
-	cmd += "END\n"
-	err := app.run(cmd, &buf, false)
-	if err != nil {
-		output := buf.Bytes()
-		if output == nil {
-			err = fmt.Errorf("Failed to write env vars: %s.", err)
-		} else {
-			err = fmt.Errorf("Failed to write env vars (%s): %s.", err, output)
-		}
-	}
-	return err
-}
-
 // SetEnvs saves a list of environment variables in the app. The publicOnly
 // parameter indicates whether only public variables can be overridden (if set
 // to false, SetEnvs may override a private variable).
 func (app *App) SetEnvs(envs []bind.EnvVar, publicOnly bool) error {
-	return app.setEnvsToApp(envs, publicOnly, false)
+	return app.setEnvsToApp(envs, publicOnly, true)
 }
 
 // setEnvsToApp adds environment variables to an app, serializing the resulting
@@ -688,9 +738,8 @@ func (app *App) SetEnvs(envs []bind.EnvVar, publicOnly bool) error {
 // parameters: publicOnly indicates whether only public variables can be
 // overridden (if set to false, setEnvsToApp may override a private variable).
 //
-// If useQueue is true, it will use a queue to write the environment variables
-// in the units of the app.
-func (app *App) setEnvsToApp(envs []bind.EnvVar, publicOnly, useQueue bool) error {
+// shouldRestart defines if the server should be restarted after saving vars.
+func (app *App) setEnvsToApp(envs []bind.EnvVar, publicOnly, shouldRestart bool) error {
 	if len(envs) > 0 {
 		for _, env := range envs {
 			set := true
@@ -713,11 +762,10 @@ func (app *App) setEnvsToApp(envs []bind.EnvVar, publicOnly, useQueue bool) erro
 		if err != nil {
 			return err
 		}
-		if useQueue {
-			Enqueue(queue.Message{Action: regenerateApprc, Args: []string{app.Name}})
+		if !shouldRestart {
 			return nil
 		}
-		go app.SerializeEnvVars()
+		return Provisioner.Restart(app)
 	}
 	return nil
 }
@@ -749,7 +797,7 @@ func (app *App) UnsetEnvs(variableNames []string, publicOnly bool) error {
 		if err != nil {
 			return err
 		}
-		go app.SerializeEnvVars()
+		return Provisioner.Restart(app)
 	}
 	return nil
 }
@@ -799,7 +847,7 @@ func (app *App) UnsetCName() error {
 
 // Log adds a log message to the app. Specifying a good source is good so the
 // user can filter where the message come from.
-func (app *App) Log(message, source string) error {
+func (app *App) Log(message, source, unit string) error {
 	messages := strings.Split(message, "\n")
 	logs := make([]interface{}, 0, len(messages))
 	for _, msg := range messages {
@@ -809,36 +857,40 @@ func (app *App) Log(message, source string) error {
 				Message: msg,
 				Source:  source,
 				AppName: app.Name,
+				Unit:    unit,
 			}
 			logs = append(logs, l)
 		}
 	}
 	if len(logs) > 0 {
-		go notify(app.Name, logs)
+		notify(app.Name, logs)
 		conn, err := db.Conn()
 		if err != nil {
 			return err
 		}
 		defer conn.Close()
-		return conn.Logs().Insert(logs...)
+		return conn.Logs(app.Name).Insert(logs...)
 	}
 	return nil
 }
 
 // LastLogs returns a list of the last `lines` log of the app, matching the
-// given source.
-func (app *App) LastLogs(lines int, source string) ([]Applog, error) {
+// fields in the log instance received as an example.
+func (app *App) LastLogs(lines int, filterLog Applog) ([]Applog, error) {
 	conn, err := db.Conn()
 	if err != nil {
 		return nil, err
 	}
 	defer conn.Close()
 	logs := []Applog{}
-	q := bson.M{"appname": app.Name}
-	if source != "" {
-		q["source"] = source
+	q := bson.M{}
+	if filterLog.Source != "" {
+		q["source"] = filterLog.Source
 	}
-	err = conn.Logs().Find(q).Sort("-date").Limit(lines).All(&logs)
+	if filterLog.Unit != "" {
+		q["unit"] = filterLog.Unit
+	}
+	err = conn.Logs(app.Name).Find(q).Sort("-_id").Limit(lines).All(&logs)
 	if err != nil {
 		return nil, err
 	}
@@ -878,54 +930,57 @@ func List(u *auth.User) ([]App, error) {
 }
 
 // Swap calls the Provisioner.Swap.
+// And updates the app.CName in the database.
 func Swap(app1, app2 *App) error {
-	return Provisioner.Swap(app1, app2)
-}
-
-// DeployApp calls the Provisioner.Deploy
-func DeployApp(app *App, version string, writer io.Writer) error {
-	start := time.Now()
-	pipeline := Provisioner.DeployPipeline()
-	if pipeline == nil {
-		actions := []*action.Action{&ProvisionerDeploy, &IncrementDeploy}
-		pipeline = action.NewPipeline(actions...)
-	}
-	logWriter := LogWriter{App: app, Writer: writer}
-	err := pipeline.Execute(app, version, &logWriter)
+	err := Provisioner.Swap(app1, app2)
 	if err != nil {
 		return err
 	}
-	elapsed := time.Since(start)
-	return saveDeployData(app.Name, elapsed)
-}
-
-func saveDeployData(appName string, duration time.Duration) error {
 	conn, err := db.Conn()
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	deploy := Deploy{
-		App:       appName,
-		Timestamp: time.Now(),
-		Duration:  duration,
+	app1.CName, app2.CName = app2.CName, app1.CName
+	updateCName := func(app *App) error {
+		app.Ip, err = Provisioner.Addr(app)
+		if err != nil {
+			return err
+		}
+		return conn.Apps().Update(
+			bson.M{"name": app.Name},
+			bson.M{"$set": bson.M{"cname": app.CName, "ip": app.Ip}},
+		)
 	}
-	return conn.Deploys().Insert(deploy)
+	err = updateCName(app1)
+	if err != nil {
+		return err
+	}
+	return updateCName(app2)
 }
 
-func incrementDeploy(app *App) error {
+// Start starts the app calling the provisioner.Start method and
+// changing the units state to StatusStarted.
+func (app *App) Start(w io.Writer) error {
+	err := Provisioner.Start(app)
+	if err != nil {
+		log.Errorf("[start] error on start the app %s - %s", app.Name, err)
+		return err
+	}
+	return nil
+}
+
+func (app *App) SetUpdatePlatform(check bool) error {
 	conn, err := db.Conn()
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
 	return conn.Apps().Update(
 		bson.M{"name": app.Name},
-		bson.M{"$inc": bson.M{"deploys": 1}},
+		bson.M{"$set": bson.M{"updateplatform": check}},
 	)
 }
 
-// Start starts the app.
-func (app *App) Start(w io.Writer) error {
-	return Provisioner.Start(app)
+func (app *App) GetUpdatePlatform() bool {
+	return app.UpdatePlatform
 }

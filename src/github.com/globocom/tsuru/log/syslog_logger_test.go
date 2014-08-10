@@ -1,10 +1,11 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 package log
 
 import (
 	"launchpad.net/gocheck"
+	"log"
 	"log/syslog"
 )
 
@@ -27,4 +28,8 @@ func (s *SyslogLoggerSuite) TestNewSyslogLoggerReturnsALogger(c *gocheck.C) {
 
 func (s *SyslogLoggerSuite) TestNewSyslogLoggerInstantiatesSyslogWriter(c *gocheck.C) {
 	c.Assert(s.sl.w, gocheck.FitsTypeOf, &syslog.Writer{})
+}
+
+func (s *SyslogLoggerSuite) TestGetStdLoggerShouldReturnValidLogger(c *gocheck.C) {
+	c.Assert(s.sl.GetStdLogger(), gocheck.FitsTypeOf, &log.Logger{})
 }

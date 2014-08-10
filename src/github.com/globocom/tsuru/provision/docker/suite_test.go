@@ -7,31 +7,39 @@ package docker
 import (
 	dtesting "github.com/fsouza/go-dockerclient/testing"
 	"github.com/garyburd/redigo/redis"
-	"github.com/globocom/config"
-	"github.com/globocom/docker-cluster/cluster"
-	"github.com/globocom/docker-cluster/storage"
-	ftesting "github.com/globocom/tsuru/fs/testing"
-	"github.com/globocom/tsuru/provision"
-	_ "github.com/globocom/tsuru/testing"
+	"github.com/tsuru/config"
+	"github.com/tsuru/docker-cluster/cluster"
+	"github.com/tsuru/tsuru/app"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/provision"
+	rtesting "github.com/tsuru/tsuru/router/testing"
+	"github.com/tsuru/tsuru/service"
+	tTesting "github.com/tsuru/tsuru/testing"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
-	"os"
+	"net/http"
+	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 )
 
 func Test(t *testing.T) { gocheck.TestingT(t) }
 
 type S struct {
-	collName      string
-	imageCollName string
-	gitHost       string
-	repoNamespace string
-	deployCmd     string
-	runBin        string
-	runArgs       string
-	port          string
-	sshUser       string
-	server        *dtesting.DockerServer
+	collName       string
+	imageCollName  string
+	gitHost        string
+	repoNamespace  string
+	deployCmd      string
+	runBin         string
+	runArgs        string
+	port           string
+	sshUser        string
+	server         *dtesting.DockerServer
+	targetRecover  []string
+	storage        *db.Storage
+	oldProvisioner provision.Provisioner
 }
 
 var _ = gocheck.Suite(&S{})
@@ -53,28 +61,49 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 	config.Set("docker:run-cmd:port", "8888")
 	config.Set("docker:ssh:add-key-cmd", "/var/lib/tsuru/add-key")
 	config.Set("docker:ssh:user", s.sshUser)
+	config.Set("docker:cluster:storage", "redis")
+	config.Set("docker:cluster:redis-prefix", "redis-scheduler-storage-test")
 	config.Set("queue", "fake")
 	s.deployCmd = "/var/lib/tsuru/deploy"
 	s.runBin = "/usr/local/bin/circusd"
 	s.runArgs = "/etc/circus/circus.ini"
 	s.port = "8888"
-	fsystem = &ftesting.RecordingFs{}
-	f, err := fsystem.Create(os.ExpandEnv("${HOME}/.ssh/id_rsa.pub"))
+	var err error
+	s.server, err = dtesting.NewServer("127.0.0.1:0", nil, nil)
 	c.Assert(err, gocheck.IsNil)
-	f.Write([]byte("key-content"))
-	f.Close()
-	s.server, err = dtesting.NewServer(nil)
+	s.targetRecover = tTesting.SetTargetFile(c, []byte("http://localhost"))
+	s.storage, err = db.Conn()
 	c.Assert(err, gocheck.IsNil)
+	s.oldProvisioner = app.Provisioner
+	app.Provisioner = &dockerProvisioner{}
 }
 
 func (s *S) SetUpTest(c *gocheck.C) {
 	var err error
 	cmutex.Lock()
 	defer cmutex.Unlock()
-	dCluster, err = cluster.New(nil, storage.Redis("localhost:6379", "tests"),
-		cluster.Node{ID: "server", Address: s.server.URL()},
+	dCluster, err = cluster.New(nil, &cluster.MapStorage{},
+		cluster.Node{Address: s.server.URL()},
 	)
 	c.Assert(err, gocheck.IsNil)
+	coll := collection()
+	defer coll.Close()
+	coll.RemoveAll(nil)
+	clearRedisKeys("redis-scheduler-storage-test*", c)
+	rtesting.FakeRouter.Reset()
+}
+
+func clearRedisKeys(keysPattern string, c *gocheck.C) {
+	redisConn, err := redis.Dial("tcp", "127.0.0.1:6379")
+	c.Assert(err, gocheck.IsNil)
+	defer redisConn.Close()
+	result, err := redisConn.Do("KEYS", keysPattern)
+	c.Assert(err, gocheck.IsNil)
+	keys := result.([]interface{})
+	for _, key := range keys {
+		keyName := string(key.([]byte))
+		redisConn.Do("DEL", keyName)
+	}
 }
 
 func (s *S) TearDownSuite(c *gocheck.C) {
@@ -82,50 +111,55 @@ func (s *S) TearDownSuite(c *gocheck.C) {
 	defer coll.Close()
 	err := coll.Database.DropDatabase()
 	c.Assert(err, gocheck.IsNil)
-	fsystem = nil
-	clearSchedStorage(c)
+	tTesting.RollbackFile(s.targetRecover)
+	s.storage.Apps().Database.DropDatabase()
+	s.storage.Close()
+	app.Provisioner = s.oldProvisioner
 }
 
-func removeClusterNodes(ids []string, c *gocheck.C) {
-	conn, err := redis.Dial("tcp", "localhost:6379")
-	c.Assert(err, gocheck.IsNil)
-	defer conn.Close()
-	c.Assert(err, gocheck.IsNil)
-	err = conn.Send("multi")
-	c.Assert(err, gocheck.IsNil)
-	for _, id := range ids {
-		conn.Send("del", "tests:node:"+id)
-		conn.Send("lrem", "tests:nodes", "0", id)
-	}
-	_, err = conn.Do("exec")
-	c.Assert(err, gocheck.IsNil)
+func (s *S) stopMultipleServersCluster(cluster *cluster.Cluster) {
+	cmutex.Lock()
+	defer cmutex.Unlock()
+	dCluster = cluster
 }
 
-func clearSchedStorage(c *gocheck.C) {
-	conn, err := redis.Dial("tcp", "localhost:6379")
-	c.Assert(err, gocheck.IsNil)
-	defer conn.Close()
-	keys, err := conn.Do("keys", "*")
-	c.Assert(err, gocheck.IsNil)
-	for _, key := range keys.([]interface{}) {
-		k := string(key.([]byte))
-		_, err := conn.Do("del", k)
-		c.Assert(err, gocheck.IsNil)
+func (s *S) startMultipleServersCluster() (*cluster.Cluster, error) {
+	otherServer, err := dtesting.NewServer("localhost:0", nil, nil)
+	if err != nil {
+		return nil, err
 	}
+	cmutex.Lock()
+	defer cmutex.Unlock()
+	oldCluster := dCluster
+	otherUrl := strings.Replace(otherServer.URL(), "127.0.0.1", "localhost", 1)
+	dCluster, err = cluster.New(nil, &cluster.MapStorage{},
+		cluster.Node{Address: s.server.URL()},
+		cluster.Node{Address: otherUrl},
+	)
+	if err != nil {
+		return nil, err
+	}
+	return oldCluster, nil
 }
 
-func insertImage(repo, nodeID string, c *gocheck.C) func() {
-	conn, err := redis.Dial("tcp", "localhost:6379")
-	c.Assert(err, gocheck.IsNil)
-	defer conn.Close()
-	_, err = conn.Do("set", "tests:image:"+repo, nodeID)
-	c.Assert(err, gocheck.IsNil)
-	return func() {
-		conn, err := redis.Dial("tcp", "localhost:6379")
-		c.Assert(err, gocheck.IsNil)
-		defer conn.Close()
-		conn.Do("del", "tests:image:"+repo)
+func (s *S) addServiceInstance(c *gocheck.C, appName string, fn http.HandlerFunc) func() {
+	ts := httptest.NewServer(fn)
+	ret := func() {
+		ts.Close()
+		s.storage.Services().Remove(bson.M{"_id": "mysql"})
+		s.storage.ServiceInstances().Remove(bson.M{"_id": "my-mysql"})
 	}
+	srvc := service.Service{Name: "mysql", Endpoint: map[string]string{"production": ts.URL}}
+	err := srvc.Create()
+	c.Assert(err, gocheck.IsNil)
+	instance := service.ServiceInstance{Name: "my-mysql", ServiceName: "mysql", Teams: []string{}}
+	err = instance.Create()
+	c.Assert(err, gocheck.IsNil)
+	err = instance.AddApp(appName)
+	c.Assert(err, gocheck.IsNil)
+	err = s.storage.ServiceInstances().Update(bson.M{"name": instance.Name}, instance)
+	c.Assert(err, gocheck.IsNil)
+	return ret
 }
 
 type unitSlice []provision.Unit
@@ -144,20 +178,4 @@ func (s unitSlice) Swap(i, j int) {
 
 func sortUnits(units []provision.Unit) {
 	sort.Sort(unitSlice(units))
-}
-
-func createFakeContainers(ids []string, c *gocheck.C) func() {
-	conn, err := redis.Dial("tcp", "localhost:6379")
-	c.Assert(err, gocheck.IsNil)
-	defer conn.Close()
-	filter := []interface{}{}
-	for _, id := range ids {
-		key := "tests:" + id
-		_, err = conn.Do("SET", key, "server")
-		c.Assert(err, gocheck.IsNil)
-		filter = append(filter, key)
-	}
-	return func() {
-		conn.Do("DEL", filter...)
-	}
 }

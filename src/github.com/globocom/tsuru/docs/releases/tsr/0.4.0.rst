@@ -1,0 +1,43 @@
+=======================
+tsr 0.4.0 release notes
+=======================
+
+Welcome to tsr 0.4.0!
+
+These release notes cover the `new features`_ and `backwards incompatible
+changes`_ you'll want to be aware of when upgrading from tsr 0.3.x or older
+versions.
+
+.. _`new features`: `What's new in tsr 0.4.0`_
+
+What's new in tsr 0.4.0
+=======================
+
+* redis queue backend was refactored.
+* fixed output when service doesn't export environment variables (issue `#772
+  <https://github.com/tsuru/tsuru/issues/772>`_)
+
+Docker
+------
+
+* refactored unit creation to be more atomic
+* support for unit-agent (issue `#633
+  <https://github.com/tsuru/tsuru/issues/633>`_) - tsuru unit agent repository:
+  https://github.com/tsuru/tsuru-unit-agent.
+* added an administrative command to move and rebalance containers between
+  nodes (issue `#646 <https://github.com/tsuru/tsuru/issues/646>`_). For more
+  details, see the :ref:`containers-rebalance reference
+  <tsuru_admin_containers_rebalance_cmd>`.
+* memory swap limit is configurable (issue `#764
+  <https://github.com/tsuru/tsuru/issues/764>`_)
+* added a command to add a new platform (issue `#780
+  <https://github.com/tsuru/tsuru/issues/780>`_). For more details, see the
+  :ref:`platform-add reference <tsuru_admin_platform_add_cmd>`.
+
+Backwards incompatible changes
+==============================
+
+The S3 integration on app creation was removed. The config properties
+``bucket-support``, ``aws:iam`` ``aws:s3`` were removed as well.
+
+You should use `tsuru` 0.9.0 and `tsuru-admin` 0.3.0 version.

@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,7 +6,7 @@ package action
 
 import (
 	"errors"
-	"github.com/globocom/tsuru/log"
+	"github.com/tsuru/tsuru/log"
 	"sync"
 )
 
@@ -82,9 +82,19 @@ type Pipeline struct {
 
 // NewPipeline creates a new pipeline instance with the given list of actions.
 func NewPipeline(actions ...*Action) *Pipeline {
-	return &Pipeline{actions: actions}
+	// Actions are usually global functions, copying them
+	// guarantees each copy have an isolated Result.
+	newActions := make([]*Action, len(actions))
+	for i, action := range actions {
+		newAction := new(Action)
+		*newAction = *action
+		newActions[i] = newAction
+	}
+	return &Pipeline{actions: newActions}
+
 }
 
+// Result returns the result of the last action.
 func (p *Pipeline) Result() Result {
 	action := p.actions[len(p.actions)-1]
 	action.rMutex.Lock()

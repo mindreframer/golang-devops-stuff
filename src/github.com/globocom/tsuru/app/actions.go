@@ -6,24 +6,19 @@ package app
 
 import (
 	"errors"
-	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/go-gandalfclient"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/provision"
-	"github.com/globocom/tsuru/queue"
-	"github.com/globocom/tsuru/quota"
-	"github.com/globocom/tsuru/repository"
+	"github.com/tsuru/config"
+	"github.com/tsuru/go-gandalfclient"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/provision"
+	"github.com/tsuru/tsuru/quota"
+	"github.com/tsuru/tsuru/repository"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"io"
-	"labix.org/v2/mgo"
-	"labix.org/v2/mgo/bson"
-	"launchpad.net/goamz/aws"
-	"launchpad.net/goamz/iam"
-	"strconv"
 )
 
 var (
@@ -37,14 +32,12 @@ var (
 var reserveUserApp = action.Action{
 	Name: "reserve-user-app",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		var app App
+		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			app = ctx.Params[0].(App)
 		case *App:
-			app = *ctx.Params[0].(*App)
+			app = ctx.Params[0].(*App)
 		default:
-			return nil, errors.New("First parameter must be App or *App.")
+			return nil, errors.New("First parameter must be *App.")
 		}
 		var user auth.User
 		switch ctx.Params[1].(type) {
@@ -80,14 +73,12 @@ var reserveUserApp = action.Action{
 var insertApp = action.Action{
 	Name: "insert-app",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		var app App
+		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			app = ctx.Params[0].(App)
 		case *App:
-			app = *ctx.Params[0].(*App)
+			app = ctx.Params[0].(*App)
 		default:
-			return nil, errors.New("First parameter must be App or *App.")
+			return nil, errors.New("First parameter must be *App.")
 		}
 		conn, err := db.Conn()
 		if err != nil {
@@ -98,12 +89,11 @@ var insertApp = action.Action{
 		if limit, err := config.GetInt("quota:units-per-app"); err == nil {
 			app.Quota.Limit = limit
 		}
-		app.Units = append(app.Units, Unit{})
 		err = conn.Apps().Insert(app)
 		if mgo.IsDup(err) {
 			return nil, ErrAppAlreadyExists
 		}
-		return &app, err
+		return app, err
 	},
 	Backward: func(ctx action.BWContext) {
 		app := ctx.FWResult.(*App)
@@ -118,93 +108,8 @@ var insertApp = action.Action{
 	MinParams: 1,
 }
 
-// createIAMUserAction creates a user in IAM. It requires that the first
-// parameter is the a pointer to an App instance.
-var createIAMUserAction = action.Action{
-	Name: "create-iam-user",
-	Forward: func(ctx action.FWContext) (action.Result, error) {
-		app := ctx.Previous.(*App)
-		return createIAMUser(app.Name)
-	},
-	Backward: func(ctx action.BWContext) {
-		user := ctx.FWResult.(*iam.User)
-		getIAMEndpoint().DeleteUser(user.Name)
-	},
-	MinParams: 1,
-}
-
-// createIAMAccessKeyAction creates an access key in IAM. It uses the result
-// returned by createIAMUserAction, so it must come after this action.
-var createIAMAccessKeyAction = action.Action{
-	Name: "create-iam-access-key",
-	Forward: func(ctx action.FWContext) (action.Result, error) {
-		user := ctx.Previous.(*iam.User)
-		return createIAMAccessKey(user)
-	},
-	Backward: func(ctx action.BWContext) {
-		key := ctx.FWResult.(*iam.AccessKey)
-		getIAMEndpoint().DeleteAccessKey(key.Id, key.UserName)
-	},
-	MinParams: 1,
-}
-
-// createBucketAction creates a bucket in S3. It uses the result of
-// createIAMAccessKeyAction for managing permission, and the app given as
-// parameter to generate the name of the bucket. It must run after
-// createIAMAccessKey.
-var createBucketAction = action.Action{
-	Name: "create-bucket",
-	Forward: func(ctx action.FWContext) (action.Result, error) {
-		app := ctx.Params[0].(*App)
-		key := ctx.Previous.(*iam.AccessKey)
-		bucket, err := putBucket(app.Name)
-		if err != nil {
-			return nil, err
-		}
-		env := s3Env{
-			Auth: aws.Auth{
-				AccessKey: key.Id,
-				SecretKey: key.Secret,
-			},
-			bucket:             bucket.Name,
-			endpoint:           bucket.S3Endpoint,
-			locationConstraint: bucket.S3LocationConstraint,
-		}
-		return &env, nil
-	},
-	Backward: func(ctx action.BWContext) {
-		env := ctx.FWResult.(*s3Env)
-		getS3Endpoint().Bucket(env.bucket).DelBucket()
-	},
-	MinParams: 1,
-}
-
-// createUserPolicyAction creates a new UserPolicy in IAM. It requires a
-// pointer to an App instance as the first parameter, and the previous result
-// to be a *s3Env (it should be used after createBucketAction).
-var createUserPolicyAction = action.Action{
-	Name: "create-user-policy",
-	Forward: func(ctx action.FWContext) (action.Result, error) {
-		app := ctx.Params[0].(*App)
-		env := ctx.Previous.(*s3Env)
-		_, err := createIAMUserPolicy(&iam.User{Name: app.Name}, app.Name, env.bucket)
-		if err != nil {
-			return nil, err
-		}
-		return ctx.Previous, nil
-	},
-	Backward: func(ctx action.BWContext) {
-		app := ctx.Params[0].(*App)
-		policyName := fmt.Sprintf("app-%s-bucket", app.Name)
-		getIAMEndpoint().DeleteUserPolicy(app.Name, policyName)
-	},
-	MinParams: 1,
-}
-
 // exportEnvironmentsAction exports tsuru's default environment variables in a
-// new app. It requires a pointer to an App instance as the first parameter,
-// and the previous result to be a *s3Env (it should be used after
-// createUserPolicyAction or createBucketAction).
+// new app. It requires a pointer to an App instance as the first parameter.
 var exportEnvironmentsAction = action.Action{
 	Name: "export-environments",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
@@ -213,7 +118,7 @@ var exportEnvironmentsAction = action.Action{
 		if err != nil {
 			return nil, err
 		}
-		t, err := auth.CreateApplicationToken(app.Name)
+		t, err := AuthScheme.AppLogin(app.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -221,26 +126,9 @@ var exportEnvironmentsAction = action.Action{
 		envVars := []bind.EnvVar{
 			{Name: "TSURU_APPNAME", Value: app.Name},
 			{Name: "TSURU_HOST", Value: host},
-			{Name: "TSURU_APP_TOKEN", Value: t.Token},
+			{Name: "TSURU_APP_TOKEN", Value: t.GetValue()},
 		}
-		env, ok := ctx.Previous.(*s3Env)
-		if ok {
-			variables := map[string]string{
-				"ENDPOINT":           env.endpoint,
-				"LOCATIONCONSTRAINT": strconv.FormatBool(env.locationConstraint),
-				"ACCESS_KEY_ID":      env.AccessKey,
-				"SECRET_KEY":         env.SecretKey,
-				"BUCKET":             env.bucket,
-			}
-			for name, value := range variables {
-				envVars = append(envVars, bind.EnvVar{
-					Name:         fmt.Sprintf("TSURU_S3_%s", name),
-					Value:        value,
-					InstanceName: s3InstanceName,
-				})
-			}
-		}
-		err = app.setEnvsToApp(envVars, false, true)
+		err = app.setEnvsToApp(envVars, false, false)
 		if err != nil {
 			return nil, err
 		}
@@ -248,19 +136,10 @@ var exportEnvironmentsAction = action.Action{
 	},
 	Backward: func(ctx action.BWContext) {
 		app := ctx.Params[0].(*App)
-		auth.DeleteToken(app.Env["TSURU_APP_TOKEN"].Value)
+		AuthScheme.Logout(app.Env["TSURU_APP_TOKEN"].Value)
 		app, err := GetByName(app.Name)
 		if err == nil {
-			s3Env := app.InstanceEnv(s3InstanceName)
-			vars := make([]string, len(s3Env)+3)
-			i := 0
-			for k := range s3Env {
-				vars[i] = k
-				i++
-			}
-			vars[i] = "TSURU_HOST"
-			vars[i+1] = "TSURU_APPNAME"
-			vars[i+2] = "TSURU_APP_TOKEN"
+			vars := []string{"TSURU_HOST", "TSURU_APPNAME", "TSURU_APP_TOKEN"}
 			app.UnsetEnvs(vars, false)
 		}
 	},
@@ -271,14 +150,12 @@ var exportEnvironmentsAction = action.Action{
 var createRepository = action.Action{
 	Name: "create-repository",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		var app App
+		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			app = ctx.Params[0].(App)
 		case *App:
-			app = *ctx.Params[0].(*App)
+			app = ctx.Params[0].(*App)
 		default:
-			return nil, errors.New("First parameter must be App or *App.")
+			return nil, errors.New("First parameter must be *App.")
 		}
 		gURL := repository.ServerURL()
 		var users []string
@@ -287,7 +164,7 @@ var createRepository = action.Action{
 		}
 		c := gandalf.Client{Endpoint: gURL}
 		_, err := c.NewRepository(app.Name, users, false)
-		return &app, err
+		return app, err
 	},
 	Backward: func(ctx action.BWContext) {
 		app := ctx.FWResult.(*App)
@@ -303,24 +180,63 @@ var createRepository = action.Action{
 var provisionApp = action.Action{
 	Name: "provision-app",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		var app App
+		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			app = ctx.Params[0].(App)
 		case *App:
-			app = *ctx.Params[0].(*App)
+			app = ctx.Params[0].(*App)
 		default:
-			return nil, errors.New("First parameter must be App or *App.")
+			return nil, errors.New("First parameter must be *App.")
 		}
-		err := Provisioner.Provision(&app)
+		err := Provisioner.Provision(app)
 		if err != nil {
 			return nil, err
 		}
-		return &app, nil
+		return app, nil
 	},
 	Backward: func(ctx action.BWContext) {
 		app := ctx.FWResult.(*App)
 		Provisioner.Destroy(app)
+	},
+	MinParams: 1,
+}
+
+var setAppIp = action.Action{
+	Name: "set-app-ip",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		var app *App
+		switch ctx.Params[0].(type) {
+		case *App:
+			app = ctx.Params[0].(*App)
+		default:
+			return nil, errors.New("First parameter must be *App.")
+		}
+		conn, err := db.Conn()
+		if err != nil {
+			return nil, err
+		}
+		defer conn.Close()
+		app.Ip, err = Provisioner.Addr(app)
+		if err != nil {
+			return nil, err
+		}
+		err = conn.Apps().Update(bson.M{"name": app.Name}, bson.M{"$set": bson.M{"ip": app.Ip}})
+		if err != nil {
+			return nil, err
+		}
+		return app, nil
+	},
+	Backward: func(ctx action.BWContext) {
+		app := ctx.FWResult.(*App)
+		app.Ip = ""
+		conn, err := db.Conn()
+		if err != nil {
+			log.Errorf("Error trying to get connection to rollback setAppIp action: %s", err)
+		}
+		defer conn.Close()
+		err = conn.Apps().Update(bson.M{"name": app.Name}, bson.M{"$unset": bson.M{"ip": ""}})
+		if err != nil {
+			log.Errorf("Error trying to update app to rollback setAppIp action: %s", err)
+		}
 	},
 	MinParams: 1,
 }
@@ -330,13 +246,10 @@ var reserveUnitsToAdd = action.Action{
 	Forward: func(ctx action.FWContext) (action.Result, error) {
 		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			tmp := ctx.Params[0].(App)
-			app = &tmp
 		case *App:
 			app = ctx.Params[0].(*App)
 		default:
-			return nil, errors.New("First parameter must be App or *App.")
+			return nil, errors.New("First parameter must be *App.")
 		}
 		var n int
 		switch ctx.Params[1].(type) {
@@ -365,9 +278,6 @@ var reserveUnitsToAdd = action.Action{
 	Backward: func(ctx action.BWContext) {
 		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			tmp := ctx.Params[0].(App)
-			app = &tmp
 		case *App:
 			app = ctx.Params[0].(*App)
 		}
@@ -380,94 +290,59 @@ var reserveUnitsToAdd = action.Action{
 	MinParams: 2,
 }
 
-type addUnitsActionResult struct {
-	units []provision.Unit
-}
-
 var provisionAddUnits = action.Action{
 	Name: "provision-add-units",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		var app App
+		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			app = ctx.Params[0].(App)
 		case *App:
-			app = *ctx.Params[0].(*App)
+			app = ctx.Params[0].(*App)
 		default:
-			return nil, errors.New("First parameter must be App or *App.")
+			return nil, errors.New("First parameter must be *App.")
 		}
 		n := ctx.Previous.(int)
-		var result addUnitsActionResult
-		units, err := Provisioner.AddUnits(&app, uint(n))
+		units, err := Provisioner.AddUnits(app, uint(n))
 		if err != nil {
 			return nil, err
 		}
-		result.units = units
-		return &result, nil
+		return units, nil
 	},
 	Backward: func(ctx action.BWContext) {
-		var app App
-		switch ctx.Params[0].(type) {
-		case App:
-			app = ctx.Params[0].(App)
-		case *App:
-			app = *ctx.Params[0].(*App)
-		}
-		fwResult := ctx.FWResult.(*addUnitsActionResult)
-		for _, unit := range fwResult.units {
-			Provisioner.RemoveUnit(&app, unit.Name)
+		units := ctx.FWResult.([]provision.Unit)
+		for _, unit := range units {
+			Provisioner.RemoveUnit(unit)
 		}
 	},
 	MinParams: 1,
 }
 
-var saveNewUnitsInDatabase = action.Action{
-	Name: "save-new-units-in-database",
+var BindService = action.Action{
+	Name: "bind-service",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
 		var app *App
 		switch ctx.Params[0].(type) {
-		case App:
-			tmp := ctx.Params[0].(App)
-			app = &tmp
 		case *App:
 			app = ctx.Params[0].(*App)
+		case DeployOptions:
+			opts := ctx.Params[0].(DeployOptions)
+			app = opts.App
 		default:
-			return nil, errors.New("First parameter must be App or *App.")
+			return nil, errors.New("First parameter must be *App or DeployOptions.")
 		}
-		prev := ctx.Previous.(*addUnitsActionResult)
-		conn, err := db.Conn()
-		if err != nil {
-			return nil, err
-		}
-		defer conn.Close()
-		app, err = GetByName(app.Name)
+		units, _ := ctx.Previous.([]provision.Unit)
+		app, err := GetByName(app.Name)
 		if err != nil {
 			return nil, ErrAppNotFound
 		}
-		messages := make([]queue.Message, len(prev.units)*2)
-		mCount := 0
-		for _, unit := range prev.units {
-			unit := Unit{
-				Name:       unit.Name,
-				Type:       unit.Type,
-				Ip:         unit.Ip,
-				Machine:    unit.Machine,
-				State:      provision.StatusBuilding.String(),
-				InstanceId: unit.InstanceId,
+		if len(units) == 0 {
+			units = app.Units()
+		}
+		for _, unit := range units {
+			err := app.BindUnit(&unit)
+			if err != nil {
+				return nil, err
 			}
-			app.AddUnit(&unit)
-			messages[mCount] = queue.Message{Action: regenerateApprc, Args: []string{app.Name, unit.Name}}
-			messages[mCount+1] = queue.Message{Action: BindService, Args: []string{app.Name, unit.Name}}
-			mCount += 2
 		}
-		err = conn.Apps().Update(
-			bson.M{"name": app.Name},
-			bson.M{"$set": bson.M{"units": app.Units}},
-		)
-		if err != nil {
-			return nil, err
-		}
-		go Enqueue(messages...)
 		return nil, nil
 	},
 	MinParams: 1,
@@ -477,35 +352,36 @@ var saveNewUnitsInDatabase = action.Action{
 var ProvisionerDeploy = action.Action{
 	Name: "provisioner-deploy",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		app, ok := ctx.Params[0].(*App)
+		opts, ok := ctx.Params[0].(DeployOptions)
 		if !ok {
-			return nil, errors.New("First parameter must be a *App.")
+			return nil, errors.New("First parameter must be DeployOptions")
 		}
-		version, ok := ctx.Params[1].(string)
+		writer, ok := ctx.Params[1].(io.Writer)
 		if !ok {
-			return nil, errors.New("Second parameter must be a string.")
+			return nil, errors.New("Second parameter must be an io.Writer")
 		}
-		logWriter, ok := ctx.Params[2].(io.Writer)
-		if !ok {
-			return nil, errors.New("Third parameter must be a io.Writer.")
+		if opts.ArchiveURL != "" {
+			if deployer, ok := Provisioner.(provision.ArchiveDeployer); ok {
+				return nil, deployer.ArchiveDeploy(opts.App, opts.ArchiveURL, writer)
+			}
 		}
-		err := Provisioner.Deploy(app, version, logWriter)
+		err := Provisioner.(provision.GitDeployer).GitDeploy(opts.App, opts.Version, writer)
 		return nil, err
 	},
 	Backward: func(ctx action.BWContext) {
 	},
-	MinParams: 3,
+	MinParams: 2,
 }
 
 // Increment is an actions that increments the deploy number.
 var IncrementDeploy = action.Action{
 	Name: "increment-deploy",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		app, ok := ctx.Params[0].(*App)
+		opts, ok := ctx.Params[0].(DeployOptions)
 		if !ok {
-			return nil, errors.New("First parameter must be a *App.")
+			return nil, errors.New("First parameter must be DeployOptions")
 		}
-		err := incrementDeploy(app)
+		err := incrementDeploy(opts.App)
 		return nil, err
 	},
 	Backward: func(ctx action.BWContext) {

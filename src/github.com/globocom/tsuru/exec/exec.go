@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -11,17 +11,28 @@ import (
 	"os/exec"
 )
 
+// ExecuteOptions specify parameters to the Execute method.
+type ExecuteOptions struct {
+	Cmd    string
+	Args   []string
+	Envs   []string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
 type Executor interface {
 	// Execute executes the specified command.
-	Execute(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error
+	Execute(opts ExecuteOptions) error
 }
 
 type OsExecutor struct{}
 
-func (OsExecutor) Execute(cmd string, args []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	c := exec.Command(cmd, args...)
-	c.Stdin = stdin
-	c.Stdout = stdout
-	c.Stderr = stderr
+func (OsExecutor) Execute(opts ExecuteOptions) error {
+	c := exec.Command(opts.Cmd, opts.Args...)
+	c.Stdin = opts.Stdin
+	c.Stdout = opts.Stdout
+	c.Stderr = opts.Stderr
+	c.Env = opts.Envs
 	return c.Run()
 }

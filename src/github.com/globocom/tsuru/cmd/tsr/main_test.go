@@ -5,16 +5,16 @@
 package main
 
 import (
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/provision"
-	"github.com/globocom/tsuru/testing"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/cmd"
+	"github.com/tsuru/tsuru/provision"
+	"github.com/tsuru/tsuru/testing"
 	"launchpad.net/gocheck"
 	"os"
 )
 
 func (s *S) TestCommandsFromBaseManagerAreRegistered(c *gocheck.C) {
-	baseManager := cmd.NewManager("tsr", "0.3.0", "", os.Stdout, os.Stderr, os.Stdin)
+	baseManager := cmd.NewManager("tsr", "0.3.0", "", os.Stdout, os.Stderr, os.Stdin, nil)
 	manager := buildManager()
 	for name, instance := range baseManager.Commands {
 		command, ok := manager.Commands[name]
@@ -40,24 +40,6 @@ func (s *S) TestAPICmdIsRegistered(c *gocheck.C) {
 	c.Assert(tsrApi.Command, gocheck.FitsTypeOf, &apiCmd{})
 }
 
-func (s *S) TestAdminCmdIsRegistered(c *gocheck.C) {
-	manager := buildManager()
-	admin, ok := manager.Commands["admin-api"]
-	c.Assert(ok, gocheck.Equals, true)
-	tsrApi, ok := admin.(*tsrCommand)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(tsrApi.Command, gocheck.FitsTypeOf, &adminCmd{})
-}
-
-func (s *S) TestCollectorCmdIsRegistered(c *gocheck.C) {
-	manager := buildManager()
-	collector, ok := manager.Commands["collector"]
-	c.Assert(ok, gocheck.Equals, true)
-	tsrCollector, ok := collector.(*tsrCommand)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(tsrCollector.Command, gocheck.FitsTypeOf, &collectorCmd{})
-}
-
 func (s *S) TestTokenCmdIsRegistered(c *gocheck.C) {
 	manager := buildManager()
 	token, ok := manager.Commands["token"]
@@ -69,14 +51,14 @@ func (s *S) TestTokenCmdIsRegistered(c *gocheck.C) {
 
 func (s *S) TestShouldRegisterAllCommandsFromProvisioners(c *gocheck.C) {
 	fp := testing.NewFakeProvisioner()
-	p := testing.CommandableProvisioner{FakeProvisioner: *fp}
+	p := CommandableProvisioner{FakeProvisioner: *fp}
 	provision.Register("comm", &p)
 	manager := buildManager()
 	fake, ok := manager.Commands["fake"]
 	c.Assert(ok, gocheck.Equals, true)
 	tsrFake, ok := fake.(*tsrCommand)
 	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(tsrFake.Command, gocheck.FitsTypeOf, &testing.FakeCommand{})
+	c.Assert(tsrFake.Command, gocheck.FitsTypeOf, &FakeCommand{})
 }
 
 func (s *S) TestHealerCmdIsRegistered(c *gocheck.C) {

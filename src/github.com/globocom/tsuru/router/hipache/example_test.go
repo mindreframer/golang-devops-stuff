@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,8 +6,8 @@ package hipache_test
 
 import (
 	"fmt"
-	"github.com/globocom/tsuru/router"
-	_ "github.com/globocom/tsuru/router/hipache"
+	"github.com/tsuru/tsuru/router"
+	_ "github.com/tsuru/tsuru/router/hipache"
 )
 
 func Example() {

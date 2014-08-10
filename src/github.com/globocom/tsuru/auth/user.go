@@ -1,60 +1,27 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package auth
 
 import (
-	"bytes"
-	"code.google.com/p/go.crypto/bcrypt"
 	stderrors "errors"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/go-gandalfclient"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/quota"
-	"github.com/globocom/tsuru/repository"
-	"github.com/globocom/tsuru/validation"
-	"labix.org/v2/mgo/bson"
-	"math/rand"
-	"net"
-	"net/smtp"
-	"strings"
-	"time"
+	"github.com/tsuru/config"
+	"github.com/tsuru/go-gandalfclient"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/quota"
+	"github.com/tsuru/tsuru/repository"
+	"github.com/tsuru/tsuru/validation"
+	"gopkg.in/mgo.v2/bson"
 )
 
 const (
-	defaultExpiration = 7 * 24 * time.Hour
-	emailError        = "Invalid email."
-	passwordError     = "Password length should be least 6 characters and at most 50 characters."
-	passwordMinLen    = 6
-	passwordMaxLen    = 50
+	emailError = "Invalid email."
 )
 
 var ErrUserNotFound = stderrors.New("User not found")
-
-var tokenExpire time.Duration
-var cost int
-
-func loadConfig() error {
-	if cost == 0 && tokenExpire == 0 {
-		var err error
-		if days, err := config.GetInt("auth:token-expire-days"); err == nil {
-			tokenExpire = time.Duration(int64(days) * 24 * int64(time.Hour))
-		} else {
-			tokenExpire = defaultExpiration
-		}
-		if cost, err = config.GetInt("auth:hash-cost"); err != nil {
-			cost = bcrypt.DefaultCost
-		}
-		if cost < bcrypt.MinCost || cost > bcrypt.MaxCost {
-			return fmt.Errorf("Invalid value for setting %q: it must be between %d and %d.", "auth:hash-cost", bcrypt.MinCost, bcrypt.MaxCost)
-		}
-	}
-	return nil
-}
 
 type Key struct {
 	Name    string
@@ -66,6 +33,16 @@ type User struct {
 	Password string
 	Keys     []Key
 	quota.Quota
+}
+
+// keyToMap converts a Key array into a map maybe we should store a map
+// directly instead of having a convertion
+func keyToMap(keys []Key) map[string]string {
+	kMap := make(map[string]string, len(keys))
+	for _, k := range keys {
+		kMap[k.Name] = k.Content
+	}
+	return kMap
 }
 
 func GetUserByEmail(email string) (*User, error) {
@@ -90,9 +67,23 @@ func (u *User) Create() error {
 	if err != nil {
 		return err
 	}
+	if u.Quota.Limit == 0 {
+		u.Quota = quota.Unlimited
+		if limit, err := config.GetInt("quota:apps-per-user"); err == nil && limit > -1 {
+			u.Quota.Limit = limit
+		}
+	}
 	defer conn.Close()
-	u.HashPassword()
 	return conn.Users().Insert(u)
+}
+
+func (u *User) Delete() error {
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	return conn.Users().Remove(bson.M{"email": u.Email})
 }
 
 func (u *User) Update() error {
@@ -102,43 +93,6 @@ func (u *User) Update() error {
 	}
 	defer conn.Close()
 	return conn.Users().Update(bson.M{"email": u.Email}, u)
-}
-
-func (u *User) HashPassword() {
-	if passwd, err := bcrypt.GenerateFromPassword([]byte(u.Password), cost); err == nil {
-		u.Password = string(passwd)
-	}
-}
-
-func (u *User) CheckPassword(password string) error {
-	if !validation.ValidateLength(password, passwordMinLen, passwordMaxLen) {
-		return &errors.ValidationError{Message: passwordError}
-	}
-	if bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)) == nil {
-		return nil
-	}
-	return AuthenticationFailure{}
-}
-
-func (u *User) CreateToken(password string) (*Token, error) {
-	if u.Email == "" {
-		return nil, stderrors.New("User does not have an email")
-	}
-	if err := u.CheckPassword(password); err != nil {
-		return nil, err
-	}
-	conn, err := db.Conn()
-	if err != nil {
-		return nil, err
-	}
-	defer conn.Close()
-	t, err := newUserToken(u)
-	if err != nil {
-		return nil, err
-	}
-	err = conn.Tokens().Insert(t)
-	go removeOldTokens(u.Email)
-	return t, err
 }
 
 // Teams returns a slice containing all teams that the user is member of.
@@ -185,6 +139,15 @@ func (u *User) RemoveKey(key Key) error {
 	return nil
 }
 
+func (u *User) AddKeyGandalf(key *Key) error {
+	key.Name = fmt.Sprintf("%s-%d", u.Email, len(u.Keys)+1)
+	gURL := repository.ServerURL()
+	if err := (&gandalf.Client{Endpoint: gURL}).AddKey(u.Email, keyToMap([]Key{*key})); err != nil {
+		return fmt.Errorf("Failed to add key to git server: %s", err)
+	}
+	return nil
+}
+
 func (u *User) IsAdmin() bool {
 	adminTeamName, err := config.GetString("admin-team")
 	if err != nil {
@@ -225,122 +188,17 @@ func (u *User) AllowedApps() ([]string, error) {
 	return appNames, nil
 }
 
-// StartPasswordReset starts the password reset process, creating a new token
-// and mailing it to the user.
-//
-// The token should then be used to finish the process, through the
-// ResetPassword function.
-func (u *User) StartPasswordReset() error {
-	t, err := createPasswordToken(u)
-	if err != nil {
-		return err
-	}
-	go u.sendResetPassword(t)
-	return nil
-}
-
-func (u *User) sendResetPassword(t *passwordToken) {
-	var body bytes.Buffer
-	err := resetEmailData.Execute(&body, t)
-	if err != nil {
-		log.Errorf("Failed to send password token to user %q: %s", u.Email, err)
-		return
-	}
-	err = sendEmail(u.Email, body.Bytes())
-	if err != nil {
-		log.Errorf("Failed to send password token for user %q: %s", u.Email, err)
-	}
-}
-
-// ResetPassword actually resets the password of the user. It needs the token
-// string. The new password will be a random string, that will be then sent to
-// the user email.
-func (u *User) ResetPassword(token string) error {
-	if token == "" {
-		return ErrInvalidToken
-	}
-	conn, err := db.Conn()
-	if err != nil {
-		return err
-	}
-	t, err := getPasswordToken(token)
-	if err != nil {
-		return err
-	}
-	if t.UserEmail != u.Email {
-		return ErrInvalidToken
-	}
-	password := generatePassword(12)
-	u.Password = password
-	u.HashPassword()
-	go u.sendNewPassword(password)
-	t.Used = true
-	conn.PasswordTokens().UpdateId(t.Token, t)
-	return u.Update()
-}
-
-func (u *User) sendNewPassword(password string) {
-	m := map[string]string{
-		"password": password,
-		"email":    u.Email,
-	}
-	var body bytes.Buffer
-	err := passwordResetConfirm.Execute(&body, m)
-	if err != nil {
-		log.Errorf("Failed to send new password to user %q: %s", u.Email, err)
-		return
-	}
-	err = sendEmail(u.Email, body.Bytes())
-	if err != nil {
-		log.Errorf("Failed to send new password to user %q: %s", u.Email, err)
-	}
-}
-
 func (u *User) ListKeys() (map[string]string, error) {
 	gURL := repository.ServerURL()
 	c := gandalf.Client{Endpoint: gURL}
 	return c.ListKeys(u.Email)
 }
 
-type AuthenticationFailure struct{}
-
-func (AuthenticationFailure) Error() string {
-	return "Authentication failed, wrong password."
-}
-
-func generatePassword(length int) string {
-	password := make([]byte, length)
-	for i := range password {
-		password[i] = passwordChars[rand.Int()%len(passwordChars)]
+func (u *User) CreateOnGandalf() error {
+	gURL := repository.ServerURL()
+	c := gandalf.Client{Endpoint: gURL}
+	if _, err := c.NewUser(u.Email, keyToMap(u.Keys)); err != nil {
+		return fmt.Errorf("Failed to create user in the git server: %s", err)
 	}
-	return string(password)
-}
-
-func sendEmail(email string, data []byte) error {
-	addr, err := smtpServer()
-	if err != nil {
-		return err
-	}
-	var auth smtp.Auth
-	user, err := config.GetString("smtp:user")
-	if err != nil {
-		return stderrors.New(`Setting "smtp:user" is not defined`)
-	}
-	password, _ := config.GetString("smtp:password")
-	if password != "" {
-		host, _, _ := net.SplitHostPort(addr)
-		auth = smtp.PlainAuth("", user, password, host)
-	}
-	return smtp.SendMail(addr, auth, user, []string{email}, data)
-}
-
-func smtpServer() (string, error) {
-	server, _ := config.GetString("smtp:server")
-	if server == "" {
-		return "", stderrors.New(`Setting "smtp:server" is not defined`)
-	}
-	if !strings.Contains(server, ":") {
-		server += ":25"
-	}
-	return server, nil
+	return nil
 }

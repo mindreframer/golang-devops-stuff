@@ -1,14 +1,14 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package service
 
 import (
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/testing"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/testing"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"
@@ -36,7 +36,7 @@ func (s *S) TestCreateServiceInstanceForward(c *gocheck.C) {
 	defer s.conn.Services().RemoveId(srv.Name)
 	instance := ServiceInstance{Name: "mysql"}
 	ctx := action.FWContext{
-		Params: []interface{}{srv, instance},
+		Params: []interface{}{srv, instance, "my@user"},
 	}
 	r, err := createServiceInstance.Forward(ctx)
 	c.Assert(err, gocheck.IsNil)
@@ -57,14 +57,19 @@ func (s *S) TestCreateServiceInstanceForwardInvalidParams(c *gocheck.C) {
 	err := s.conn.Services().Insert(&srv)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Services().RemoveId(srv.Name)
-	ctx := action.FWContext{Params: []interface{}{"", ""}}
+	ctx := action.FWContext{Params: []interface{}{"", "", ""}}
 	_, err = createServiceInstance.Forward(ctx)
 	c.Assert(err, gocheck.NotNil)
 	c.Assert(err.Error(), gocheck.Equals, "First parameter must be a Service.")
-	ctx = action.FWContext{Params: []interface{}{srv, ""}}
+	ctx = action.FWContext{Params: []interface{}{srv, "", ""}}
 	_, err = createServiceInstance.Forward(ctx)
 	c.Assert(err, gocheck.NotNil)
 	c.Assert(err.Error(), gocheck.Equals, "Second parameter must be a ServiceInstance.")
+	instance := ServiceInstance{Name: "mysql"}
+	ctx = action.FWContext{Params: []interface{}{srv, instance, 1}}
+	_, err = createServiceInstance.Forward(ctx)
+	c.Assert(err, gocheck.NotNil)
+	c.Assert(err.Error(), gocheck.Equals, "Third parameter must be a string.")
 }
 
 func (s *S) TestCreateServiceInstanceBackward(c *gocheck.C) {
@@ -311,7 +316,11 @@ func (s *S) TestSetEnvironVariablesToAppForwardReturnsEnvVars(c *gocheck.C) {
 			InstanceName: si.Name,
 		},
 	}
-	c.Assert(result.([]bind.EnvVar), gocheck.DeepEquals, expected)
+	got := result.([]bind.EnvVar)
+	if got[0].Name == "DATABASE_PASSWORD" {
+		got[0], got[1] = got[1], got[0]
+	}
+	c.Assert(got, gocheck.DeepEquals, expected)
 }
 
 func (s *S) TestSetEnvironVariablesToAppBackward(c *gocheck.C) {

@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,8 +7,8 @@ package tsuru
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/cmd/testing"
+	"github.com/tsuru/tsuru/cmd"
+	"github.com/tsuru/tsuru/cmd/testing"
 	"io/ioutil"
 	"launchpad.net/gocheck"
 	"net/http"
@@ -28,7 +28,7 @@ If you don't provide the app name, tsuru will try to guess it.`
 
 func (s *S) TestEnvGetRun(c *gocheck.C) {
 	var stdout, stderr bytes.Buffer
-	jsonResult := `{"DATABASE_HOST":"somehost"}`
+	jsonResult := `[{"name": "DATABASE_HOST", "value": "somehost", "public": true}]`
 	result := "DATABASE_HOST=somehost\n"
 	context := cmd.Context{
 		Args:   []string{"DATABASE_HOST"},
@@ -45,7 +45,7 @@ func (s *S) TestEnvGetRun(c *gocheck.C) {
 
 func (s *S) TestEnvGetRunWithMultipleParams(c *gocheck.C) {
 	var stdout, stderr bytes.Buffer
-	jsonResult := `{"DATABASE_HOST":"somehost","DATABASE_USER":"someuser"}`
+	jsonResult := `[{"name": "DATABASE_HOST", "value": "somehost", "public": true}, {"name": "DATABASE_USER", "value": "someuser", "public": true}]`
 	result := "DATABASE_HOST=somehost\nDATABASE_USER=someuser\n"
 	params := []string{"DATABASE_HOST", "DATABASE_USER"}
 	context := cmd.Context{
@@ -73,8 +73,26 @@ func (s *S) TestEnvGetRunWithMultipleParams(c *gocheck.C) {
 
 func (s *S) TestEnvGetAlwaysPrintInAlphabeticalOrder(c *gocheck.C) {
 	var stdout, stderr bytes.Buffer
-	jsonResult := `{"DATABASE_USER":"someuser","DATABASE_HOST":"somehost"}`
+	jsonResult := `[{"name": "DATABASE_USER", "value": "someuser", "public": true}, {"name": "DATABASE_HOST", "value": "somehost", "public": true}]`
 	result := "DATABASE_HOST=somehost\nDATABASE_USER=someuser\n"
+	params := []string{"DATABASE_HOST", "DATABASE_USER"}
+	context := cmd.Context{
+		Args:   params,
+		Stdout: &stdout,
+		Stderr: &stderr,
+	}
+	client := cmd.NewClient(&http.Client{Transport: &testing.Transport{Message: jsonResult, Status: http.StatusOK}}, nil, manager)
+	command := EnvGet{}
+	command.Flags().Parse(true, []string{"-a", "someapp"})
+	err := command.Run(&context, client)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(stdout.String(), gocheck.Equals, result)
+}
+
+func (s *S) TestEnvGetPrivateVariables(c *gocheck.C) {
+	var stdout, stderr bytes.Buffer
+	jsonResult := `[{"name": "DATABASE_USER", "value": "someuser", "public": true}, {"name": "DATABASE_HOST", "value": "somehost", "public": false}]`
+	result := "DATABASE_HOST=*** (private variable)\nDATABASE_USER=someuser\n"
 	params := []string{"DATABASE_HOST", "DATABASE_USER"}
 	context := cmd.Context{
 		Args:   params,
@@ -91,7 +109,7 @@ func (s *S) TestEnvGetAlwaysPrintInAlphabeticalOrder(c *gocheck.C) {
 
 func (s *S) TestEnvGetWithoutTheFlag(c *gocheck.C) {
 	var stdout, stderr bytes.Buffer
-	jsonResult := `{"DATABASE_HOST":"somehost","DATABASE_USER":"someuser"}`
+	jsonResult := `[{"name": "DATABASE_HOST", "value": "somehost", "public": true}, {"name": "DATABASE_USER", "value": "someuser", "public": true}]`
 	result := "DATABASE_HOST=somehost\nDATABASE_USER=someuser\n"
 	params := []string{"DATABASE_HOST", "DATABASE_USER"}
 	context := cmd.Context{
@@ -171,9 +189,12 @@ func (s *S) TestEnvSetValues(c *gocheck.C) {
 	result := "variable(s) successfully exported\n"
 	context := cmd.Context{
 		Args: []string{
-			"DATABASE_HOST=some", "host",
-			"DATABASE_USER=root", "DATABASE_PASSWORD=.1234..abc",
+			"DATABASE_HOST=some host",
+			"DATABASE_USER=root",
+			"DATABASE_PASSWORD=.1234..abc",
 			"http_proxy=http://myproxy.com:3128/",
+			"VALUE_WITH_EQUAL_SIGN=http://wholikesquerystrings.me/?tsuru=awesome",
+			"BASE64_STRING=t5urur0ck5==",
 		},
 		Stdout: &stdout,
 		Stderr: &stderr,
@@ -182,10 +203,12 @@ func (s *S) TestEnvSetValues(c *gocheck.C) {
 		Transport: testing.Transport{Message: result, Status: http.StatusOK},
 		CondFunc: func(req *http.Request) bool {
 			want := map[string]string{
-				"DATABASE_HOST":     "some host",
-				"DATABASE_USER":     "root",
-				"DATABASE_PASSWORD": ".1234..abc",
-				"http_proxy":        "http://myproxy.com:3128/",
+				"DATABASE_HOST":         "some host",
+				"DATABASE_USER":         "root",
+				"DATABASE_PASSWORD":     ".1234..abc",
+				"http_proxy":            "http://myproxy.com:3128/",
+				"VALUE_WITH_EQUAL_SIGN": "http://wholikesquerystrings.me/?tsuru=awesome",
+				"BASE64_STRING":         "t5urur0ck5==",
 			}
 			defer req.Body.Close()
 			var got map[string]string

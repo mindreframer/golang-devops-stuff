@@ -1,12 +1,17 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package app
 
 import (
-	"github.com/globocom/tsuru/db"
-	"labix.org/v2/mgo/bson"
+	"errors"
+	"fmt"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/provision"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
+	"io"
 )
 
 type Platform struct {
@@ -22,6 +27,85 @@ func Platforms() ([]Platform, error) {
 	}
 	err = conn.Platforms().Find(nil).All(&platforms)
 	return platforms, err
+}
+
+// PlatformAdd add a new platform to tsuru
+func PlatformAdd(name string, args map[string]string, w io.Writer) error {
+	var (
+		provisioner provision.ExtensibleProvisioner
+		ok          bool
+	)
+	if provisioner, ok = Provisioner.(provision.ExtensibleProvisioner); !ok {
+		return errors.New("Provisioner is not extensible")
+	}
+	if name == "" {
+		return errors.New("Platform name is required.")
+	}
+	p := Platform{Name: name}
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	err = conn.Platforms().Insert(p)
+	if err != nil {
+		if mgo.IsDup(err) {
+			return DuplicatePlatformError{}
+		}
+		return err
+	}
+	err = provisioner.PlatformAdd(name, args, w)
+	if err != nil {
+		db_err := conn.Platforms().RemoveId(p.Name)
+		if db_err != nil {
+			return fmt.Errorf("Caused by: %s and %s", err.Error(), db_err.Error())
+		}
+		return err
+	}
+	return nil
+}
+
+type DuplicatePlatformError struct{}
+
+func (DuplicatePlatformError) Error() string {
+	return "Duplicate platform"
+}
+
+func PlatformUpdate(name string, args map[string]string, w io.Writer) error {
+	var (
+		provisioner provision.ExtensibleProvisioner
+		platform    Platform
+		ok          bool
+	)
+	if provisioner, ok = Provisioner.(provision.ExtensibleProvisioner); !ok {
+		return errors.New("Provisioner is not extensible")
+	}
+	if name == "" {
+		return errors.New("Platform name is required.")
+	}
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	err = conn.Platforms().Find(bson.M{"_id": name}).One(&platform)
+	if err != nil {
+		if err == mgo.ErrNotFound {
+			return errors.New("Platform doesn't exist.")
+		}
+		return err
+	}
+	err = provisioner.PlatformUpdate(name, args, w)
+	if err != nil {
+		return err
+	}
+	var apps []App
+	err = conn.Apps().Find(bson.M{"framework": name}).All(&apps)
+	if err != nil {
+		return err
+	}
+	for _, app := range apps {
+		app.SetUpdatePlatform(true)
+	}
+	return nil
 }
 
 func getPlatform(name string) (*Platform, error) {

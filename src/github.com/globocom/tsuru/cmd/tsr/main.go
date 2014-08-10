@@ -5,21 +5,18 @@
 package main
 
 import (
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/provision"
-	_ "github.com/globocom/tsuru/provision/docker"
-	_ "github.com/globocom/tsuru/provision/juju"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/cmd"
+	"github.com/tsuru/tsuru/provision"
+	_ "github.com/tsuru/tsuru/provision/docker"
 	"os"
 )
 
 const defaultConfigPath = "/etc/tsuru/tsuru.conf"
 
 func buildManager() *cmd.Manager {
-	m := cmd.NewManager("tsr", "0.3.2", "", os.Stdout, os.Stderr, os.Stdin)
+	m := cmd.NewManager("tsr", "0.6.0", "", os.Stdout, os.Stderr, os.Stdin, nil)
 	m.Register(&tsrCommand{Command: &apiCmd{}})
-	m.Register(&tsrCommand{Command: &adminCmd{}})
-	m.Register(&tsrCommand{Command: &collectorCmd{}})
 	m.Register(&tsrCommand{Command: tokenCmd{}})
 	m.Register(&tsrCommand{Command: &healerCmd{}})
 	registerProvisionersCommands(m)
@@ -29,7 +26,7 @@ func buildManager() *cmd.Manager {
 func registerProvisionersCommands(m *cmd.Manager) {
 	provisioners := provision.Registry()
 	for _, p := range provisioners {
-		if c, ok := p.(provision.Commandable); ok {
+		if c, ok := p.(cmd.Commandable); ok {
 			commands := c.Commands()
 			for _, cmd := range commands {
 				m.Register(&tsrCommand{Command: cmd})

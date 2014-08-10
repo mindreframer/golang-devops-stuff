@@ -7,26 +7,29 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/app"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/provision"
-	"github.com/globocom/tsuru/quota"
-	"github.com/globocom/tsuru/repository"
-	"github.com/globocom/tsuru/service"
-	"github.com/globocom/tsuru/testing"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/api/context"
+	"github.com/tsuru/tsuru/app"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/provision"
+	"github.com/tsuru/tsuru/queue"
+	"github.com/tsuru/tsuru/quota"
+	"github.com/tsuru/tsuru/repository"
+	"github.com/tsuru/tsuru/service"
+	"github.com/tsuru/tsuru/testing"
+	"gopkg.in/mgo.v2/bson"
 	"io"
 	"io/ioutil"
-	"labix.org/v2/mgo/bson"
 	"launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -36,12 +39,11 @@ func (s *S) TestAppIsAvailableHandlerShouldReturnErrorWhenAppStatusIsnotStarted(
 		Name:     "someapp",
 		Platform: "zend",
 		Teams:    []string{s.team.Name},
-		Units:    []app.Unit{{Name: "someapp/0", Type: "django", State: provision.StatusBuilding.String()}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/available?:appname=%s", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -55,12 +57,14 @@ func (s *S) TestAppIsAvailableHandlerShouldReturn200WhenAppUnitStatusIsStarted(c
 		Name:     "someapp",
 		Platform: "zend",
 		Teams:    []string{s.team.Name},
-		Units:    []app.Unit{{Name: "someapp/0", Type: "django", State: provision.StatusStarted.String()}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 1)
 	url := fmt.Sprintf("/apps/%s/repository/clone?:appname=%s", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -75,7 +79,6 @@ func (s *S) TestDeployHandler(c *gocheck.C) {
 		Name:     "otherapp",
 		Platform: "zend",
 		Teams:    []string{s.team.Name},
-		Units:    []app.Unit{{Name: "i-0800", State: "started"}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
@@ -93,7 +96,61 @@ func (s *S) TestDeployHandler(c *gocheck.C) {
 	c.Assert(recorder.Code, gocheck.Equals, http.StatusOK)
 	b, err := ioutil.ReadAll(recorder.Body)
 	c.Assert(err, gocheck.IsNil)
-	c.Assert(string(b), gocheck.Equals, "Deploy called")
+	c.Assert(string(b), gocheck.Equals, "Git deploy called\nOK\n")
+	c.Assert(s.provisioner.Version(&a), gocheck.Equals, "a345f3e")
+}
+
+func (s *S) TestDeployArchiveURL(c *gocheck.C) {
+	a := app.App{
+		Name:     "otherapp",
+		Platform: "zend",
+		Teams:    []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	url := fmt.Sprintf("/apps/%s/repository/clone?:appname=%s", a.Name, a.Name)
+	request, err := http.NewRequest("POST", url, strings.NewReader("archive-url=http://something.tar.gz&user=fulano"))
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	err = deploy(recorder, request, s.token)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(recorder.Header().Get("Content-Type"), gocheck.Equals, "text")
+	c.Assert(recorder.Code, gocheck.Equals, http.StatusOK)
+	b, err := ioutil.ReadAll(recorder.Body)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(string(b), gocheck.Equals, "Archive deploy called\nOK\n")
+}
+
+func (s *S) TestDeployWithCommit(c *gocheck.C) {
+	a := app.App{
+		Name:     "otherapp",
+		Platform: "zend",
+		Teams:    []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	url := fmt.Sprintf("/apps/%s/repository/clone?:appname=%s", a.Name, a.Name)
+	request, err := http.NewRequest("POST", url, strings.NewReader("version=a345f3e&user=fulano&commit=123"))
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	err = deploy(recorder, request, s.token)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(recorder.Header().Get("Content-Type"), gocheck.Equals, "text")
+	c.Assert(recorder.Code, gocheck.Equals, http.StatusOK)
+	b, err := ioutil.ReadAll(recorder.Body)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(string(b), gocheck.Equals, "Git deploy called\nOK\n")
+	deploys, err := s.conn.Deploys().Find(bson.M{"commit": "123"}).Count()
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(deploys, gocheck.Equals, 1)
 	c.Assert(s.provisioner.Version(&a), gocheck.Equals, "a345f3e")
 }
 
@@ -102,7 +159,6 @@ func (s *S) TestCloneRepositoryShouldIncrementDeployNumberOnApp(c *gocheck.C) {
 		Name:     "otherapp",
 		Platform: "zend",
 		Teams:    []string{s.team.Name},
-		Units:    []app.Unit{{Name: "i-0800", State: "started"}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
@@ -126,7 +182,7 @@ func (s *S) TestCloneRepositoryShouldIncrementDeployNumberOnApp(c *gocheck.C) {
 	c.Assert(diff < 60*time.Second, gocheck.Equals, true)
 }
 
-func (s *S) TestCloneRepositoryShouldReturnNotFoundWhenAppDoesNotExist(c *gocheck.C) {
+func (s *S) TestDeployShouldReturnNotFoundWhenAppDoesNotExist(c *gocheck.C) {
 	request, err := http.NewRequest("POST", "/apps/abc/repository/clone?:appname=abc", strings.NewReader("version=abcdef"))
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -139,7 +195,7 @@ func (s *S) TestCloneRepositoryShouldReturnNotFoundWhenAppDoesNotExist(c *gochec
 	c.Assert(e, gocheck.ErrorMatches, "^App abc not found.$")
 }
 
-func (s *S) TestCloneRepositoryWithoutVersion(c *gocheck.C) {
+func (s *S) TestDeployWithoutVersionAndArchiveURL(c *gocheck.C) {
 	request, err := http.NewRequest("POST", "/apps/abc/repository/clone?:appname=abc", nil)
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -149,29 +205,44 @@ func (s *S) TestCloneRepositoryWithoutVersion(c *gocheck.C) {
 	e, ok := err.(*errors.HTTP)
 	c.Assert(ok, gocheck.Equals, true)
 	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
-	c.Assert(e.Message, gocheck.Equals, "Missing parameter version")
+	c.Assert(e.Message, gocheck.Equals, "you must specify either the version or the archive-url")
+}
+
+func (s *S) TestDeployWithVersionAndArchiveURL(c *gocheck.C) {
+	body := strings.NewReader("version=abcdef&archive-url=http://google.com")
+	request, err := http.NewRequest("POST", "/apps/abc/repository/clone?:appname=abc", body)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	err = deploy(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
+	c.Assert(e.Message, gocheck.Equals, "you must specify either the version or the archive-url, but not both")
 }
 
 func (s *S) TestAppList(c *gocheck.C) {
 	app1 := app.App{
 		Name:  "app1",
 		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Name: "app1/0", Ip: "10.10.10.10"}},
 	}
 	err := s.conn.Apps().Insert(app1)
 	c.Assert(err, gocheck.IsNil)
+	s.provisioner.Provision(&app1)
+	defer s.provisioner.Destroy(&app1)
 	defer s.conn.Apps().Remove(bson.M{"name": app1.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": app1.Name})
+	defer s.conn.Logs(app1.Name).DropCollection()
 	app2 := app.App{
 		Name:  "app2",
 		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Name: "app2/0"}},
 	}
 	err = s.conn.Apps().Insert(app2)
 	c.Assert(err, gocheck.IsNil)
+	s.provisioner.Provision(&app2)
+	defer s.provisioner.Destroy(&app2)
 	defer s.conn.Apps().Remove(bson.M{"name": app2.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": app2.Name})
-	expected := []app.App{app1, app2}
+	defer s.conn.Logs(app2.Name).DropCollection()
 	request, err := http.NewRequest("GET", "/apps/", nil)
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/json")
@@ -184,12 +255,11 @@ func (s *S) TestAppList(c *gocheck.C) {
 	apps := []app.App{}
 	err = json.Unmarshal(body, &apps)
 	c.Assert(err, gocheck.IsNil)
+	expected := []app.App{app1, app2}
 	c.Assert(len(apps), gocheck.Equals, len(expected))
 	for i, app := range apps {
 		c.Assert(app.Name, gocheck.DeepEquals, expected[i].Name)
-		if app.Units[0].Ip != "" {
-			c.Assert(app.Units[0].Ip, gocheck.Equals, "10.10.10.10")
-		}
+		c.Assert(app.Units(), gocheck.DeepEquals, expected[i].Units())
 	}
 	action := testing.Action{Action: "app-list", User: s.user.Email}
 	c.Assert(action, testing.IsRecorded)
@@ -198,13 +268,12 @@ func (s *S) TestAppList(c *gocheck.C) {
 // Issue #52.
 func (s *S) TestAppListShouldListAllAppsOfAllTeamsThatTheUserIsAMember(c *gocheck.C) {
 	u := auth.User{Email: "passing-by@angra.com", Password: "123456"}
-	u.HashPassword()
-	err := s.conn.Users().Insert(u)
+	_, err := nativeScheme.Create(&u)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Users().Remove(bson.M{"email": u.Email})
-	token, err := u.CreateToken("123456")
+	token, err := nativeScheme.Login(map[string]string{"email": u.Email, "password": "123456"})
 	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Tokens().Remove(bson.M{"token": token.Token})
+	defer s.conn.Tokens().Remove(bson.M{"token": token.GetValue()})
 	team := auth.Team{Name: "angra", Users: []string{s.user.Email, u.Email}}
 	err = s.conn.Teams().Insert(team)
 	c.Assert(err, gocheck.IsNil)
@@ -216,7 +285,7 @@ func (s *S) TestAppListShouldListAllAppsOfAllTeamsThatTheUserIsAMember(c *gochec
 	err = s.conn.Apps().Insert(app1)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": app1.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": app1.Name})
+	defer s.conn.Logs(app1.Name).DropCollection()
 	request, err := http.NewRequest("GET", "/apps/", nil)
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/json")
@@ -250,9 +319,6 @@ func (s *S) TestDelete(c *gocheck.C) {
 		Name:     "myapptodelete",
 		Platform: "zend",
 		Teams:    []string{s.team.Name},
-		Units: []app.Unit{
-			{Ip: "10.10.10.10", Machine: 1},
-		},
 	}
 	err := app.CreateApp(myApp, s.user)
 	c.Assert(err, gocheck.IsNil)
@@ -284,7 +350,7 @@ func (s *S) TestDeleteShouldReturnForbiddenIfTheGivenUserDoesNotHaveAccesToTheAp
 	err := s.conn.Apps().Insert(myApp)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": myApp.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": myApp.Name})
+	defer s.conn.Logs(myApp.Name).DropCollection()
 	request, err := http.NewRequest("DELETE", "/apps/"+myApp.Name+"?:app="+myApp.Name, nil)
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
@@ -318,7 +384,7 @@ func (s *S) TestAppInfo(c *gocheck.C) {
 	err := s.conn.Apps().Insert(expectedApp)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": expectedApp.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": expectedApp.Name})
+	defer s.conn.Logs(expectedApp.Name).DropCollection()
 	var myApp map[string]interface{}
 	request, err := http.NewRequest("GET", "/apps/"+expectedApp.Name+"?:app="+expectedApp.Name, nil)
 	request.Header.Set("Content-Type", "application/json")
@@ -350,7 +416,7 @@ func (s *S) TestAppInfoReturnsForbiddenWhenTheUserDoesNotHaveAccessToTheApp(c *g
 	err := s.conn.Apps().Insert(expectedApp)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": expectedApp.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": expectedApp.Name})
+	defer s.conn.Logs(expectedApp.Name).DropCollection()
 	request, err := http.NewRequest("GET", "/apps/"+expectedApp.Name+"?:app="+expectedApp.Name, nil)
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
@@ -377,6 +443,7 @@ func (s *S) TestAppInfoReturnsNotFoundWhenAppDoesNotExist(c *gocheck.C) {
 }
 
 func (s *S) TestCreateAppHandler(c *gocheck.C) {
+	config.Set("docker:allow-memory-set", true)
 	h := testHandler{}
 	ts := testing.StartGandalfTestServer(&h)
 	defer ts.Close()
@@ -387,7 +454,8 @@ func (s *S) TestCreateAppHandler(c *gocheck.C) {
 		err = app.Delete(a)
 		c.Assert(err, gocheck.IsNil)
 	}()
-	b := strings.NewReader(`{"name":"someapp","platform":"zend"}`)
+	data := `{"name":"someapp","platform":"zend","memory":"10","swap":"20"}`
+	b := strings.NewReader(data)
 	request, err := http.NewRequest("POST", "/apps", b)
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/json")
@@ -401,6 +469,7 @@ func (s *S) TestCreateAppHandler(c *gocheck.C) {
 	expected := map[string]string{
 		"status":         "success",
 		"repository_url": repoURL,
+		"ip":             "someapp.fake-lb.tsuru.io",
 	}
 	err = json.Unmarshal(body, &obtained)
 	c.Assert(obtained, gocheck.DeepEquals, expected)
@@ -409,13 +478,155 @@ func (s *S) TestCreateAppHandler(c *gocheck.C) {
 	err = s.conn.Apps().Find(bson.M{"name": "someapp"}).One(&gotApp)
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(gotApp.Teams, gocheck.DeepEquals, []string{s.team.Name})
-	c.Assert(s.provisioner.GetUnits(&gotApp), gocheck.HasLen, 1)
+	c.Assert(s.provisioner.GetUnits(&gotApp), gocheck.HasLen, 0)
 	action := testing.Action{
 		Action: "create-app",
 		User:   s.user.Email,
-		Extra:  []interface{}{"name=someapp", "platform=zend"},
+		Extra:  []interface{}{"name=someapp", "platform=zend", "memory=10", "swap=20"},
 	}
 	c.Assert(action, testing.IsRecorded)
+}
+
+func (s *S) TestCreateAppTeamOwner(c *gocheck.C) {
+	config.Set("docker:allow-memory-set", true)
+	h := testHandler{}
+	ts := testing.StartGandalfTestServer(&h)
+	defer ts.Close()
+	a := app.App{Name: "someapp"}
+	defer func() {
+		a, err := app.GetByName("someapp")
+		c.Assert(err, gocheck.IsNil)
+		err = app.Delete(a)
+		c.Assert(err, gocheck.IsNil)
+	}()
+	data := `{"name":"someapp","platform":"zend","memory":"1","teamOwner":"tsuruteam"}`
+	b := strings.NewReader(data)
+	request, err := http.NewRequest("POST", "/apps", b)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	err = createApp(recorder, request, s.token)
+	c.Assert(err, gocheck.IsNil)
+	body, err := ioutil.ReadAll(recorder.Body)
+	c.Assert(err, gocheck.IsNil)
+	var gotApp app.App
+	err = s.conn.Apps().Find(bson.M{"name": a.Name}).One(&gotApp)
+	c.Assert(err, gocheck.IsNil)
+	repoURL := repository.ReadWriteURL(a.Name)
+	var appIP string
+	appIP, err = s.provisioner.Addr(&gotApp)
+	c.Assert(err, gocheck.IsNil)
+	var obtained map[string]string
+	expected := map[string]string{
+		"status":         "success",
+		"repository_url": repoURL,
+		"ip":             appIP,
+	}
+	err = json.Unmarshal(body, &obtained)
+	c.Assert(obtained, gocheck.DeepEquals, expected)
+	c.Assert(recorder.Code, gocheck.Equals, http.StatusOK)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(gotApp.Teams, gocheck.DeepEquals, []string{s.team.Name})
+	c.Assert(s.provisioner.GetUnits(&gotApp), gocheck.HasLen, 0)
+	action := testing.Action{
+		Action: "create-app",
+		User:   s.user.Email,
+		Extra:  []interface{}{"name=someapp", "platform=zend", "memory=1", "swap=0"},
+	}
+	c.Assert(action, testing.IsRecorded)
+}
+
+func (s *S) TestCreateAppTwoTeamOwner(c *gocheck.C) {
+	config.Set("docker:allow-memory-set", true)
+	h := testHandler{}
+	ts := testing.StartGandalfTestServer(&h)
+	defer ts.Close()
+	team := auth.Team{Name: "tsurutwo", Users: []string{s.user.Email}}
+	err := s.conn.Teams().Insert(team)
+	c.Check(err, gocheck.IsNil)
+	defer s.conn.Teams().RemoveId(team.Name)
+	data := `{"name":"someapp","platform":"zend","memory":"1"}`
+	b := strings.NewReader(data)
+	request, err := http.NewRequest("POST", "/apps", b)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	err = createApp(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+}
+
+func (s *S) TestCreateAppMemorySetNowAllowed(c *gocheck.C) {
+	config.Set("docker:allow-memory-set", false)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	b := strings.NewReader(`{"name":"someapp","platform":"zend","memory":"10"}`)
+	request, err := http.NewRequest("POST", "/apps", b)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	err = createApp(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusForbidden)
+	c.Assert(e.Message, gocheck.Matches, "^.*Memory setting not allowed.$")
+}
+
+func (s *S) TestCreateAppSwapSetNowAllowed(c *gocheck.C) {
+	config.Set("docker:allow-memory-set", false)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	b := strings.NewReader(`{"name":"someapp","platform":"zend","swap":"10"}`)
+	request, err := http.NewRequest("POST", "/apps", b)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	err = createApp(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusForbidden)
+	c.Assert(e.Message, gocheck.Matches, "^.*Memory setting not allowed.$")
+}
+
+func (s *S) TestCreateAppInvalidMemorySize(c *gocheck.C) {
+	config.Set("docker:allow-memory-set", true)
+	config.Set("docker:max-allowed-memory", 1)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	b := strings.NewReader(`{"name":"someapp","platform":"zend","memory":"10"}`)
+	request, err := http.NewRequest("POST", "/apps", b)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	err = createApp(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusForbidden)
+	c.Assert(e.Message, gocheck.Matches, "^.*Invalid memory size. You cannot request more than.*")
+}
+
+func (s *S) TestCreateAppInvalidSwapSize(c *gocheck.C) {
+	config.Set("docker:allow-memory-set", true)
+	config.Set("docker:max-allowed-swap", 1)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	b := strings.NewReader(`{"name":"someapp","platform":"zend","swap":"10"}`)
+	request, err := http.NewRequest("POST", "/apps", b)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	err = createApp(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusForbidden)
+	c.Assert(e.Message, gocheck.Matches, "^.*Invalid swap size. You cannot request more than.*")
 }
 
 func (s *S) TestCreateAppQuotaExceeded(c *gocheck.C) {
@@ -457,12 +668,12 @@ func (s *S) TestCreateAppInvalidName(c *gocheck.C) {
 
 func (s *S) TestCreateAppReturns400IfTheUserIsNotMemberOfAnyTeam(c *gocheck.C) {
 	u := &auth.User{Email: "thetrees@rush.com", Password: "123456"}
-	err := u.Create()
+	_, err := nativeScheme.Create(u)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Users().Remove(bson.M{"email": u.Email})
-	token, err := u.CreateToken("123456")
+	token, err := nativeScheme.Login(map[string]string{"email": u.Email, "password": "123456"})
 	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Tokens().Remove(bson.M{"token": token.Token})
+	defer s.conn.Tokens().Remove(bson.M{"token": token.GetValue()})
 	b := strings.NewReader(`{"name":"someapp", "platform":"django"}`)
 	request, err := http.NewRequest("POST", "/apps", b)
 	c.Assert(err, gocheck.IsNil)
@@ -478,13 +689,12 @@ func (s *S) TestCreateAppReturns400IfTheUserIsNotMemberOfAnyTeam(c *gocheck.C) {
 
 func (s *S) TestCreateAppReturnsConflictWithProperMessageWhenTheAppAlreadyExist(c *gocheck.C) {
 	a := app.App{
-		Name:  "plainsofdawn",
-		Units: []app.Unit{{Machine: 1}},
+		Name: "plainsofdawn",
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	b := strings.NewReader(`{"name":"plainsofdawn","platform":"zend"}`)
 	request, err := http.NewRequest("POST", "/apps", b)
 	c.Assert(err, gocheck.IsNil)
@@ -508,7 +718,7 @@ func (s *S) TestAddUnits(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	err = s.provisioner.Provision(&a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.provisioner.Destroy(&a)
@@ -520,7 +730,7 @@ func (s *S) TestAddUnits(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName(a.Name)
 	c.Assert(err, gocheck.IsNil)
-	c.Assert(app.Units, gocheck.HasLen, 3)
+	c.Assert(app.Units(), gocheck.HasLen, 3)
 	action := testing.Action{
 		Action: "add-units",
 		User:   s.user.Email,
@@ -550,7 +760,7 @@ func (s *S) TestAddUnitsReturns403IfTheUserDoesNotHaveAccessToTheApp(c *gocheck.
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	body := strings.NewReader("1")
 	request, err := http.NewRequest("PUT", "/apps/armorandsword/units?:app=armorandsword", body)
 	c.Assert(err, gocheck.IsNil)
@@ -624,14 +834,11 @@ func (s *S) TestRemoveUnits(c *gocheck.C) {
 		Name:     "velha",
 		Platform: "python",
 		Teams:    []string{s.team.Name},
-		Units: []app.Unit{
-			{Name: "velha/0"}, {Name: "velha/1"}, {Name: "velha/2"},
-		},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	err = s.provisioner.Provision(&a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.provisioner.Destroy(&a)
@@ -644,9 +851,9 @@ func (s *S) TestRemoveUnits(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName(a.Name)
 	c.Assert(err, gocheck.IsNil)
-	c.Assert(app.Units, gocheck.HasLen, 1)
-	c.Assert(app.Units[0].Name, gocheck.Equals, "velha/2")
-	c.Assert(s.provisioner.GetUnits(app), gocheck.HasLen, 2)
+	c.Assert(context.IsPreventUnlock(request), gocheck.Equals, true)
+	c.Assert(app.Units(), gocheck.HasLen, 1)
+	c.Assert(s.provisioner.GetUnits(app), gocheck.HasLen, 1)
 	action := testing.Action{
 		Action: "remove-units",
 		User:   s.user.Email,
@@ -676,7 +883,7 @@ func (s *S) TestRemoveUnitsReturns403IfTheUserDoesNotHaveAccessToTheApp(c *goche
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	body := strings.NewReader("1")
 	request, err := http.NewRequest("DELETE", "/apps/fetisha/units?:app=fetisha", body)
 	c.Assert(err, gocheck.IsNil)
@@ -720,6 +927,76 @@ func (s *S) TestRemoveUnitsReturns400IfNumberIsInvalid(c *gocheck.C) {
 	}
 }
 
+func (s *S) TestSetUnitStatus(c *gocheck.C) {
+	a := app.App{
+		Name:     "telegram",
+		Platform: "python",
+		Teams:    []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 3)
+	body := strings.NewReader("status=error")
+	unit := a.Units()[0]
+	request, err := http.NewRequest("POST", "/apps/telegram/units/<unit-name>?:app=telegram&:unit="+unit.Name, body)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	err = setUnitStatus(recorder, request, s.token)
+	c.Assert(err, gocheck.IsNil)
+	unit = a.Units()[0]
+	c.Assert(unit.Status, gocheck.Equals, provision.StatusError)
+}
+
+func (s *S) TestSetUnitStatusNoUnit(c *gocheck.C) {
+	body := strings.NewReader("status=error")
+	request, err := http.NewRequest("POST", "/apps/velha/units/af32db?:app=velha", body)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	err = setUnitStatus(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
+	c.Assert(e.Message, gocheck.Equals, "missing unit")
+}
+
+func (s *S) TestSetUnitStatusInvalidStatus(c *gocheck.C) {
+	bodies := []io.Reader{strings.NewReader("status=something"), strings.NewReader("")}
+	for _, body := range bodies {
+		request, err := http.NewRequest("POST", "/apps/velha/units/af32db?:app=velha&:unit=af32db", body)
+		c.Assert(err, gocheck.IsNil)
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		recorder := httptest.NewRecorder()
+		err = setUnitStatus(recorder, request, s.token)
+		c.Assert(err, gocheck.NotNil)
+		e, ok := err.(*errors.HTTP)
+		c.Assert(ok, gocheck.Equals, true)
+		c.Check(e.Code, gocheck.Equals, http.StatusBadRequest)
+		c.Check(e.Message, gocheck.Equals, provision.ErrInvalidStatus.Error())
+	}
+}
+
+func (s *S) TestSetUnitStatusAppNotFound(c *gocheck.C) {
+	body := strings.NewReader("status=error")
+	request, err := http.NewRequest("POST", "/apps/velha/units/af32db?:app=velha&:unit=af32db", body)
+	c.Assert(err, gocheck.IsNil)
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	recorder := httptest.NewRecorder()
+	err = setUnitStatus(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Check(e.Code, gocheck.Equals, http.StatusNotFound)
+	c.Check(e.Message, gocheck.Equals, "App not found")
+}
+
 func (s *S) TestAddTeamToTheApp(c *gocheck.C) {
 	h := testHandler{}
 	ts := testing.StartGandalfTestServer(&h)
@@ -736,7 +1013,7 @@ func (s *S) TestAddTeamToTheApp(c *gocheck.C) {
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -775,7 +1052,7 @@ func (s *S) TestGrantAccessToTeamReturn403IfTheGivenUserDoesNotHasAccessToTheApp
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -797,7 +1074,7 @@ func (s *S) TestGrantAccessToTeamReturn404IfTheTeamDoesNotExist(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/a?:app=%s&:team=a", a.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -819,7 +1096,7 @@ func (s *S) TestGrantAccessToTeamReturn409IfTheTeamHasAlreadyAccessToTheApp(c *g
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -847,7 +1124,7 @@ func (s *S) TestGrantAccessToTeamCallsGandalf(c *gocheck.C) {
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -876,7 +1153,7 @@ func (s *S) TestRevokeAccessFromTeam(c *gocheck.C) {
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -917,7 +1194,7 @@ func (s *S) TestRevokeAccessFromTeamReturn401IfTheGivenUserDoesNotHavePermission
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -939,7 +1216,7 @@ func (s *S) TestRevokeAccessFromTeamReturn404IfTheTeamDoesNotExist(c *gocheck.C)
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/x?:app=%s&:team=x", a.Name, a.Name)
 	request, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -968,7 +1245,7 @@ func (s *S) TestRevokeAccessFromTeamReturn404IfTheTeamDoesNotHaveAccessToTheApp(
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, t.Name, a.Name, t.Name)
 	request, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -989,7 +1266,7 @@ func (s *S) TestRevokeAccessFromTeamReturn403IfTheTeamIsTheLastWithAccessToTheAp
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -1007,13 +1284,12 @@ func (s *S) TestRevokeAccessFromTeamRemovesRepositoryFromGandalf(c *gocheck.C) {
 	ts := testing.StartGandalfTestServer(&h)
 	defer ts.Close()
 	u := auth.User{Email: "again@live.com", Password: "123456"}
-	u.HashPassword()
-	err := s.conn.Users().Insert(u)
+	_, err := nativeScheme.Create(&u)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Users().Remove(bson.M{"email": u.Email})
-	token, err := u.CreateToken("123456")
+	token, err := nativeScheme.Login(map[string]string{"email": u.Email, "password": "123456"})
 	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Tokens().Remove(bson.M{"token": token.Token})
+	defer s.conn.Tokens().Remove(bson.M{"token": token.GetValue()})
 	t := auth.Team{Name: "anything", Users: []string{u.Email}}
 	err = s.conn.Teams().Insert(t)
 	c.Assert(err, gocheck.IsNil)
@@ -1026,7 +1302,7 @@ func (s *S) TestRevokeAccessFromTeamRemovesRepositoryFromGandalf(c *gocheck.C) {
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, s.team.Name, a.Name, s.team.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -1063,7 +1339,7 @@ func (s *S) TestRevokeAccessFromTeamDontRemoveTheUserIfItHasAccesToTheAppThrough
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, t.Name, a.Name, t.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -1097,7 +1373,7 @@ func (s *S) TestRevokeAccessFromTeamDontCallGandalfIfNoUserNeedToBeRevoked(c *go
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/%s?:app=%s&:team=%s", a.Name, t.Name, a.Name, t.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -1119,15 +1395,14 @@ func (s *S) TestRunOnceHandler(c *gocheck.C) {
 		Name:     "secrets",
 		Platform: "arch enemy",
 		Teams:    []string{s.team.Name},
-		Units: []app.Unit{
-			{Name: "i-0800", State: "started", Machine: 10},
-			{Name: "i-0801", State: "started", Machine: 11},
-		},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 1)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/run/?:app=%s&once=true", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader("ls"))
 	c.Assert(err, gocheck.IsNil)
@@ -1155,12 +1430,14 @@ func (s *S) TestRunHandler(c *gocheck.C) {
 		Name:     "secrets",
 		Platform: "arch enemy",
 		Teams:    []string{s.team.Name},
-		Units:    []app.Unit{{Name: "i-0800", State: "started", Machine: 10}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 1)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/run/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader("ls"))
 	c.Assert(err, gocheck.IsNil)
@@ -1189,12 +1466,14 @@ func (s *S) TestRunHandlerReturnsTheOutputOfTheCommandEvenIfItFails(c *gocheck.C
 		Name:     "secrets",
 		Platform: "arch enemy",
 		Teams:    []string{s.team.Name},
-		Units:    []app.Unit{{Name: "i-0800", State: "started"}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 1)
 	url := fmt.Sprintf("/apps/%s/run/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader("ls"))
 	c.Assert(err, gocheck.IsNil)
@@ -1250,7 +1529,7 @@ func (s *S) TestRunHandlerReturnsForbiddenIfTheGivenUserDoesNotHaveAccessToTheAp
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/run/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader("ls"))
 	c.Assert(err, gocheck.IsNil)
@@ -1276,7 +1555,7 @@ func (s *S) TestGetEnvHandlerGetsEnvironmentVariableFromApp(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, strings.NewReader(`["DATABASE_HOST"]`))
 	request.Header.Set("Content-Type", "application/json")
@@ -1284,8 +1563,15 @@ func (s *S) TestGetEnvHandlerGetsEnvironmentVariableFromApp(c *gocheck.C) {
 	recorder := httptest.NewRecorder()
 	err = getEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
-	expected := `{"DATABASE_HOST":"localhost"}` + "\n"
-	c.Assert(recorder.Body.String(), gocheck.Equals, expected)
+	expected := []map[string]interface{}{{
+		"name":   "DATABASE_HOST",
+		"value":  "localhost",
+		"public": true,
+	}}
+	result := []map[string]interface{}{}
+	err = json.Unmarshal(recorder.Body.Bytes(), &result)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(result, gocheck.DeepEquals, expected)
 	c.Assert(recorder.Header().Get("Content-Type"), gocheck.Equals, "application/json")
 	action := testing.Action{
 		Action: "get-env",
@@ -1308,7 +1594,7 @@ func (s *S) TestGetEnvHandlerShouldAcceptMultipleVariables(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, strings.NewReader(`["DATABASE_HOST", "DATABASE_USER"]`))
 	c.Assert(err, gocheck.IsNil)
@@ -1316,11 +1602,11 @@ func (s *S) TestGetEnvHandlerShouldAcceptMultipleVariables(c *gocheck.C) {
 	err = getEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(recorder.Header().Get("Content-type"), gocheck.Equals, "application/json")
-	expected := map[string]string{
-		"DATABASE_HOST": "localhost",
-		"DATABASE_USER": "root",
+	expected := []map[string]interface{}{
+		{"name": "DATABASE_HOST", "value": "localhost", "public": true},
+		{"name": "DATABASE_USER", "value": "root", "public": true},
 	}
-	var got map[string]string
+	var got []map[string]interface{}
 	err = json.Unmarshal(recorder.Body.Bytes(), &got)
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(got, gocheck.DeepEquals, expected)
@@ -1330,40 +1616,6 @@ func (s *S) TestGetEnvHandlerShouldAcceptMultipleVariables(c *gocheck.C) {
 		Extra:  []interface{}{"app=" + a.Name, "envs=[DATABASE_HOST DATABASE_USER]"},
 	}
 	c.Assert(action, testing.IsRecorded)
-}
-
-func (s *S) TestGetEnvHandlerReturnsAllVariablesIfEnvironmentVariablesAreMissingWithMaskOnPrivateVars(c *gocheck.C) {
-	a := app.App{
-		Name:     "time",
-		Platform: "pink-floyd",
-		Teams:    []string{s.team.Name},
-		Env: map[string]bind.EnvVar{
-			"DATABASE_HOST":     {Name: "DATABASE_HOST", Value: "localhost", Public: true},
-			"DATABASE_USER":     {Name: "DATABASE_USER", Value: "root", Public: true},
-			"DATABASE_PASSWORD": {Name: "DATABASE_PASSWORD", Value: "secret", Public: false},
-		},
-	}
-	err := s.conn.Apps().Insert(a)
-	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
-	expected := map[string]string{
-		"DATABASE_HOST":     "localhost",
-		"DATABASE_PASSWORD": "*** (private variable)",
-		"DATABASE_USER":     "root",
-	}
-	var got map[string]string
-	bodies := []io.Reader{nil, strings.NewReader("")}
-	for _, body := range bodies {
-		request, err := http.NewRequest("GET", "/apps/time/env/?:app=time", body)
-		c.Assert(err, gocheck.IsNil)
-		recorder := httptest.NewRecorder()
-		err = getEnv(recorder, request, s.token)
-		c.Assert(err, gocheck.IsNil)
-		err = json.Unmarshal(recorder.Body.Bytes(), &got)
-		c.Assert(err, gocheck.IsNil)
-		c.Assert(got, gocheck.DeepEquals, expected)
-	}
 }
 
 func (s *S) TestGetEnvHandlerReturnsInternalErrorIfReadAllFails(c *gocheck.C) {
@@ -1396,7 +1648,7 @@ func (s *S) TestGetEnvHandlerReturnsForbiddenIfTheGivenUserDoesNotHaveAccessToTh
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, strings.NewReader(`["DATABASE_HOST"]`))
 	c.Assert(err, gocheck.IsNil)
@@ -1408,21 +1660,59 @@ func (s *S) TestGetEnvHandlerReturnsForbiddenIfTheGivenUserDoesNotHaveAccessToTh
 	c.Assert(e.Code, gocheck.Equals, http.StatusForbidden)
 }
 
-func (s *S) TestSetEnvHandlerShouldSetAPublicEnvironmentVariableInTheApp(c *gocheck.C) {
+func (s *S) TestGetEnvHandlerGetsEnvironmentVariableFromAppWithAppToken(c *gocheck.C) {
 	a := app.App{
-		Name:  "black-dog",
-		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Machine: 1}},
+		Name:     "everything-i-want",
+		Platform: "gotthard",
+		Teams:    []string{s.team.Name},
+		Env: map[string]bind.EnvVar{
+			"DATABASE_HOST":     {Name: "DATABASE_HOST", Value: "localhost", Public: true},
+			"DATABASE_USER":     {Name: "DATABASE_USER", Value: "root", Public: true},
+			"DATABASE_PASSWORD": {Name: "DATABASE_PASSWORD", Value: "secret", Public: false},
+		},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
+	request, err := http.NewRequest("GET", url, strings.NewReader(`["DATABASE_HOST"]`))
+	request.Header.Set("Content-Type", "application/json")
+	c.Assert(err, gocheck.IsNil)
+	recorder := httptest.NewRecorder()
+	token, err := nativeScheme.AppLogin("appToken")
+	c.Assert(err, gocheck.IsNil)
+	err = getEnv(recorder, request, auth.Token(token))
+	c.Assert(err, gocheck.IsNil)
+	expected := []map[string]interface{}{{
+		"name":   "DATABASE_HOST",
+		"value":  "localhost",
+		"public": true,
+	}}
+	result := []map[string]interface{}{}
+	err = json.Unmarshal(recorder.Body.Bytes(), &result)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(result, gocheck.DeepEquals, expected)
+	c.Assert(recorder.Header().Get("Content-Type"), gocheck.Equals, "application/json")
+}
+
+func (s *S) TestSetEnvHandlerShouldSetAPublicEnvironmentVariableInTheApp(c *gocheck.C) {
+	s.provisioner.PrepareOutput([]byte("exported"))
+	a := app.App{
+		Name:  "black-dog",
+		Teams: []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader(`{"DATABASE_HOST":"localhost"}`))
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = setEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName("black-dog")
@@ -1441,20 +1731,22 @@ func (s *S) TestSetEnvHandlerShouldSetAPublicEnvironmentVariableInTheApp(c *goch
 }
 
 func (s *S) TestSetEnvHandlerShouldSetMultipleEnvironmentVariablesInTheApp(c *gocheck.C) {
+	s.provisioner.PrepareOutput([]byte("exported"))
 	a := app.App{
 		Name:  "vigil",
 		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Machine: 1}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env?:app=%s", a.Name, a.Name)
 	b := strings.NewReader(`{"DATABASE_HOST": "localhost", "DATABASE_USER": "root"}`)
 	request, err := http.NewRequest("POST", url, b)
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = setEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName("vigil")
@@ -1476,6 +1768,7 @@ func (s *S) TestSetEnvHandlerShouldSetMultipleEnvironmentVariablesInTheApp(c *go
 }
 
 func (s *S) TestSetEnvHandlerShouldNotChangeValueOfPrivateVariables(c *gocheck.C) {
+	s.provisioner.PrepareOutput([]byte("exported"))
 	original := map[string]bind.EnvVar{
 		"DATABASE_HOST": {
 			Name:   "DATABASE_HOST",
@@ -1487,16 +1780,17 @@ func (s *S) TestSetEnvHandlerShouldNotChangeValueOfPrivateVariables(c *gocheck.C
 		Name:  "losers",
 		Teams: []string{s.team.Name},
 		Env:   original,
-		Units: []app.Unit{{Machine: 1}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader(`{"DATABASE_HOST":"http://foo.com:8080"}`))
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = setEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName("losers")
@@ -1547,11 +1841,13 @@ func (s *S) TestSetEnvHandlerReturnsForbiddenIfTheGivenUserDoesNotHaveAccessToTh
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader(`{"DATABASE_HOST":"localhost"}`))
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = setEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.NotNil)
 	e, ok := err.(*errors.HTTP)
@@ -1572,7 +1868,7 @@ func (s *S) TestUnsetEnvHandlerRemovesTheEnvironmentVariablesFromTheApp(c *goche
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	expected := a.Env
 	delete(expected, "DATABASE_HOST")
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
@@ -1580,6 +1876,8 @@ func (s *S) TestUnsetEnvHandlerRemovesTheEnvironmentVariablesFromTheApp(c *goche
 	c.Assert(err, gocheck.IsNil)
 	request.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = unsetEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName("swift")
@@ -1606,11 +1904,13 @@ func (s *S) TestUnsetEnvHandlerRemovesAllGivenEnvironmentVariables(c *gocheck.C)
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("DELETE", url, strings.NewReader(`["DATABASE_HOST", "DATABASE_USER"]`))
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = unsetEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName("let-it-be")
@@ -1644,12 +1944,14 @@ func (s *S) TestUnsetHandlerDoesNotRemovePrivateVariables(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
 	b := strings.NewReader(`["DATABASE_HOST", "DATABASE_USER", "DATABASE_PASSWORD"]`)
 	request, err := http.NewRequest("DELETE", url, b)
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = unsetEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	app, err := app.GetByName("letitbe")
@@ -1707,11 +2009,13 @@ func (s *S) TestUnsetEnvHandlerReturnsForbiddenIfTheGivenUserDoesNotHaveAccessTo
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/env/?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("POST", url, strings.NewReader(`["DATABASE_HOST"]`))
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
+	err = s.provisioner.Provision(&a)
+	c.Assert(err, gocheck.IsNil)
 	err = unsetEnv(recorder, request, s.token)
 	c.Assert(err, gocheck.NotNil)
 	e, ok := err.(*errors.HTTP)
@@ -1724,7 +2028,7 @@ func (s *S) TestSetCNameHandler(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	s.provisioner.Provision(&a)
 	defer s.provisioner.Destroy(&a)
 	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
@@ -1745,12 +2049,38 @@ func (s *S) TestSetCNameHandler(c *gocheck.C) {
 	c.Assert(action, testing.IsRecorded)
 }
 
+func (s *S) TestSetCNameHandlerAcceptsWildCard(c *gocheck.C) {
+	a := app.App{Name: "leper", Teams: []string{s.team.Name}}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
+	b := strings.NewReader(`{"cname":"*.leper.secretcompany.com"}`)
+	request, err := http.NewRequest("POST", url, b)
+	c.Assert(err, gocheck.IsNil)
+	recorder := httptest.NewRecorder()
+	err = setCName(recorder, request, s.token)
+	c.Assert(err, gocheck.IsNil)
+	app, err := app.GetByName(a.Name)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(app.CName, gocheck.Equals, "*.leper.secretcompany.com")
+	action := testing.Action{
+		Action: "set-cname",
+		User:   s.user.Email,
+		Extra:  []interface{}{"app=" + app.Name, "cname=*.leper.secretcompany.com"},
+	}
+	c.Assert(action, testing.IsRecorded)
+}
+
 func (s *S) TestSetCNameHandlerAcceptsEmptyCName(c *gocheck.C) {
 	a := app.App{Name: "leper", Teams: []string{s.team.Name}, CName: "leper.secretcompany.com"}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	s.provisioner.Provision(&a)
 	defer s.provisioner.Destroy(&a)
 	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
@@ -1763,6 +2093,27 @@ func (s *S) TestSetCNameHandlerAcceptsEmptyCName(c *gocheck.C) {
 	app, err := app.GetByName(a.Name)
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(app.CName, gocheck.Equals, "")
+}
+
+func (s *S) TestSetCNameHandlerErrsOnInvalidCName(c *gocheck.C) {
+	a := app.App{Name: "leper", Teams: []string{s.team.Name}}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
+	b := strings.NewReader(`{"cname":"_leper.secretcompany.com"}`)
+	request, err := http.NewRequest("POST", url, b)
+	c.Assert(err, gocheck.IsNil)
+	recorder := httptest.NewRecorder()
+	err = setCName(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
+	c.Assert(e.Message, gocheck.Equals, "Invalid cname")
 }
 
 func (s *S) TestSetCNameHandlerReturnsInternalErrorIfItFailsToReadTheBody(c *gocheck.C) {
@@ -1823,7 +2174,7 @@ func (s *S) TestSetCNameHandlerUserWithoutAccessToTheApp(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
 	b := strings.NewReader(`{"cname": "lost.secretcompany.com"}`)
 	request, err := http.NewRequest("POST", url, b)
@@ -1841,7 +2192,7 @@ func (s *S) TestSetCNameHandlerInvalidCName(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
 	b := strings.NewReader(`{"cname": ".leper.secretcompany.com"}`)
 	request, err := http.NewRequest("POST", url, b)
@@ -1860,7 +2211,7 @@ func (s *S) TestUnsetCNameHandler(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	s.provisioner.Provision(&a)
 	defer s.provisioner.Destroy(&a)
 	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
@@ -1899,7 +2250,7 @@ func (s *S) TestUnsetCNameHandlerUserWithoutAccessToTheApp(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/cname?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -1931,7 +2282,7 @@ func (s *S) TestAppLogReturnsForbiddenIfTheGivenUserDoesNotHaveAccessToTheApp(c 
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/log/?:app=%s&lines=10", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -1969,6 +2320,96 @@ func (s *S) TestAppLogReturnsBadRequestIfNumberOfLinesIsNotAnInteger(c *gocheck.
 	c.Assert(e.Message, gocheck.Equals, `Parameter "lines" must be an integer.`)
 }
 
+func (s *S) TestAppLogFollowWithPubSub(c *gocheck.C) {
+	a := app.App{
+		Name:     "lost",
+		Platform: "vougan",
+		Teams:    []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	url := "/apps/something/log/?:app=lost&lines=10&follow=1"
+	request, err := http.NewRequest("GET", url, nil)
+	c.Assert(err, gocheck.IsNil)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		recorder := httptest.NewRecorder()
+		err := appLog(recorder, request, s.token)
+		c.Assert(err, gocheck.IsNil)
+		body, err := ioutil.ReadAll(recorder.Body)
+		c.Assert(err, gocheck.IsNil)
+		splitted := strings.Split(strings.TrimSpace(string(body)), "\n")
+		c.Assert(splitted, gocheck.HasLen, 2)
+		c.Assert(splitted[0], gocheck.Equals, "[]")
+		logs := []app.Applog{}
+		err = json.Unmarshal([]byte(splitted[1]), &logs)
+		c.Assert(err, gocheck.IsNil)
+		c.Assert(logs, gocheck.HasLen, 1)
+		c.Assert(logs[0].Message, gocheck.Equals, "x")
+	}()
+	time.Sleep(1e8)
+	factory, err := queue.Factory()
+	c.Assert(err, gocheck.IsNil)
+	q, err := factory.Get("pubsub:" + a.Name)
+	c.Assert(err, gocheck.IsNil)
+	pubSubQ, ok := q.(queue.PubSubQ)
+	c.Assert(ok, gocheck.Equals, true)
+	err = pubSubQ.Pub([]byte(`{"message": "x"}`))
+	c.Assert(err, gocheck.IsNil)
+	time.Sleep(1e8)
+	pubSubQ.UnSub()
+	wg.Wait()
+}
+
+func (s *S) TestAppLogFollowWithFilter(c *gocheck.C) {
+	a := app.App{
+		Name:     "lost",
+		Platform: "vougan",
+		Teams:    []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	url := "/apps/something/log/?:app=lost&lines=10&follow=1&source=web"
+	request, err := http.NewRequest("GET", url, nil)
+	c.Assert(err, gocheck.IsNil)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		recorder := httptest.NewRecorder()
+		err := appLog(recorder, request, s.token)
+		c.Assert(err, gocheck.IsNil)
+		body, err := ioutil.ReadAll(recorder.Body)
+		c.Assert(err, gocheck.IsNil)
+		splitted := strings.Split(strings.TrimSpace(string(body)), "\n")
+		c.Assert(splitted, gocheck.HasLen, 2)
+		c.Assert(splitted[0], gocheck.Equals, "[]")
+		logs := []app.Applog{}
+		err = json.Unmarshal([]byte(splitted[1]), &logs)
+		c.Assert(err, gocheck.IsNil)
+		c.Assert(logs, gocheck.HasLen, 1)
+		c.Assert(logs[0].Message, gocheck.Equals, "y")
+	}()
+	time.Sleep(1e8)
+	factory, err := queue.Factory()
+	c.Assert(err, gocheck.IsNil)
+	q, err := factory.Get("pubsub:" + a.Name)
+	c.Assert(err, gocheck.IsNil)
+	pubSubQ, ok := q.(queue.PubSubQ)
+	c.Assert(ok, gocheck.Equals, true)
+	err = pubSubQ.Pub([]byte(`{"message": "x", "source": "app"}`))
+	c.Assert(err, gocheck.IsNil)
+	err = pubSubQ.Pub([]byte(`{"message": "y", "source": "web"}`))
+	c.Assert(err, gocheck.IsNil)
+	time.Sleep(1e8)
+	pubSubQ.UnSub()
+	wg.Wait()
+}
+
 func (s *S) TestAppLogShouldHaveContentType(c *gocheck.C) {
 	a := app.App{
 		Name:     "lost",
@@ -1978,7 +2419,7 @@ func (s *S) TestAppLogShouldHaveContentType(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/log/?:app=%s&lines=10", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -1998,9 +2439,9 @@ func (s *S) TestAppLogSelectByLines(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	for i := 0; i < 15; i++ {
-		a.Log(strconv.Itoa(i), "source")
+		a.Log(strconv.Itoa(i), "source", "")
 	}
 	url := fmt.Sprintf("/apps/%s/log/?:app=%s&lines=10", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, nil)
@@ -2033,9 +2474,9 @@ func (s *S) TestAppLogSelectBySource(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
-	a.Log("mars log", "mars")
-	a.Log("earth log", "earth")
+	defer s.conn.Logs(a.Name).DropCollection()
+	a.Log("mars log", "mars", "")
+	a.Log("earth log", "earth", "")
 	url := fmt.Sprintf("/apps/%s/log/?:app=%s&source=mars&lines=10", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2060,6 +2501,43 @@ func (s *S) TestAppLogSelectBySource(c *gocheck.C) {
 	c.Assert(action, testing.IsRecorded)
 }
 
+func (s *S) TestAppLogSelectByUnit(c *gocheck.C) {
+	a := app.App{
+		Name:     "lost",
+		Platform: "vougan",
+		Teams:    []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	a.Log("mars log", "mars", "prospero")
+	a.Log("earth log", "earth", "caliban")
+	url := fmt.Sprintf("/apps/%s/log/?:app=%s&unit=caliban&lines=10", a.Name, a.Name)
+	request, err := http.NewRequest("GET", url, nil)
+	c.Assert(err, gocheck.IsNil)
+	recorder := httptest.NewRecorder()
+	request.Header.Set("Content-Type", "application/json")
+	err = appLog(recorder, request, s.token)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(recorder.Code, gocheck.Equals, http.StatusOK)
+	body, err := ioutil.ReadAll(recorder.Body)
+	c.Assert(err, gocheck.IsNil)
+	logs := []app.Applog{}
+	err = json.Unmarshal(body, &logs)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(logs, gocheck.HasLen, 1)
+	c.Assert(logs[0].Message, gocheck.Equals, "earth log")
+	c.Assert(logs[0].Source, gocheck.Equals, "earth")
+	c.Assert(logs[0].Unit, gocheck.Equals, "caliban")
+	action := testing.Action{
+		Action: "app-log",
+		User:   s.user.Email,
+		Extra:  []interface{}{"app=" + a.Name, "lines=10", "unit=caliban"},
+	}
+	c.Assert(action, testing.IsRecorded)
+}
+
 func (s *S) TestAppLogSelectByLinesShouldReturnTheLastestEntries(c *gocheck.C) {
 	a := app.App{
 		Name:     "lost",
@@ -2069,10 +2547,10 @@ func (s *S) TestAppLogSelectByLinesShouldReturnTheLastestEntries(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	now := time.Now()
-	coll := s.conn.Logs()
-	defer coll.Remove(bson.M{"appname": a.Name})
+	coll := s.conn.Logs(a.Name)
+	defer coll.DropCollection()
 	for i := 0; i < 15; i++ {
 		l := app.Applog{
 			Date:    now.Add(time.Duration(i) * time.Hour),
@@ -2110,8 +2588,8 @@ func (s *S) TestAppLogShouldReturnLogByApp(c *gocheck.C) {
 	err := s.conn.Apps().Insert(app1)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": app1.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": app1.Name})
-	app1.Log("app1 log", "source")
+	defer s.conn.Logs(app1.Name).DropCollection()
+	app1.Log("app1 log", "source", "")
 	app2 := app.App{
 		Name:     "app2",
 		Platform: "vougan",
@@ -2120,8 +2598,8 @@ func (s *S) TestAppLogShouldReturnLogByApp(c *gocheck.C) {
 	err = s.conn.Apps().Insert(app2)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": app2.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": app2.Name})
-	app2.Log("app2 log", "source")
+	defer s.conn.Logs(app2.Name).DropCollection()
+	app2.Log("app2 log", "source", "")
 	app3 := app.App{
 		Name:     "app3",
 		Platform: "vougan",
@@ -2130,8 +2608,8 @@ func (s *S) TestAppLogShouldReturnLogByApp(c *gocheck.C) {
 	err = s.conn.Apps().Insert(app3)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": app3.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": app3.Name})
-	app3.Log("app3 log", "tsuru")
+	defer s.conn.Logs(app3.Name).DropCollection()
+	app3.Log("app3 log", "tsuru", "")
 	url := fmt.Sprintf("/apps/%s/log/?:app=%s&lines=10", app3.Name, app3.Name)
 	request, err := http.NewRequest("GET", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2175,13 +2653,15 @@ func (s *S) TestBindHandlerEndpointIsDown(c *gocheck.C) {
 	a := app.App{
 		Name:  "painkiller",
 		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Ip: "127.0.0.1", Machine: 1}},
 		Env:   map[string]bind.EnvVar{},
 	}
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 1)
 	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, a.Name, instance.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2210,17 +2690,20 @@ func (s *S) TestBindHandler(c *gocheck.C) {
 	a := app.App{
 		Name:  "painkiller",
 		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Ip: "127.0.0.1", Machine: 1}},
 		Env:   map[string]bind.EnvVar{},
 	}
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 1)
 	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, a.Name, instance.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
+	s.provisioner.PrepareOutput([]byte("exported"))
 	err = bindServiceInstance(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	err = s.conn.ServiceInstances().Find(bson.M{"name": instance.Name}).One(&instance)
@@ -2255,7 +2738,7 @@ func (s *S) TestBindHandlerReturns404IfTheInstanceDoesNotExist(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/services/instances/unknown/%s?:instance=unknown&:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2281,7 +2764,7 @@ func (s *S) TestBindHandlerReturns403IfTheUserDoesNotHaveAccessToTheInstance(c *
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, a.Name, instance.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2323,7 +2806,7 @@ func (s *S) TestBindHandlerReturns403IfTheUserDoesNotHaveAccessToTheApp(c *goche
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, a.Name, instance.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2337,12 +2820,14 @@ func (s *S) TestBindHandlerReturns403IfTheUserDoesNotHaveAccessToTheApp(c *goche
 }
 
 func (s *S) TestUnbindHandler(c *gocheck.C) {
+	s.provisioner.PrepareOutput([]byte("exported"))
 	h := testHandler{}
 	gts := testing.StartGandalfTestServer(&h)
 	defer gts.Close()
 	var called int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "DELETE" && r.URL.Path == "/resources/my-mysql/hostname/127.0.0.1" {
+		fmt.Println(r.URL.Path)
+		if r.Method == "DELETE" && r.URL.Path == "/resources/my-mysql/hostname/10.10.10.1" {
 			atomic.StoreInt32(&called, 1)
 		}
 	}))
@@ -2364,13 +2849,15 @@ func (s *S) TestUnbindHandler(c *gocheck.C) {
 		Name:     "painkiller",
 		Platform: "zend",
 		Teams:    []string{s.team.Name},
-		Units:    []app.Unit{{Machine: 1}},
 	}
 	err = app.CreateApp(&a, s.user)
 	c.Assert(err, gocheck.IsNil)
+	defer app.Delete(&a)
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	s.provisioner.AddUnits(&a, 1)
 	otherApp, err := app.GetByName(a.Name)
 	c.Assert(err, gocheck.IsNil)
-	defer app.Delete(&a)
 	otherApp.Env["DATABASE_HOST"] = bind.EnvVar{
 		Name:         "DATABASE_HOST",
 		Value:        "arrea",
@@ -2378,11 +2865,10 @@ func (s *S) TestUnbindHandler(c *gocheck.C) {
 		InstanceName: instance.Name,
 	}
 	otherApp.Env["MY_VAR"] = bind.EnvVar{Name: "MY_VAR", Value: "123"}
-	otherApp.Units = []app.Unit{{Ip: "127.0.0.1", Machine: 1}}
 	err = s.conn.Apps().Update(bson.M{"name": otherApp.Name}, otherApp)
 	c.Assert(err, gocheck.IsNil)
-	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, otherApp.Name,
-		instance.Name, otherApp.Name)
+	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, a.Name,
+		instance.Name, a.Name)
 	req, err := http.NewRequest("DELETE", url, nil)
 	c.Assert(err, gocheck.IsNil)
 	recorder := httptest.NewRecorder()
@@ -2416,7 +2902,7 @@ func (s *S) TestUnbindHandler(c *gocheck.C) {
 	action := testing.Action{
 		Action: "unbind-app",
 		User:   s.user.Email,
-		Extra:  []interface{}{"instance=" + instance.Name, "app=" + otherApp.Name},
+		Extra:  []interface{}{"instance=" + instance.Name, "app=" + a.Name},
 	}
 	c.Assert(action, testing.IsRecorded)
 }
@@ -2430,7 +2916,7 @@ func (s *S) TestUnbindHandlerReturns404IfTheInstanceDoesNotExist(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/services/instances/unknown/%s?:instance=unknown&:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2456,7 +2942,7 @@ func (s *S) TestUnbindHandlerReturns403IfTheUserDoesNotHaveAccessToTheInstance(c
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, a.Name, instance.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2498,7 +2984,7 @@ func (s *S) TestUnbindHandlerReturns403IfTheUserDoesNotHaveAccessToTheApp(c *goc
 	err = s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/services/instances/%s/%s?:instance=%s&:app=%s", instance.Name, a.Name, instance.Name, a.Name)
 	request, err := http.NewRequest("PUT", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2517,12 +3003,11 @@ func (s *S) TestRestartHandler(c *gocheck.C) {
 	a := app.App{
 		Name:  "stress",
 		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Name: "i-0800", State: "started"}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	s.provisioner.Provision(&a)
 	defer s.provisioner.Destroy(&a)
 	url := fmt.Sprintf("/apps/%s/restart?:app=%s", a.Name, a.Name)
@@ -2558,7 +3043,7 @@ func (s *S) TestRestartHandlerReturns403IfTheUserDoesNotHaveAccessToTheApp(c *go
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	url := fmt.Sprintf("/apps/%s/restart?:app=%s", a.Name, a.Name)
 	request, err := http.NewRequest("GET", url, nil)
 	c.Assert(err, gocheck.IsNil)
@@ -2583,7 +3068,7 @@ func (s *S) TestAddLogHandler(c *gocheck.C) {
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	body := strings.NewReader(`["message 1", "message 2", "message 3"]`)
 	body2 := strings.NewReader(`["message 4", "message 5"]`)
 	request, err := http.NewRequest("POST", "/apps/myapp/log/?:app=myapp", body)
@@ -2615,7 +3100,7 @@ func (s *S) TestAddLogHandler(c *gocheck.C) {
 		"mysource",
 		"mysource",
 	}
-	logs, err := a.LastLogs(5, "")
+	logs, err := a.LastLogs(5, app.Applog{})
 	c.Assert(err, gocheck.IsNil)
 	got := make([]string, len(logs))
 	gotSource := make([]string, len(logs))
@@ -2656,28 +3141,14 @@ func (s *S) TestPlatformList(c *gocheck.C) {
 }
 
 func (s *S) TestgetAppOrErrorWhenUserIsAdmin(c *gocheck.C) {
-	admin := auth.User{Email: "superuser@gmail.com", Password: "123"}
-	err := s.conn.Users().Insert(&admin)
-	c.Assert(err, gocheck.IsNil)
-	adminTeamName, err := config.GetString("admin-team")
-	c.Assert(err, gocheck.IsNil)
-	adminTeam := auth.Team{Name: adminTeamName, Users: []string{admin.Email}}
-	err = s.conn.Teams().Insert(&adminTeam)
-	c.Assert(err, gocheck.IsNil)
 	a := app.App{Name: "testApp", Teams: []string{"notAdmin", "noSuperUser"}}
-	err = s.conn.Apps().Insert(&a)
+	err := s.conn.Apps().Insert(&a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
-	defer func(admin auth.User, adminTeam auth.Team) {
-		err := s.conn.Teams().RemoveId(adminTeam.Name)
-		c.Assert(err, gocheck.IsNil)
-		err = s.conn.Users().Remove(bson.M{"email": admin.Email})
-		c.Assert(err, gocheck.IsNil)
-	}(admin, adminTeam)
+	defer s.conn.Logs(a.Name).DropCollection()
 	expected, err := app.GetByName(a.Name)
 	c.Assert(err, gocheck.IsNil)
-	app, err := getApp(a.Name, &admin)
+	app, err := getApp(a.Name, s.adminuser)
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(app, gocheck.DeepEquals, *expected)
 }
@@ -2686,17 +3157,62 @@ func (s *S) TestSwap(c *gocheck.C) {
 	app1 := app.App{Name: "app1", Teams: []string{s.team.Name}}
 	err := s.conn.Apps().Insert(&app1)
 	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Apps().RemoveId(&app1.Name)
+	err = s.provisioner.Provision(&app1)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": app1.Name})
 	app2 := app.App{Name: "app2", Teams: []string{s.team.Name}}
 	err = s.conn.Apps().Insert(&app2)
 	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Apps().RemoveId(&app2.Name)
+	err = s.provisioner.Provision(&app2)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": app2.Name})
 	request, _ := http.NewRequest("PUT", "/swap?app1=app1&app2=app2", nil)
 	recorder := httptest.NewRecorder()
 	err = swap(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	action := testing.Action{Action: "swap", User: s.user.Email, Extra: []interface{}{"app1", "app2"}}
 	c.Assert(action, testing.IsRecorded)
+	var dbApp app.App
+	err = s.conn.Apps().Find(bson.M{"name": app1.Name}).One(&dbApp)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(dbApp.Lock, gocheck.Equals, app.AppLock{})
+	err = s.conn.Apps().Find(bson.M{"name": app2.Name}).One(&dbApp)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(dbApp.Lock, gocheck.Equals, app.AppLock{})
+}
+
+func (s *S) TestSwapApp1Locked(c *gocheck.C) {
+	app1 := app.App{Name: "app1", Teams: []string{s.team.Name}, Lock: app.AppLock{
+		Locked: true, Reason: "/test", Owner: "x",
+	}}
+	err := s.conn.Apps().Insert(&app1)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": app1.Name})
+	app2 := app.App{Name: "app2", Teams: []string{s.team.Name}}
+	err = s.conn.Apps().Insert(&app2)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": app2.Name})
+	request, _ := http.NewRequest("PUT", "/swap?app1=app1&app2=app2", nil)
+	recorder := httptest.NewRecorder()
+	err = swap(recorder, request, s.token)
+	c.Assert(err, gocheck.ErrorMatches, "app1: App locked by x, running /test. Acquired in .*")
+}
+
+func (s *S) TestSwapApp2Locked(c *gocheck.C) {
+	app1 := app.App{Name: "app1", Teams: []string{s.team.Name}}
+	err := s.conn.Apps().Insert(&app1)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": app1.Name})
+	app2 := app.App{Name: "app2", Teams: []string{s.team.Name}, Lock: app.AppLock{
+		Locked: true, Reason: "/test", Owner: "x",
+	}}
+	err = s.conn.Apps().Insert(&app2)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": app2.Name})
+	request, _ := http.NewRequest("PUT", "/swap?app1=app1&app2=app2", nil)
+	recorder := httptest.NewRecorder()
+	err = swap(recorder, request, s.token)
+	c.Assert(err, gocheck.ErrorMatches, "app2: App locked by x, running /test. Acquired in .*")
 }
 
 func (s *S) TestStartHandler(c *gocheck.C) {
@@ -2705,12 +3221,11 @@ func (s *S) TestStartHandler(c *gocheck.C) {
 	a := app.App{
 		Name:  "stress",
 		Teams: []string{s.team.Name},
-		Units: []app.Unit{{Name: "i-0800", State: "started"}},
 	}
 	err := s.conn.Apps().Insert(a)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
-	defer s.conn.Logs().Remove(bson.M{"appname": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
 	s.provisioner.Provision(&a)
 	defer s.provisioner.Destroy(&a)
 	url := fmt.Sprintf("/apps/%s/start?:app=%s", a.Name, a.Name)
@@ -2723,6 +3238,33 @@ func (s *S) TestStartHandler(c *gocheck.C) {
 	c.Assert(starts, gocheck.Equals, 1)
 	action := testing.Action{
 		Action: "start",
+		User:   s.user.Email,
+		Extra:  []interface{}{a.Name},
+	}
+	c.Assert(action, testing.IsRecorded)
+}
+
+func (s *S) TestStopHandler(c *gocheck.C) {
+	a := app.App{
+		Name:  "stress",
+		Teams: []string{s.team.Name},
+	}
+	err := s.conn.Apps().Insert(a)
+	c.Assert(err, gocheck.IsNil)
+	defer s.conn.Apps().Remove(bson.M{"name": a.Name})
+	defer s.conn.Logs(a.Name).DropCollection()
+	s.provisioner.Provision(&a)
+	defer s.provisioner.Destroy(&a)
+	url := fmt.Sprintf("/apps/%s/stop?:app=%s", a.Name, a.Name)
+	request, err := http.NewRequest("GET", url, nil)
+	c.Assert(err, gocheck.IsNil)
+	recorder := httptest.NewRecorder()
+	err = stop(recorder, request, s.token)
+	c.Assert(err, gocheck.IsNil)
+	stops := s.provisioner.Stops(&a)
+	c.Assert(stops, gocheck.Equals, 1)
+	action := testing.Action{
+		Action: "stop",
 		User:   s.user.Email,
 		Extra:  []interface{}{a.Name},
 	}

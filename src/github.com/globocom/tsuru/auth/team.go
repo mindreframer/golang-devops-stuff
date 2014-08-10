@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,18 +7,19 @@ package auth
 import (
 	"errors"
 	"fmt"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/log"
-	"labix.org/v2/mgo"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/log"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"regexp"
 	"strings"
 	"sync"
 )
 
 var (
-	ErrInvalidTeamName   = errors.New("Invalid team name")
-	ErrTeamAlreadyExists = errors.New("Team already exists")
+	ErrInvalidTeamName   = errors.New("invalid team name")
+	ErrTeamAlreadyExists = errors.New("team already exists")
+	ErrTeamNotFound      = errors.New("team not found")
 
 	teamNameRegexp = regexp.MustCompile(`^[a-zA-Z][-@_.+\w\s]+$`)
 )
@@ -118,6 +119,9 @@ func GetTeam(name string) (*Team, error) {
 	}
 	err = conn.Teams().FindId(name).One(&t)
 	if err != nil {
+		if err == mgo.ErrNotFound {
+			err = ErrTeamNotFound
+		}
 		return nil, err
 	}
 	return &t, nil

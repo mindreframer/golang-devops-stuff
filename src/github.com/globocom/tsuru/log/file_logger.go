@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 package log
@@ -51,4 +51,8 @@ func (l *fileLogger) Debug(o string) {
 
 func (l *fileLogger) Debugf(format string, o ...interface{}) {
 	l.Debug(fmt.Sprintf(format, o...))
+}
+
+func (l *fileLogger) GetStdLogger() *log.Logger {
+	return l.logger
 }

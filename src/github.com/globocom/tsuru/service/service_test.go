@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,7 +6,7 @@ package service
 
 import (
 	"encoding/json"
-	"labix.org/v2/mgo/bson"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 )
 
@@ -65,10 +65,15 @@ func (s *S) TestGetClient(c *gocheck.C) {
 		"production": "http://mysql.api.com",
 		"test":       "http://localhost:9090",
 	}
-	service := Service{Name: "redis", Endpoint: endpoints}
+	service := Service{Name: "redis", Password: "abcde", Endpoint: endpoints}
 	cli, err := service.getClient("production")
+	expected := &Client{
+		endpoint: endpoints["production"],
+		username: "redis",
+		password: "abcde",
+	}
 	c.Assert(err, gocheck.IsNil)
-	c.Assert(cli, gocheck.DeepEquals, &Client{endpoint: endpoints["production"]})
+	c.Assert(cli, gocheck.DeepEquals, expected)
 }
 
 func (s *S) TestGetClientWithouHTTP(c *gocheck.C) {
@@ -80,6 +85,17 @@ func (s *S) TestGetClientWithouHTTP(c *gocheck.C) {
 	cli, err := service.getClient("production")
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(cli.endpoint, gocheck.Equals, "http://mysql.api.com")
+}
+
+func (s *S) TestGetClientWithHTTPS(c *gocheck.C) {
+	endpoints := map[string]string{
+		"production": "https://mysql.api.com",
+		"test":       "https://localhost:9090",
+	}
+	service := Service{Name: "redis", Endpoint: endpoints}
+	cli, err := service.getClient("production")
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(cli.endpoint, gocheck.Equals, "https://mysql.api.com")
 }
 
 func (s *S) TestGetClientWithUnknownEndpoint(c *gocheck.C) {

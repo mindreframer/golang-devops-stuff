@@ -7,23 +7,27 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/go-gandalfclient"
-	"github.com/globocom/tsuru/app"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/quota"
-	"github.com/globocom/tsuru/rec"
-	"github.com/globocom/tsuru/repository"
-	"github.com/globocom/tsuru/service"
+	"github.com/tsuru/config"
+	"github.com/tsuru/go-gandalfclient"
+	"github.com/tsuru/tsuru/api/context"
+	"github.com/tsuru/tsuru/app"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	tsuruIo "github.com/tsuru/tsuru/io"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/provision"
+	"github.com/tsuru/tsuru/quota"
+	"github.com/tsuru/tsuru/rec"
+	"github.com/tsuru/tsuru/repository"
+	"github.com/tsuru/tsuru/service"
+	"gopkg.in/mgo.v2/bson"
 	"io"
 	"io/ioutil"
-	"labix.org/v2/mgo/bson"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 func getApp(name string, u *auth.User) (app.App, error) {
@@ -31,7 +35,7 @@ func getApp(name string, u *auth.User) (app.App, error) {
 	if err != nil {
 		return app.App{}, &errors.HTTP{Code: http.StatusNotFound, Message: fmt.Sprintf("App %s not found.", name)}
 	}
-	if u.IsAdmin() {
+	if u == nil || u.IsAdmin() {
 		return *a, nil
 	}
 	if !auth.CheckUserAccess(a.Teams, u) {
@@ -40,21 +44,44 @@ func getApp(name string, u *auth.User) (app.App, error) {
 	return *a, nil
 }
 
-func deploy(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func deploy(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	version := r.PostFormValue("version")
-	if version == "" {
-		return &errors.HTTP{Code: http.StatusBadRequest, Message: "Missing parameter version"}
+	archiveURL := r.PostFormValue("archive-url")
+	if version == "" && archiveURL == "" {
+		return &errors.HTTP{
+			Code:    http.StatusBadRequest,
+			Message: "you must specify either the version or the archive-url",
+		}
 	}
+	if version != "" && archiveURL != "" {
+		return &errors.HTTP{
+			Code:    http.StatusBadRequest,
+			Message: "you must specify either the version or the archive-url, but not both",
+		}
+	}
+	commit := r.PostFormValue("commit")
 	w.Header().Set("Content-Type", "text")
 	appName := r.URL.Query().Get(":appname")
 	instance, err := app.GetByName(appName)
 	if err != nil {
 		return &errors.HTTP{Code: http.StatusNotFound, Message: fmt.Sprintf("App %s not found.", appName)}
 	}
-	return app.DeployApp(instance, version, w)
+	writer := tsuruIo.NewKeepAliveWriter(w, 30*time.Second, "please wait...")
+	err = app.Deploy(app.DeployOptions{
+		App:          instance,
+		Version:      version,
+		Commit:       commit,
+		ArchiveURL:   archiveURL,
+		OutputStream: writer,
+	})
+	if err == nil {
+		fmt.Fprintln(w, "\nOK")
+	}
+	return err
+
 }
 
-func appIsAvailable(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func appIsAvailable(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	app, err := app.GetByName(r.URL.Query().Get(":appname"))
 	if err != nil {
 		return err
@@ -66,7 +93,7 @@ func appIsAvailable(w http.ResponseWriter, r *http.Request, t *auth.Token) error
 	return nil
 }
 
-func appDelete(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func appDelete(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -76,12 +103,13 @@ func appDelete(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	if err != nil {
 		return err
 	}
+	context.SetPreventUnlock(r)
 	app.Delete(&a)
 	fmt.Fprint(w, "success")
 	return nil
 }
 
-func appList(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func appList(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -98,7 +126,7 @@ func appList(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return json.NewEncoder(w).Encode(apps)
 }
 
-func appInfo(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func appInfo(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -116,7 +144,7 @@ func appInfo(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return json.NewEncoder(w).Encode(&app)
 }
 
-func createApp(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func createApp(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	var a app.App
 	defer r.Body.Close()
 	body, err := ioutil.ReadAll(r.Body)
@@ -130,7 +158,25 @@ func createApp(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	if err != nil {
 		return err
 	}
-	rec.Log(u.Email, "create-app", "name="+a.Name, "platform="+a.Platform)
+	rec.Log(u.Email, "create-app", "name="+a.Name, "platform="+a.Platform, "memory="+strconv.Itoa(a.Memory), "swap="+strconv.Itoa(a.Swap))
+	canSetMem, _ := config.GetBool("docker:allow-memory-set")
+	if !canSetMem && (a.Memory > 0 || a.Swap > 0) {
+		err := "Memory setting not allowed."
+		log.Errorf("%s", err)
+		return &errors.HTTP{Code: http.StatusForbidden, Message: err}
+	}
+	maxMem, _ := config.GetInt("docker:max-allowed-memory")
+	if maxMem > 0 && a.Memory > maxMem {
+		err := fmt.Sprintf("Invalid memory size. You cannot request more than %dMB.", maxMem)
+		log.Errorf("%s", err)
+		return &errors.HTTP{Code: http.StatusForbidden, Message: err}
+	}
+	maxSwap, _ := config.GetInt("docker:max-allowed-swap")
+	if maxSwap > 0 && a.Swap > maxSwap {
+		err := fmt.Sprintf("Invalid swap size. You cannot request more than %dMB.", maxSwap)
+		log.Errorf("%s", err)
+		return &errors.HTTP{Code: http.StatusForbidden, Message: err}
+	}
 	err = app.CreateApp(&a, u)
 	if err != nil {
 		log.Errorf("Got error while creating app: %s", err)
@@ -159,6 +205,7 @@ func createApp(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	msg := map[string]string{
 		"status":         "success",
 		"repository_url": repository.ReadWriteURL(a.Name),
+		"ip":             a.Ip,
 	}
 	jsonMsg, err := json.Marshal(msg)
 	if err != nil {
@@ -192,7 +239,7 @@ func numberOfUnits(r *http.Request) (uint, error) {
 	return uint(n), nil
 }
 
-func addUnits(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func addUnits(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	n, err := numberOfUnits(r)
 	if err != nil {
 		return err
@@ -217,7 +264,7 @@ func addUnits(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return err
 }
 
-func removeUnits(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func removeUnits(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	n, err := numberOfUnits(r)
 	if err != nil {
 		return err
@@ -232,10 +279,35 @@ func removeUnits(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	if err != nil {
 		return err
 	}
+	context.SetPreventUnlock(r)
 	return app.RemoveUnits(uint(n))
 }
 
-func grantAppAccess(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func setUnitStatus(w http.ResponseWriter, r *http.Request, t auth.Token) error {
+	unitName := r.URL.Query().Get(":unit")
+	if unitName == "" {
+		return &errors.HTTP{
+			Code:    http.StatusBadRequest,
+			Message: "missing unit",
+		}
+	}
+	postStatus := r.FormValue("status")
+	status, err := provision.ParseStatus(postStatus)
+	if err != nil {
+		return &errors.HTTP{
+			Code:    http.StatusBadRequest,
+			Message: err.Error(),
+		}
+	}
+	appName := r.URL.Query().Get(":app")
+	a, err := app.GetByName(appName)
+	if err != nil {
+		return &errors.HTTP{Code: http.StatusNotFound, Message: err.Error()}
+	}
+	return a.SetUnitStatus(unitName, status)
+}
+
+func grantAppAccess(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -295,7 +367,7 @@ func getEmailsForRevoking(app *app.App, t *auth.Team) []string {
 	return users[:i]
 }
 
-func revokeAppAccess(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func revokeAppAccess(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -339,7 +411,7 @@ func revokeAppAccess(w http.ResponseWriter, r *http.Request, t *auth.Token) erro
 	return nil
 }
 
-func runCommand(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func runCommand(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	w.Header().Set("Content-Type", "text")
 	msg := "You must provide the command to run"
 	if r.Body == nil {
@@ -366,7 +438,7 @@ func runCommand(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return app.Run(string(c), w, once == "true")
 }
 
-func getEnv(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func getEnv(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	var variables []string
 	if r.Body != nil {
 		defer r.Body.Close()
@@ -375,37 +447,47 @@ func getEnv(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 			return err
 		}
 	}
-	u, err := t.User()
-	if err != nil {
-		return err
-	}
 	appName := r.URL.Query().Get(":app")
-	rec.Log(u.Email, "get-env", "app="+appName, fmt.Sprintf("envs=%s", variables))
+	var u *auth.User = nil
+	var err error
+	if !t.IsAppToken() {
+		u, err = t.User()
+		if err != nil {
+			return err
+		}
+		rec.Log(u.Email, "get-env", "app="+appName, fmt.Sprintf("envs=%s", variables))
+	}
 	app, err := getApp(appName, u)
 	if err != nil {
 		return err
 	}
-	l := len(variables)
-	if l == 0 {
-		l = len(app.Env)
-	}
-	result := make(map[string]string, l)
+	var result []map[string]interface{}
 	w.Header().Set("Content-Type", "application/json")
 	if len(variables) > 0 {
 		for _, variable := range variables {
 			if v, ok := app.Env[variable]; ok {
-				result[variable] = v.String()
+				item := map[string]interface{}{
+					"name":   v.Name,
+					"value":  v.Value,
+					"public": v.Public,
+				}
+				result = append(result, item)
 			}
 		}
 	} else {
-		for k, v := range app.Env {
-			result[k] = v.String()
+		for _, v := range app.Env {
+			item := map[string]interface{}{
+				"name":   v.Name,
+				"value":  v.Value,
+				"public": v.Public,
+			}
+			result = append(result, item)
 		}
 	}
 	return json.NewEncoder(w).Encode(result)
 }
 
-func setEnv(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func setEnv(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	msg := "You must provide the environment variables in a JSON object"
 	if r.Body == nil {
 		return &errors.HTTP{Code: http.StatusBadRequest, Message: msg}
@@ -432,7 +514,7 @@ func setEnv(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return app.SetEnvs(envs, true)
 }
 
-func unsetEnv(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func unsetEnv(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	msg := "You must provide the list of environment variables, in JSON format"
 	if r.Body == nil {
 		return &errors.HTTP{Code: http.StatusBadRequest, Message: msg}
@@ -459,7 +541,7 @@ func unsetEnv(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return app.UnsetEnvs(variables, true)
 }
 
-func setCName(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func setCName(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	msg := "You must provide the cname."
 	if r.Body == nil {
 		return &errors.HTTP{Code: http.StatusBadRequest, Message: msg}
@@ -491,7 +573,7 @@ func setCName(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return err
 }
 
-func unsetCName(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func unsetCName(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -505,7 +587,7 @@ func unsetCName(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return app.UnsetCName()
 }
 
-func appLog(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func appLog(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	var err error
 	var lines int
 	if l := r.URL.Query().Get("lines"); l != "" {
@@ -519,6 +601,8 @@ func appLog(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	source := r.URL.Query().Get("source")
+	unit := r.URL.Query().Get("unit")
+	follow := r.URL.Query().Get("follow")
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -531,15 +615,19 @@ func appLog(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	if source != "" {
 		extra = append(extra, "source="+source)
 	}
-	if r.URL.Query().Get("follow") == "1" {
+	if follow == "1" {
 		extra = append(extra, "follow=1")
 	}
+	if unit != "" {
+		extra = append(extra, "unit="+unit)
+	}
 	rec.Log(u.Email, "app-log", extra...)
+	filterLog := app.Applog{Source: source, Unit: unit}
 	a, err := getApp(appName, u)
 	if err != nil {
 		return err
 	}
-	logs, err := a.LastLogs(lines, source)
+	logs, err := a.LastLogs(lines, filterLog)
 	if err != nil {
 		return err
 	}
@@ -548,9 +636,11 @@ func appLog(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	if err != nil {
 		return err
 	}
-	// TODO(fss): write an automated test for this code.
-	if r.URL.Query().Get("follow") == "1" {
-		l := app.NewLogListener(&a)
+	if follow == "1" {
+		l, err := app.NewLogListener(&a, filterLog)
+		if err != nil {
+			return err
+		}
 		defer l.Close()
 		for log := range l.C {
 			err := encoder.Encode([]app.Applog{log})
@@ -585,7 +675,7 @@ func getServiceInstance(instanceName, appName string, u *auth.User) (*service.Se
 	return instance, &app, nil
 }
 
-func bindServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func bindServiceInstance(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	instanceName, appName := r.URL.Query().Get(":instance"), r.URL.Query().Get(":app")
 	u, err := t.User()
 	if err != nil {
@@ -609,7 +699,7 @@ func bindServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token) 
 	return enc.Encode(envs)
 }
 
-func unbindServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func unbindServiceInstance(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	instanceName, appName := r.URL.Query().Get(":instance"), r.URL.Query().Get(":app")
 	u, err := t.User()
 	if err != nil {
@@ -623,7 +713,7 @@ func unbindServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token
 	return instance.UnbindApp(a)
 }
 
-func restart(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func restart(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	w.Header().Set("Content-Type", "text")
 	u, err := t.User()
 	if err != nil {
@@ -638,7 +728,7 @@ func restart(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return instance.Restart(w)
 }
 
-func addLog(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func addLog(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	queryValues := r.URL.Query()
 	app, err := app.GetByName(queryValues.Get(":app"))
 	if err != nil {
@@ -655,8 +745,9 @@ func addLog(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	if len(source) == 0 {
 		source = "app"
 	}
+	unit := queryValues.Get("unit")
 	for _, log := range logs {
-		err := app.Log(log, source)
+		err := app.Log(log, source, unit)
 		if err != nil {
 			return err
 		}
@@ -665,7 +756,7 @@ func addLog(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return nil
 }
 
-func platformList(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func platformList(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -678,26 +769,42 @@ func platformList(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return json.NewEncoder(w).Encode(platforms)
 }
 
-func swap(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func swap(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
 	}
 	app1Name := r.URL.Query().Get("app1")
 	app2Name := r.URL.Query().Get("app2")
+	locked1, err := app.AcquireApplicationLock(app1Name, t.GetUserName(), "/swap")
+	if err != nil {
+		return err
+	}
+	defer app.ReleaseApplicationLock(app1Name)
+	locked2, err := app.AcquireApplicationLock(app2Name, t.GetUserName(), "/swap")
+	if err != nil {
+		return err
+	}
+	defer app.ReleaseApplicationLock(app2Name)
 	app1, err := getApp(app1Name, u)
 	if err != nil {
 		return err
+	}
+	if !locked1 {
+		return &errors.HTTP{Code: http.StatusConflict, Message: fmt.Sprintf("%s: %s", app1.Name, &app1.Lock)}
 	}
 	app2, err := getApp(app2Name, u)
 	if err != nil {
 		return err
 	}
+	if !locked2 {
+		return &errors.HTTP{Code: http.StatusConflict, Message: fmt.Sprintf("%s: %s", app2.Name, &app2.Lock)}
+	}
 	rec.Log(u.Email, "swap", app1Name, app2Name)
 	return app.Swap(&app1, &app2)
 }
 
-func start(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func start(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	w.Header().Set("Content-Type", "text")
 	u, err := t.User()
 	if err != nil {
@@ -710,4 +817,19 @@ func start(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 		return err
 	}
 	return app.Start(w)
+}
+
+func stop(w http.ResponseWriter, r *http.Request, t auth.Token) error {
+	w.Header().Set("Content-Type", "text")
+	u, err := t.User()
+	if err != nil {
+		return err
+	}
+	appName := r.URL.Query().Get(":app")
+	rec.Log(u.Email, "stop", appName)
+	app, err := getApp(appName, u)
+	if err != nil {
+		return err
+	}
+	return app.Stop(w)
 }

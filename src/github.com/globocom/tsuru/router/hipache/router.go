@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -17,15 +17,13 @@ import (
 	"errors"
 	"fmt"
 	"github.com/garyburd/redigo/redis"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/router"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/router"
 	"strings"
 )
 
 var pool *redis.Pool
-
-var errRouteNotFound = errors.New("Route not found")
 
 func init() {
 	router.Register("hipache", hipacheRouter{})
@@ -190,7 +188,7 @@ func (r hipacheRouter) SetCName(cname, name string) error {
 		return &routeError{"setCName", err}
 	}
 	if !r.validCName(cname) {
-		err := errors.New(fmt.Sprintf("Invalid CNAME %s. You can't use Tsuru's application domain.", cname))
+		err := errors.New(fmt.Sprintf("Invalid CNAME %s. You can't use tsuru's application domain.", cname))
 		return &routeError{"setCName", err}
 	}
 	frontend := "frontend:" + backendName + "." + domain
@@ -256,7 +254,7 @@ func (hipacheRouter) Addr(name string) (string, error) {
 	}
 	backends := reply.([]interface{})
 	if len(backends) < 1 {
-		return "", errRouteNotFound
+		return "", router.ErrRouteNotFound
 	}
 	return fmt.Sprintf("%s.%s", backendName, domain), nil
 }

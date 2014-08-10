@@ -1,4 +1,4 @@
-.. Copyright 2012 tsuru authors. All rights reserved.
+.. Copyright 2014 tsuru authors. All rights reserved.
    Use of this source code is governed by a BSD-style
    license that can be found in the LICENSE file.
 
@@ -38,9 +38,10 @@ This will create a manifest.yaml in your current path with this content:
 ::
 
     id: servicename
+    password: abc123
     endpoint:
       production: production-endpoint.com
-        test: test-endpoint.com:8080
+      test: test-endpoint.com:8080
 
 The manifest.yaml is used by crane to define an id and an endpoint to your service.
 
@@ -78,7 +79,7 @@ To update a service manifest:
 
 ::
 
-    $ crane create path/to/your/manifest.yaml
+    $ crane update path/to/your/manifest.yaml
 
 To remove a service:
 
@@ -110,4 +111,4 @@ Further instructions
 ====================
 
 For a complete reference, check the documentation for crane command:
-`<http://godoc.org/github.com/globocom/tsuru/cmd/crane>`_.
+`<http://godoc.org/github.com/tsuru/crane>`_.

@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -9,8 +9,8 @@ package testing
 
 import (
 	"fmt"
-	"github.com/globocom/tsuru/fs"
-	"github.com/globocom/tsuru/safe"
+	"github.com/tsuru/tsuru/fs"
+	"github.com/tsuru/tsuru/safe"
 	"os"
 	"path"
 	"strings"
@@ -28,13 +28,13 @@ import (
 type FakeFile struct {
 	content string
 	current int64
-	r       *safe.Reader
+	r       *safe.BytesReader
 	f       *os.File
 }
 
-func (f *FakeFile) reader() *safe.Reader {
+func (f *FakeFile) reader() *safe.BytesReader {
 	if f.r == nil {
-		f.r = safe.NewReader([]byte(f.content))
+		f.r = safe.NewBytesReader([]byte(f.content))
 	}
 	return f.r
 }

@@ -7,17 +7,18 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/rec"
-	"github.com/globocom/tsuru/service"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/rec"
+	"github.com/tsuru/tsuru/service"
+	"gopkg.in/mgo.v2/bson"
+	"io"
 	"io/ioutil"
-	"labix.org/v2/mgo/bson"
 	"net/http"
 )
 
-func createServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func createServiceInstance(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	b, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		return err
@@ -37,11 +38,15 @@ func createServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token
 	if err != nil {
 		return &errors.HTTP{Code: http.StatusNotFound, Message: err.Error()}
 	}
-	planName := body["plan"]
-	return service.CreateServiceInstance(body["name"], &srv, planName, user)
+	instance := service.ServiceInstance{
+		Name:      body["name"],
+		PlanName:  body["plan"],
+		TeamOwner: body["owner"],
+	}
+	return service.CreateServiceInstance(instance, &srv, user)
 }
 
-func removeServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func removeServiceInstance(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -60,7 +65,7 @@ func removeServiceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token
 	return nil
 }
 
-func serviceInstances(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceInstances(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -88,7 +93,7 @@ func serviceInstances(w http.ResponseWriter, r *http.Request, t *auth.Token) err
 	return err
 }
 
-func serviceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceInstance(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -100,7 +105,7 @@ func serviceInstance(w http.ResponseWriter, r *http.Request, t *auth.Token) erro
 	return json.NewEncoder(w).Encode(instance)
 }
 
-func serviceInstanceStatus(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceInstanceStatus(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -124,7 +129,7 @@ func serviceInstanceStatus(w http.ResponseWriter, r *http.Request, t *auth.Token
 	return nil
 }
 
-func serviceInfo(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceInfo(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -159,7 +164,7 @@ func serviceInfo(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 	return nil
 }
 
-func serviceDoc(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func serviceDoc(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -211,7 +216,7 @@ func getServiceInstanceOrError(name string, u *auth.User) (*service.ServiceInsta
 	return si, nil
 }
 
-func servicePlans(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
+func servicePlans(w http.ResponseWriter, r *http.Request, t auth.Token) error {
 	u, err := t.User()
 	if err != nil {
 		return err
@@ -227,5 +232,24 @@ func servicePlans(w http.ResponseWriter, r *http.Request, t *auth.Token) error {
 		return nil
 	}
 	w.Write(b)
+	return nil
+}
+
+func serviceProxy(w http.ResponseWriter, r *http.Request, t auth.Token) error {
+	u, err := t.User()
+	if err != nil {
+		return err
+	}
+	siName := r.URL.Query().Get(":instance")
+	si, err := getServiceInstanceOrError(siName, u)
+	if err != nil {
+		return err
+	}
+	path := r.URL.Query().Get("callback")
+	rec.Log(u.Email, "service-proxy-status", siName, path)
+	response, _ := service.Proxy(si, r.Method, path, r.Body)
+	w.WriteHeader(response.StatusCode)
+	defer response.Body.Close()
+	io.Copy(w, response.Body)
 	return nil
 }

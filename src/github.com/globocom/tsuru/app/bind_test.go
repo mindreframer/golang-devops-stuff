@@ -5,10 +5,10 @@
 package app
 
 import (
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/service"
-	"github.com/globocom/tsuru/testing"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/service"
+	"github.com/tsuru/tsuru/testing"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"
@@ -38,9 +38,6 @@ func (s *S) TestDestroyShouldUnbindAppFromInstance(c *gocheck.C) {
 		Name:     "whichapp",
 		Platform: "python",
 		Teams:    []string{},
-		Units: []Unit{
-			{Ip: "10.10.10.10", Machine: 1},
-		},
 	}
 	err = CreateApp(&a, s.user)
 	c.Assert(err, gocheck.IsNil)
@@ -51,7 +48,4 @@ func (s *S) TestDestroyShouldUnbindAppFromInstance(c *gocheck.C) {
 	n, err := s.conn.ServiceInstances().Find(bson.M{"apps": bson.M{"$in": []string{a.Name}}}).Count()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(n, gocheck.Equals, 0)
-	msg, err := aqueue().Get(1e6)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(msg.Args, gocheck.DeepEquals, []string{app.Name})
 }

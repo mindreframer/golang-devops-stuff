@@ -1,29 +1,29 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package docker
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app"
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/exec"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/provision"
-	"github.com/globocom/tsuru/queue"
-	"github.com/globocom/tsuru/router"
-	_ "github.com/globocom/tsuru/router/hipache"
-	_ "github.com/globocom/tsuru/router/testing"
+	"github.com/fsouza/go-dockerclient"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/app"
+	"github.com/tsuru/tsuru/cmd"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/db/storage"
+	"github.com/tsuru/tsuru/exec"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/provision"
+	"github.com/tsuru/tsuru/router"
+	_ "github.com/tsuru/tsuru/router/hipache"
+	_ "github.com/tsuru/tsuru/router/testing"
 	"io"
 	"io/ioutil"
+	"net/url"
 	"sync"
-	"time"
 )
 
 func init() {
@@ -69,67 +69,62 @@ func (p *dockerProvisioner) Provision(app provision.App) error {
 }
 
 func (p *dockerProvisioner) Restart(app provision.App) error {
-	containers, err := listAppContainers(app.GetName())
+	err := p.Stop(app)
 	if err != nil {
-		log.Errorf("Got error while getting app containers: %s", err)
 		return err
 	}
-	var buf bytes.Buffer
-	for _, c := range containers {
-		err = c.ssh(&buf, &buf, "/var/lib/tsuru/restart")
-		if err != nil {
-			log.Errorf("Failed to restart %q: %s.", app.GetName(), err)
-			log.Debug("Command outputs:")
-			log.Debugf("out: %s", &buf)
-			log.Debugf("err: %s", &buf)
-			return err
-		}
-		buf.Reset()
-	}
-	return nil
+	return p.Start(app)
 }
 
 func (*dockerProvisioner) Start(app provision.App) error {
-	containers, err := listAppContainers(app.GetName())
+	containers, err := listContainersByApp(app.GetName())
 	if err != nil {
 		return errors.New(fmt.Sprintf("Got error while getting app containers: %s", err))
 	}
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(containers)+1)
 	for _, c := range containers {
-		err := c.start()
-		if err != nil {
-			return err
-		}
+		wg.Add(1)
+		go func(c container) {
+			defer wg.Done()
+			err := c.start()
+			if err != nil {
+				errCh <- err
+				return
+			}
+			c.setStatus(provision.StatusStarted.String())
+			if info, err := c.networkInfo(); err == nil {
+				fixContainer(&c, info)
+			}
+		}(c)
 	}
-	return nil
+	wg.Wait()
+	close(errCh)
+	return <-errCh
 }
 
-func injectEnvsAndRestart(a provision.App) {
-	time.Sleep(5e9)
-	err := a.SerializeEnvVars()
+func (p *dockerProvisioner) Stop(app provision.App) error {
+	containers, err := listContainersByApp(app.GetName())
 	if err != nil {
-		log.Errorf("Failed to serialize env vars: %s.", err)
+		log.Errorf("Got error while getting app containers: %s", err)
+		return nil
 	}
-	var buf bytes.Buffer
-	w := app.LogWriter{App: a, Writer: &buf}
-	err = a.Restart(&w)
-	if err != nil {
-		log.Errorf("Failed to restart app %q (%s): %s.", a.GetName(), err, buf.String())
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(containers)+1)
+	for _, c := range containers {
+		wg.Add(1)
+		go func(c container) {
+			defer wg.Done()
+			err := c.stop()
+			if err != nil {
+				log.Errorf("Failed to stop %q: %s", app.GetName(), err)
+				errCh <- err
+			}
+		}(c)
 	}
-}
-
-func startInBackground(a provision.App, c container, imageId string, w io.Writer, started chan bool) {
-	_, err := start(a, imageId, w)
-	if err != nil {
-		log.Errorf("error on start the app %s - %s", a.GetName(), err)
-		started <- false
-		return
-	}
-	if c.ID != "" {
-		if a.RemoveUnit(c.ID) != nil {
-			removeContainer(&c)
-		}
-	}
-	started <- true
+	wg.Wait()
+	close(errCh)
+	return <-errCh
 }
 
 func (dockerProvisioner) Swap(app1, app2 provision.App) error {
@@ -140,54 +135,65 @@ func (dockerProvisioner) Swap(app1, app2 provision.App) error {
 	return r.Swap(app1.GetName(), app2.GetName())
 }
 
-func (p *dockerProvisioner) Deploy(a provision.App, version string, w io.Writer) error {
-	imageId, err := build(a, version, w)
+func (p *dockerProvisioner) GitDeploy(a provision.App, version string, w io.Writer) error {
+	imageId, err := gitDeploy(a, version, w)
 	if err != nil {
 		return err
 	}
-	containers, err := listAppContainers(a.GetName())
-	started := make(chan bool, len(containers))
-	if err == nil && len(containers) > 0 {
-		for _, c := range containers {
-			go startInBackground(a, c, imageId, w, started)
-		}
-	} else {
-		go startInBackground(a, container{}, imageId, w, started)
+	return p.deploy(a, imageId, w)
+}
+
+func (p *dockerProvisioner) ArchiveDeploy(a provision.App, archiveURL string, w io.Writer) error {
+	imageId, err := archiveDeploy(a, archiveURL, w)
+	if err != nil {
+		return err
 	}
-	if <-started {
-		fmt.Fprint(w, "\n ---> App will be restarted, please check its logs for more details...\n\n")
+	return p.deploy(a, imageId, w)
+}
+
+func (p *dockerProvisioner) deploy(a provision.App, imageId string, w io.Writer) error {
+	containers, err := listContainersByApp(a.GetName())
+	if len(containers) == 0 {
+		_, err = runCreateUnitsPipeline(w, a, 1)
 	} else {
-		fmt.Fprint(w, "\n ---> App failed to start, please check its logs for more details...\n\n")
+		_, err = runReplaceUnitsPipeline(w, a, containers)
 	}
-	return nil
+	return err
 }
 
 func (p *dockerProvisioner) Destroy(app provision.App) error {
-	containers, _ := listAppContainers(app.GetName())
-	go func(c []container) {
-		var containersGroup sync.WaitGroup
-		containersGroup.Add(len(containers))
-		for _, c := range containers {
-			go func(c container) {
-				defer containersGroup.Done()
-				err := removeContainer(&c)
-				if err != nil {
-					log.Error(err.Error())
-				}
-			}(c)
-		}
-		containersGroup.Wait()
-		err := removeImage(assembleImageName(app.GetName()))
-		if err != nil {
-			log.Error(err.Error())
-		}
-	}(containers)
-	r, err := getRouter()
+	containers, err := listContainersByApp(app.GetName())
 	if err != nil {
-		log.Errorf("Failed to get router: %s", err)
+		log.Errorf("Failed to list app containers: %s", err.Error())
 		return err
 	}
-	return r.RemoveBackend(app.GetName())
+	var containersGroup sync.WaitGroup
+	containersGroup.Add(len(containers))
+	for _, c := range containers {
+		go func(c container) {
+			defer containersGroup.Done()
+			err := removeContainer(&c)
+			if err != nil {
+				log.Errorf("Unable to destroy container %s: %s", c.ID, err.Error())
+			}
+		}(c)
+	}
+	containersGroup.Wait()
+	err = removeImage(assembleImageName(app.GetName()))
+	if err != nil {
+		log.Errorf("Failed to remove image: %s", err.Error())
+	}
+	r, err := getRouter()
+	if err != nil {
+		log.Errorf("Failed to get router: %s", err.Error())
+		return err
+	}
+	err = r.RemoveBackend(app.GetName())
+	if err != nil {
+		log.Errorf("Failed to remove route backend: %s", err.Error())
+		return err
+	}
+	return nil
 }
 
 func (*dockerProvisioner) Addr(app provision.App) (string, error) {
@@ -204,10 +210,59 @@ func (*dockerProvisioner) Addr(app provision.App) (string, error) {
 	return addr, nil
 }
 
-func (*dockerProvisioner) AddUnits(a provision.App, units uint) ([]provision.Unit, error) {
+func addContainersWithHost(w io.Writer, a provision.App, units int, destinationHost ...string) ([]container, error) {
 	if units == 0 {
 		return nil, errors.New("Cannot add 0 units")
 	}
+	if w == nil {
+		w = ioutil.Discard
+	}
+	writer := app.LogWriter{App: a, Writer: w}
+	imageId := assembleImageName(a.GetName())
+	wg := sync.WaitGroup{}
+	createdContainers := make(chan *container, units)
+	errors := make(chan error, units)
+	var plural string
+	if units > 1 {
+		plural = "s"
+	}
+	fmt.Fprintf(&writer, "\n---- Starting %d new unit%s ----\n", units, plural)
+	for i := 0; i < units; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			c, err := start(a, imageId, &writer, destinationHost...)
+			if err != nil {
+				errors <- err
+				return
+			}
+			createdContainers <- c
+		}()
+	}
+	wg.Wait()
+	close(errors)
+	close(createdContainers)
+	if err := <-errors; err != nil {
+		for c := range createdContainers {
+			log.Errorf("Removing container %q due failed add units: %s", c.ID, err.Error())
+			errRem := removeContainer(c)
+			if errRem != nil {
+				log.Errorf("Unable to destroy container %s: %s", c.ID, err.Error())
+			}
+		}
+		return nil, err
+	}
+	result := make([]container, units)
+	i := 0
+	for c := range createdContainers {
+		result[i] = *c
+		i++
+		fmt.Fprintf(&writer, " ---> Started unit %d/%d...\n", i, units)
+	}
+	return result, nil
+}
+
+func (*dockerProvisioner) AddUnits(a provision.App, units uint) ([]provision.Unit, error) {
 	length, err := getContainerCountForAppName(a.GetName())
 	if err != nil {
 		return nil, err
@@ -215,59 +270,49 @@ func (*dockerProvisioner) AddUnits(a provision.App, units uint) ([]provision.Uni
 	if length < 1 {
 		return nil, errors.New("New units can only be added after the first deployment")
 	}
-	writer := app.LogWriter{App: a, Writer: ioutil.Discard}
-	result := make([]provision.Unit, int(units))
-	container, err := getOneContainerByAppName(a.GetName())
+	conts, err := runCreateUnitsPipeline(nil, a, int(units))
 	if err != nil {
 		return nil, err
 	}
-	imageId := container.Image
-	for i := uint(0); i < units; i++ {
-		container, err := start(a, imageId, &writer)
-		if err != nil {
-			return nil, err
-		}
-		result[i] = provision.Unit{
-			Name:    container.ID,
-			AppName: a.GetName(),
-			Type:    a.GetPlatform(),
-			Ip:      container.HostAddr,
-			Status:  provision.StatusBuilding,
-		}
+	result := make([]provision.Unit, len(conts))
+	for i, c := range conts {
+		result[i] = c.asUnit(a)
 	}
 	return result, nil
 }
 
-func (*dockerProvisioner) RemoveUnit(a provision.App, unitName string) error {
-	container, err := getContainer(unitName)
+func (*dockerProvisioner) RemoveUnits(a provision.App, units uint) error {
+	if a == nil {
+		return errors.New("remove units: app should not be nil")
+	}
+	if units < 1 {
+		return errors.New("remove units: units must be at least 1")
+	}
+	containers, err := listContainersByAppOrderedByStatus(a.GetName())
 	if err != nil {
 		return err
 	}
-	if container.AppName != a.GetName() {
-		return errors.New("Unit does not belong to this app")
+	if units >= uint(len(containers)) {
+		return errors.New("remove units: cannot remove all units from app")
 	}
-	if err := removeContainer(container); err != nil {
-		return err
+	var wg sync.WaitGroup
+	for i := 0; i < int(units); i++ {
+		wg.Add(1)
+		go func(c container) {
+			removeContainer(&c)
+			wg.Done()
+		}(containers[i])
 	}
-	return rebindWhenNeed(a.GetName(), container)
+	wg.Wait()
+	return nil
 }
 
-// rebindWhenNeed rebinds a unit to the app's services when it finds
-// that the unit being removed has the same host that any
-// of the units that still being used
-func rebindWhenNeed(appName string, container *container) error {
-	containers, err := listAppContainers(appName)
+func (*dockerProvisioner) RemoveUnit(unit provision.Unit) error {
+	container, err := getContainer(unit.Name)
 	if err != nil {
 		return err
 	}
-	for _, c := range containers {
-		if c.HostAddr == container.HostAddr && c.ID != container.ID {
-			msg := queue.Message{Action: app.BindService, Args: []string{appName, c.ID}}
-			go app.Enqueue(msg)
-			break
-		}
-	}
-	return nil
+	return removeContainer(container)
 }
 
 func removeContainer(c *container) error {
@@ -282,29 +327,36 @@ func removeContainer(c *container) error {
 	return err
 }
 
-func (*dockerProvisioner) InstallDeps(app provision.App, w io.Writer) error {
-	return nil
+func (p *dockerProvisioner) SetUnitStatus(unit provision.Unit, status provision.Status) error {
+	container, err := getContainer(unit.Name)
+	if err != nil {
+		return err
+	}
+	if container.AppName != unit.AppName {
+		return errors.New("wrong app name")
+	}
+	return container.setStatus(status.String())
 }
 
 func (*dockerProvisioner) ExecuteCommandOnce(stdout, stderr io.Writer, app provision.App, cmd string, args ...string) error {
-	containers, err := listAppContainers(app.GetName())
+	containers, err := listContainersByApp(app.GetName())
 	if err != nil {
 		return err
 	}
 	if len(containers) == 0 {
-		return errors.New("No containers for this app")
+		return provision.ErrEmptyApp
 	}
 	container := containers[0]
 	return container.ssh(stdout, stderr, cmd, args...)
 }
 
 func (*dockerProvisioner) ExecuteCommand(stdout, stderr io.Writer, app provision.App, cmd string, args ...string) error {
-	containers, err := listAppContainers(app.GetName())
+	containers, err := listContainersByApp(app.GetName())
 	if err != nil {
 		return err
 	}
 	if len(containers) == 0 {
-		return errors.New("No containers for this app")
+		return provision.ErrEmptyApp
 	}
 	for _, c := range containers {
 		err = c.ssh(stdout, stderr, cmd, args...)
@@ -333,14 +385,29 @@ func (p *dockerProvisioner) UnsetCName(app provision.App, cname string) error {
 
 func (p *dockerProvisioner) Commands() []cmd.Command {
 	return []cmd.Command{
-		addNodeToSchedulerCmd{},
-		removeNodeFromSchedulerCmd{},
-		listNodesInTheSchedulerCmd{},
 		&sshAgentCmd{},
 	}
 }
 
-func collection() *db.Collection {
+func (p *dockerProvisioner) AdminCommands() []cmd.Command {
+	return []cmd.Command{
+		&moveContainerCmd{},
+		&moveContainersCmd{},
+		&rebalanceContainersCmd{},
+		&addNodeToSchedulerCmd{},
+		&removeNodeFromSchedulerCmd{},
+		listNodesInTheSchedulerCmd{},
+		addPoolToSchedulerCmd{},
+		removePoolFromSchedulerCmd{},
+		listPoolsInTheSchedulerCmd{},
+		addTeamsToPoolCmd{},
+		removeTeamsFromPoolCmd{},
+		fixContainersCmd{},
+		sshToContainerCmd{},
+	}
+}
+
+func collection() *storage.Collection {
 	name, err := config.GetString("docker:collection")
 	if err != nil {
 		log.Fatal(err.Error())
@@ -356,10 +423,50 @@ func (p *dockerProvisioner) DeployPipeline() *action.Pipeline {
 	actions := []*action.Action{
 		&app.ProvisionerDeploy,
 		&app.IncrementDeploy,
-		&saveUnits,
-		&injectEnvirons,
-		&bindService,
+		&app.BindService,
 	}
 	pipeline := action.NewPipeline(actions...)
 	return pipeline
+}
+
+// PlatformAdd build and push a new docker platform to register
+func (p *dockerProvisioner) PlatformAdd(name string, args map[string]string, w io.Writer) error {
+	if args["dockerfile"] == "" {
+		return errors.New("Dockerfile is required.")
+	}
+	if _, err := url.ParseRequestURI(args["dockerfile"]); err != nil {
+		return errors.New("dockerfile parameter should be an url.")
+	}
+	imageName := assembleImageName(name)
+	dockerCluster := dockerCluster()
+	buildOptions := docker.BuildImageOptions{
+		Name:           imageName,
+		NoCache:        true,
+		RmTmpContainer: true,
+		Remote:         args["dockerfile"],
+		InputStream:    nil,
+		OutputStream:   w,
+	}
+	err := dockerCluster.BuildImage(buildOptions)
+	if err != nil {
+		return err
+	}
+	return pushImage(imageName)
+}
+
+func (p *dockerProvisioner) PlatformUpdate(name string, args map[string]string, w io.Writer) error {
+	return p.PlatformAdd(name, args, w)
+}
+
+func (p *dockerProvisioner) Units(app provision.App) []provision.Unit {
+	containers, err := listContainersByApp(app.GetName())
+	if err != nil {
+		return nil
+	}
+	units := []provision.Unit{}
+	for _, container := range containers {
+		unit := unitFromContainer(container)
+		units = append(units, unit)
+	}
+	return units
 }

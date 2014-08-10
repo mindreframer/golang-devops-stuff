@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,12 +6,12 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/globocom/tsuru/fs"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/fs"
 	"io"
 	"launchpad.net/gnuflag"
 	"net/http"
 	"os"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -27,6 +27,8 @@ func (e osExiter) Exit(code int) {
 	os.Exit(code)
 }
 
+type Lookup func(context *Context) error
+
 type Manager struct {
 	Commands      map[string]Command
 	topics        map[string]string
@@ -39,17 +41,18 @@ type Manager struct {
 	e             exiter
 	original      string
 	wrong         bool
+	lookup        Lookup
 }
 
-func NewManager(name, ver, verHeader string, stdout, stderr io.Writer, stdin io.Reader) *Manager {
-	manager := &Manager{name: name, version: ver, versionHeader: verHeader, stdout: stdout, stderr: stderr, stdin: stdin}
+func NewManager(name, ver, verHeader string, stdout, stderr io.Writer, stdin io.Reader, lookup Lookup) *Manager {
+	manager := &Manager{name: name, version: ver, versionHeader: verHeader, stdout: stdout, stderr: stderr, stdin: stdin, lookup: lookup}
 	manager.Register(&help{manager})
 	manager.Register(&version{manager})
 	return manager
 }
 
-func BuildBaseManager(name, version, versionHeader string) *Manager {
-	m := NewManager(name, version, versionHeader, os.Stdout, os.Stderr, os.Stdin)
+func BuildBaseManager(name, version, versionHeader string, lookup Lookup) *Manager {
+	m := NewManager(name, version, versionHeader, os.Stdout, os.Stderr, os.Stdin, lookup)
 	m.Register(&login{})
 	m.Register(&logout{})
 	m.Register(&userCreate{})
@@ -74,7 +77,13 @@ func (m *Manager) Register(command Command) {
 	if m.Commands == nil {
 		m.Commands = make(map[string]Command)
 	}
-	name := command.Info().Name
+	var name string
+	namedCmd, ok := command.(NamedCommand)
+	if ok {
+		name = namedCmd.Name()
+	} else {
+		name = command.Info().Name
+	}
 	_, found := m.Commands[name]
 	if found {
 		panic(fmt.Sprintf("command already registered: %s", name))
@@ -101,6 +110,21 @@ func (m *Manager) Run(args []string) {
 	name := args[0]
 	command, ok := m.Commands[name]
 	if !ok {
+		if m.lookup != nil {
+			context := Context{args, m.stdout, m.stderr, m.stdin}
+			err := m.lookup(&context)
+			if err != nil {
+				msg := ""
+				if os.IsNotExist(err) {
+					msg = fmt.Sprintf("Error: command %q does not exist\n", args[0])
+				} else {
+					msg = err.Error()
+				}
+				fmt.Fprint(m.stderr, msg)
+				m.finisher().Exit(1)
+			}
+			return
+		}
 		fmt.Fprintf(m.stderr, "Error: command %q does not exist\n", args[0])
 		m.finisher().Exit(1)
 		return
@@ -129,9 +153,9 @@ func (m *Manager) Run(args []string) {
 	client := NewClient(&http.Client{}, &context, m)
 	err := command.Run(&context, client)
 	if err != nil {
-		re := regexp.MustCompile(`^((Invalid token)|(You must provide the Authorization header))`)
 		errorMsg := err.Error()
-		if re.MatchString(errorMsg) {
+		httpErr, ok := err.(*errors.HTTP)
+		if ok && httpErr.Code == http.StatusUnauthorized {
 			errorMsg = `You're not authenticated or your session has expired. Please use "login" command for authentication.`
 		}
 		if !strings.HasSuffix(errorMsg, "\n") {
@@ -155,6 +179,11 @@ type Command interface {
 	Run(context *Context, client *Client) error
 }
 
+type NamedCommand interface {
+	Command
+	Name() string
+}
+
 type FlaggedCommand interface {
 	Command
 	Flags() *gnuflag.FlagSet
@@ -173,6 +202,18 @@ type Info struct {
 	MaxArgs int
 	Usage   string
 	Desc    string
+}
+
+// Implementing the Commandable interface allows extending
+// the tsr command line interface
+type Commandable interface {
+	Commands() []Command
+}
+
+// Implementing the AdminCommandable interface allows extending
+// the tsuru-admin command line interface
+type AdminCommandable interface {
+	AdminCommands() []Command
 }
 
 type help struct {
