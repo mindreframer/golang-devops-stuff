@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -25,8 +24,7 @@ func writeImage(img image.Image, format string, w io.Writer) error {
 	return jpeg.Encode(w, img, &jpeg.Options{Config.jpegQuality})
 }
 
-func readImage(data []byte, format string) (image.Image, error) {
-	reader := bytes.NewReader(data)
+func readImage(reader io.Reader, format string) (image.Image, error) {
 	if format == "png" {
 		return png.Decode(reader)
 	}

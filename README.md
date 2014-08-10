@@ -74,7 +74,7 @@ Authorisation can be easily set up to require an API key between `server` and `i
 
 ### Using pixlserv locally
 
-Start redis (see the [Requirements](#requirements) section for details). Create a directory `local-images` with some JPEG or PNG images in the same directory where you installed pixlserv. Then run:
+Start redis (see the [Requirements](#requirements) section for details). Create a directory `images` with some JPEG or PNG images in the same directory where you installed pixlserv. Then run:
 
 ```
 ./pixlserv run config/example.yaml
@@ -82,7 +82,7 @@ Start redis (see the [Requirements](#requirements) section for details). Create 
 
 This will run the server using a simple configuration defined in [config/example.yaml](config/example.yaml). You are encouraged to look at the Configuration section below, create a copy of the sample configuration file and customise it to suit your needs.
 
-Assuming you copied a file `cat.jpg` to the `local-images` directory you can now access [http://localhost:3000/image/t_square/cat.jpg](http://localhost:3000/image/t_square/cat.jpg) using your browser.
+Assuming you copied a file `cat.jpg` to the `images` directory you can now access [http://localhost:3000/image/t_square/cat.jpg](http://localhost:3000/image/t_square/cat.jpg) using your browser.
 
 ### Using pixlserv with Heroku and Amazon S3
 

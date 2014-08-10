@@ -25,7 +25,7 @@ import (
 	"github.com/go-martini/martini"
 	"github.com/martini-contrib/binding"
 	"github.com/martini-contrib/cors"
-	"github.com/tgulacsi/agostle/temp"
+	"github.com/tgulacsi/go/temp"
 )
 
 // UploadForm is a form structure to use when an image is POSTed to the server
@@ -361,7 +361,7 @@ func uploadHandler(params martini.Params, uf UploadForm) (int, string) {
 		return http.StatusBadRequest, uploadError(err.Error())
 	}
 
-	reader, err := temp.NewReadSeeker(file, 0)
+	reader, err := temp.NewReadSeeker(file)
 	if err != nil {
 		return http.StatusBadRequest, uploadError(err.Error())
 	}
