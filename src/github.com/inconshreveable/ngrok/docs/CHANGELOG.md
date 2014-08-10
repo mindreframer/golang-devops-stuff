@@ -1,4 +1,18 @@
 # Changelog
+## 1.7 - 6/6/2014
+- IMPROVEMENT: Print a better help message when run without any arguments
+- IMPROVEMENT: Display useful help message and instructions when double-clicked from explorer on Windows
+- IMPROVEMENT: ngrok now uses the specified server_addr to set the SNI header instead of forcing ngrokd.ngrok.com
+- IMPROVEMENT: ngrok now uses equinox.io for automatic updates with greater speed and safety
+- IMPROVEMENT: Many documentation improvements
+- IMPROVEMENT: Added example plist file for autostart on OS X
+- BUGFIX: Fixed an issue where ngrok could crash when parsing some websocket requests
+- BUGFIX: Fixed an issue where the web UI would truncate the raw request to 8192 bytes
+- BUGFIX: Fixed an issue where ngrok could not replay requests where the request was larger than 8192 bytes
+- BUGFIX: Fixed an issue where the web UI would not update in realtime when not accessed over localhost
+- BUGFIX: Fixed an unlikely race condition in ngrokd when loading the tunnel URL cache
+- BUGFIX: Check for a valid server address without trying to resolve for less confusing errors
+
 ## 1.6 -  10/25/2013
 - BUGFIX: Fixed a goroutine/memory leak in ngrok/proto's parsing of http traffic
 - IMPROVEMENT: The web inspection API can now be disabled again by setting inspect_addr: disabled in the config file
@@ -9,7 +23,7 @@
 - IMPROVEMENT: Improvements to ngrok's logging for easier debugging
 - IMPROVEMENT: Batch metric reporting to Keen to not be limited by the speed of their API at high request loads
 - IMPROVEMENT: Added additional safety to ensure the server doesn't crash on panics()
-- BUGFIX: Fixed an issue with prefetching tunnel connections that could hang tunnel connections when behind an aggresive NAT
+- BUGFIX: Fixed an issue with prefetching tunnel connections that could hang tunnel connections when behind an aggressive NAT
 - BUGFIX: Fixed a race condition where ngrokd could send back a different message instead of AuthResp first
 - BUGFIX: Fixed an issue where under some circumstances, reconnecting would fail and tell the client the tunnels were still in use
 - BUGFIX: Fixed an issue where a race-condition with handling pings could cause a tunnel to hang forever and stop handling requests
@@ -74,4 +88,4 @@
 ## 0.12 - 06/30/2013
 - IMPROVEMENT: Improved developer documentation
 - IMPROVEMENT: Simplified build process with custom version of go-bindata that compiles assets into binary releases
-- BUGFIX: Github issue #4: Raw/Binary requests bodies are no longer truncated at 8192 bytes.
+- BUGFIX: GitHub issue #4: Raw/Binary requests bodies are no longer truncated at 8192 bytes.
