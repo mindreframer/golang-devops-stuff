@@ -36,6 +36,11 @@ The options below are all specified on the command-line.
   introduces support for non-consistent ports across the cluster. For more information,
   see the [compatibility page](/docs/compatibility.html).
 
+* `-iface` - This flag can be used to provide a binding interface. It can be
+  used instead of `-bind` if the interface is known but not the address. If both
+  are provided, then Serf verifies that the interface has the bind address that is
+  provided. This flag also sets the multicast device used for `-discover`.
+
 * `-advertise` - The advertise flag is used to change the address that we
   advertise to other nodes in the cluster. By default, the bind address is
   advertised. However, in some cases (specifically NAT traversal), there may
@@ -65,6 +70,17 @@ The options below are all specified on the command-line.
   network traffic. This key must be 16-bytes that are base64 encoded. The
   easiest way to create an encryption key is to use `serf keygen`. All
   nodes within a cluster must share the same encryption key to communicate.
+
+* `-keyring-file` - Specifies a file to load keyring data from. Serf is able to
+  keep encryption keys in sync and perform key rotations. During a key rotation,
+  there may be some period of time in which Serf is required to maintain more
+  than one encryption key until all members have received the new key. The
+  keyring file helps persist changes to the encryption keyring, allowing the
+  agent to start and rejoin the cluster successfully later on, even if key
+  rotations had been initiated by other members in the cluster. More information
+  on the format of the keyring file can be found below in the examples section.
+
+  NOTE: this option is not compatible with the `-encrypt` option.
 
 * `-event-handler` - Adds an event handler that Serf will invoke for
   events. This flag can be specified multiple times to define multiple
@@ -97,7 +113,7 @@ The options below are all specified on the command-line.
   Network. However, there are cases in which a user may want to use Serf over
   the Internet or (WAN), or even just locally. To support setting the correct
   configuration values for each environment, you can select a timing profile.
-  The current choices are "lan", "wan", and "local". This defaults to "local".
+  The current choices are "lan", "wan", and "local". This defaults to "lan".
   If a "lan" or "local" profile is used over the Internet, or a "local" profile
   over the LAN, a high rate of false failures is risked, as the timing constrains
   are too tight.
@@ -105,6 +121,21 @@ The options below are all specified on the command-line.
 * `-protocol` - The Serf protocol version to use. This defaults to the latest
   version. This should be set only when [upgrading](/docs/upgrading.html).
   You can view the protocol versions supported by Serf by running `serf -v`.
+
+* `-retry-join` - Address of another agent to join after starting up. This can
+  be specified multiple times to specify multiple agents to join. If Serf is
+  unable to join with any of the specified addresses, the agent will retry
+  the join every `-retry-interval` up to `-retry-max` attempts. This can be used
+  instead of `-join` to continue attempting to join the cluster.
+
+* `-retry-interval` - Provides a duration string to control how after the
+  retry join is perfomed. By default, the join is attempted every 30 seconds
+  until success. This should use the "s" suffix for second, "m" for minute,
+  or "h" for hour.
+
+* `-retry-max` - Provides a limit on how many attempts to join the cluster
+  can be made by `-retry-join`. If 0, there is no limit, and the agent will
+  retry forever. Defaults to 0.
 
 * `-role` - **Deprecated** The role of this node, if any. By default this is blank or empty.
   The role can be used by events in order to differentiate members of a
@@ -127,12 +158,28 @@ The options below are all specified on the command-line.
   must be read/writable by Serf, and the directory must allow Serf to create
   other files, so that it can periodically compact the snapshot file.
 
+* `-rejoin` - When provided with the `-snapshot`, Serf will ignore a previous
+  leave and attempt to rejoin the cluster when starting. By default, Serf treats
+  leave as a permanent intent, and does not attempt to join the cluster again
+  when starting. This flag allows the snapshot state to be used to rejoin
+  the cluster.
+
 * `-tag` - The tag flag is used to associate a new key/value pair with the
   agent. The tags are gossiped and can be used to provide additional information
   such as roles, ports, and configuration values to other nodes. Multiple tags
   can be specified per agent. There is a byte size limit for the maximum number
   of tags, but in practice dozens of tags may be used. Tags can be changed during
   a config reload.
+
+
+* `-tags-file` - The tags file is used to persist tag data. As an agent's tags
+  are changed, the tags file will be updated. Tags can be reloaded during later
+  agent starts. This option is incompatible with the `-tag` option and requires
+  there be no tags in the agent configuration file, if given.
+
+* `-syslog` - When provided, the logs will also be sent to the syslog facility.
+  This flag can only be enabled on Linux or OSX systems, as Windows and Plan 9 do
+  not provide the syslog facility.
 
 ## Configuration Files
 
@@ -169,7 +216,11 @@ at a single JSON object with configuration within it.
 * `tags` - This is a dictionary of tag values. It is the same as specifying
   the `tag` command-line flag once per tag.
 
+* `tags_file` - Equivalent to the `-tags-file` command-line flag.
+
 * `bind` - Equivalent to the `-bind` command-line flag.
+
+* `interface` - Equivalent to the `-iface` command-line flag.
 
 * `advertise` - Equivalent to the `-advertise` command-line flag.
 
@@ -184,6 +235,11 @@ at a single JSON object with configuration within it.
 * `protocol` - Equivalent to the `-protocol` command-line flag.
 
 * `rpc_addr` - Equivalent to the `-rpc-addr` command-line flag.
+
+* `rpc_auth` - Used to provide an RPC auth token. If this token is set, then
+  all RPC clients are required to provide this token to make RPC requests.
+  This is a simple security mechanism that can be used to prevent other users
+  from making RPC requests to Serf without the token.
 
 * `event_handlers` - An array of strings specifying the event handlers.
   The format of the strings is equivalent to the format specified for
@@ -206,3 +262,59 @@ at a single JSON object with configuration within it.
   Interrupts are usually from a Control-C from a shell. (This was previously
   `leave_on_interrupt` but has since changed).
 
+* `reconnect_interval` - This controls how often the agent will attempt to
+  connect to a failed node. By default this is every 30 seconds.
+
+* `reconnect_timeout` - This controls for how long the agent attempts to connect
+  to a failed node before reaping it from the cluster. By default this is 24 hours.
+
+* `tombstone_timeout` - This controls for how long the agent remembers nodes that
+  have gracefully left the cluster before reaping. By default this is 24 hours.
+
+* `disable_name_resolution` - If enabled, then Serf will not attempt to automatically
+  resolve name conflicts. Serf relies on the each node having a unique name, but as a
+  result of misconfiguration sometimes Serf agents have conflicting names. By default,
+  the agents that are conflicting will query the cluster to determine which node is
+  believed to be "correct" by the majority of other nodes. The node(s) that are in the
+  minority will shutdown at the end of the conflict resolution. Setting this flag prevents
+  this behavior, and instead Serf will merely log a warning. This is not recommanded since
+  the cluster will disagree about the mapping of NodeName -> IP:Port and cannot reconcile
+  this.
+
+* `enable_syslog` - Equivalent to the `-syslog` command-line flag.
+
+* `syslog_facility` - When used with `enable_syslog`, specifies the syslog
+  facility messages are sent to. By default `LOCAL0` is used.
+
+* `retry_join` - An array of strings specifying addresses of nodes to
+  join upon startup with retries if we fail to join.
+
+* `retry_max_attempts` - Equivalent to the `-retry-max` command-line flag.
+
+* `retry_interval` - Equivalent to the `-retry-interval` command-line flag.
+
+* `rejoin_after_leave` - Equivalent to the `-rejoin` command-line flag.
+
+* `statsite_addr` - This provides the address of a statsite instance. If provided
+  Serf will stream various telemetry information to that instance for aggregation.
+  This can be used to capture various runtime information.
+
+#### Example Keyring File
+
+The keyring file is a simple JSON-formatted text file. It is important to
+understand how Serf will use its contents. Following is an example of a keyring
+file:
+
+<pre class="prettyprint lang-json">
+[
+  "QHOYjmYlxSCBhdfiolhtDQ==",
+  "daZ2wnuw+Ql+2hCm7vQB6A==",
+  "keTZydopxtiTY7HVoqeWGw=="
+]
+</pre>
+
+The order in which the keys appear is important. The key appearing first in the
+list is the primary key, which is the key used to encrypt all outgoing messages.
+The remaining keys in the list are considered secondary and are used for
+decryption only. During message decryption, Serf uses the configured encryption
+keys in the order they appear in the keyring file until all keys are exhausted.

@@ -9,6 +9,12 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
+)
+
+const (
+	// This is the default IO timeout for the client
+	DefaultTimeout = 10 * time.Second
 )
 
 var (
@@ -30,10 +36,27 @@ type seqHandler interface {
 	Cleanup()
 }
 
-// RPCClient is the RPC client to make requests to the agent RPC.
+// Config is provided to ClientFromConfig to make
+// a new RPCClient from the given configuration
+type Config struct {
+	// Addr must be the RPC address to contact
+	Addr string
+
+	// If provided, the client will perform key based auth
+	AuthKey string
+
+	// If provided, overrides the DefaultTimeout used for
+	// IO deadlines
+	Timeout time.Duration
+}
+
+// RPCClient is used to make requests to the Agent using an RPC mechanism.
+// Additionally, the client manages event streams and monitors, enabling a client
+// to easily receive event notifications instead of using the fork/exec mechanism.
 type RPCClient struct {
 	seq uint64
 
+	timeout   time.Duration
 	conn      *net.TCPConn
 	reader    *bufio.Reader
 	writer    *bufio.Writer
@@ -59,6 +82,12 @@ func (c *RPCClient) send(header *requestHeader, obj interface{}) error {
 		return clientClosed
 	}
 
+	// Setup an IO deadline, this way we won't wait indefinitely
+	// if the client has hung.
+	if err := c.conn.SetWriteDeadline(time.Now().Add(c.timeout)); err != nil {
+		return err
+	}
+
 	if err := c.enc.Encode(header); err != nil {
 		return err
 	}
@@ -76,11 +105,26 @@ func (c *RPCClient) send(header *requestHeader, obj interface{}) error {
 	return nil
 }
 
-// NewRPCClient is used to create a new RPC client given the address.
-// This will properly dial, handshake, and start listening
+// NewRPCClient is used to create a new RPC client given the
+// RPC address of the Serf agent. This will return a client,
+// or an error if the connection could not be established.
+// This will use the DefaultTimeout for the client.
 func NewRPCClient(addr string) (*RPCClient, error) {
+	conf := Config{Addr: addr}
+	return ClientFromConfig(&conf)
+}
+
+// ClientFromConfig is used to create a new RPC client given the
+// configuration object. This will return a client, or an error if
+// the connection could not be established.
+func ClientFromConfig(c *Config) (*RPCClient, error) {
+	// Setup the defaults
+	if c.Timeout == 0 {
+		c.Timeout = DefaultTimeout
+	}
+
 	// Try to dial to serf
-	conn, err := net.Dial("tcp", addr)
+	conn, err := net.DialTimeout("tcp", c.Addr, c.Timeout)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +132,7 @@ func NewRPCClient(addr string) (*RPCClient, error) {
 	// Create the client
 	client := &RPCClient{
 		seq:        0,
+		timeout:    c.Timeout,
 		conn:       conn.(*net.TCPConn),
 		reader:     bufio.NewReader(conn),
 		writer:     bufio.NewWriter(conn),
@@ -105,11 +150,24 @@ func NewRPCClient(addr string) (*RPCClient, error) {
 		client.Close()
 		return nil, err
 	}
+
+	// Do the initial authentication if needed
+	if c.AuthKey != "" {
+		if err := client.auth(c.AuthKey); err != nil {
+			client.Close()
+			return nil, err
+		}
+	}
+
 	return client, err
 }
 
 // StreamHandle is an opaque handle passed to stop to stop streaming
 type StreamHandle uint64
+
+func (c *RPCClient) IsClosed() bool {
+	return c.shutdown
+}
 
 // Close is used to free any resources associated with the client
 func (c *RPCClient) Close() error {
@@ -166,6 +224,24 @@ func (c *RPCClient) Members() ([]Member, error) {
 	return resp.Members, err
 }
 
+// MembersFiltered returns a subset of members
+func (c *RPCClient) MembersFiltered(tags map[string]string, status string,
+	name string) ([]Member, error) {
+	header := requestHeader{
+		Command: membersFilteredCommand,
+		Seq:     c.getSeq(),
+	}
+	req := membersFilteredRequest{
+		Tags:   tags,
+		Status: status,
+		Name:   name,
+	}
+	var resp membersResponse
+
+	err := c.genericRPC(&header, &req, &resp)
+	return resp.Members, err
+}
+
 // UserEvent is used to trigger sending an event
 func (c *RPCClient) UserEvent(name string, payload []byte, coalesce bool) error {
 	header := requestHeader{
@@ -180,13 +256,113 @@ func (c *RPCClient) UserEvent(name string, payload []byte, coalesce bool) error 
 	return c.genericRPC(&header, &req, nil)
 }
 
-// Leave is used to trigger a graceful leave and shutdown
+// Leave is used to trigger a graceful leave and shutdown of the agent
 func (c *RPCClient) Leave() error {
 	header := requestHeader{
 		Command: leaveCommand,
 		Seq:     c.getSeq(),
 	}
 	return c.genericRPC(&header, nil, nil)
+}
+
+// UpdateTags will modify the tags on a running serf agent
+func (c *RPCClient) UpdateTags(tags map[string]string, delTags []string) error {
+	header := requestHeader{
+		Command: tagsCommand,
+		Seq:     c.getSeq(),
+	}
+	req := tagsRequest{
+		Tags:       tags,
+		DeleteTags: delTags,
+	}
+	return c.genericRPC(&header, &req, nil)
+}
+
+// Respond allows a client to respond to a query event. The ID is the
+// ID of the Query to respond to, and the given payload is the response.
+func (c *RPCClient) Respond(id uint64, buf []byte) error {
+	header := requestHeader{
+		Command: respondCommand,
+		Seq:     c.getSeq(),
+	}
+	req := respondRequest{
+		ID:      id,
+		Payload: buf,
+	}
+	return c.genericRPC(&header, &req, nil)
+}
+
+// IntallKey installs a new encryption key onto the keyring
+func (c *RPCClient) InstallKey(key string) (map[string]string, error) {
+	header := requestHeader{
+		Command: installKeyCommand,
+		Seq:     c.getSeq(),
+	}
+	req := keyRequest{
+		Key: key,
+	}
+
+	resp := keyResponse{}
+	err := c.genericRPC(&header, &req, &resp)
+
+	return resp.Messages, err
+}
+
+// UseKey changes the primary encryption key on the keyring
+func (c *RPCClient) UseKey(key string) (map[string]string, error) {
+	header := requestHeader{
+		Command: useKeyCommand,
+		Seq:     c.getSeq(),
+	}
+	req := keyRequest{
+		Key: key,
+	}
+
+	resp := keyResponse{}
+	err := c.genericRPC(&header, &req, &resp)
+
+	return resp.Messages, err
+}
+
+// RemoveKey changes the primary encryption key on the keyring
+func (c *RPCClient) RemoveKey(key string) (map[string]string, error) {
+	header := requestHeader{
+		Command: removeKeyCommand,
+		Seq:     c.getSeq(),
+	}
+	req := keyRequest{
+		Key: key,
+	}
+
+	resp := keyResponse{}
+	err := c.genericRPC(&header, &req, &resp)
+
+	return resp.Messages, err
+}
+
+// ListKeys returns all of the active keys on each member of the cluster
+func (c *RPCClient) ListKeys() (map[string]int, int, map[string]string, error) {
+	header := requestHeader{
+		Command: listKeysCommand,
+		Seq:     c.getSeq(),
+	}
+
+	resp := keyResponse{}
+	err := c.genericRPC(&header, nil, &resp)
+
+	return resp.Keys, resp.NumNodes, resp.Messages, err
+}
+
+// Stats is used to get debugging state information
+func (c *RPCClient) Stats() (map[string]map[string]string, error) {
+	header := requestHeader{
+		Command: statsCommand,
+		Seq:     c.getSeq(),
+	}
+	var resp map[string]map[string]string
+
+	err := c.genericRPC(&header, nil, &resp)
+	return resp, err
 }
 
 type monitorHandler struct {
@@ -226,7 +402,9 @@ func (mh *monitorHandler) Cleanup() {
 			mh.init = true
 			mh.initCh <- fmt.Errorf("Stream closed")
 		}
-		close(mh.logCh)
+		if mh.logCh != nil {
+			close(mh.logCh)
+		}
 		mh.closed = true
 	}
 }
@@ -306,7 +484,9 @@ func (sh *streamHandler) Cleanup() {
 			sh.init = true
 			sh.initCh <- fmt.Errorf("Stream closed")
 		}
-		close(sh.eventCh)
+		if sh.eventCh != nil {
+			close(sh.eventCh)
+		}
 		sh.closed = true
 	}
 }
@@ -349,6 +529,131 @@ func (c *RPCClient) Stream(filter string, ch chan<- map[string]interface{}) (Str
 	}
 }
 
+type queryHandler struct {
+	client *RPCClient
+	closed bool
+	init   bool
+	initCh chan<- error
+	ackCh  chan<- string
+	respCh chan<- NodeResponse
+	seq    uint64
+}
+
+func (qh *queryHandler) Handle(resp *responseHeader) {
+	// Initialize on the first response
+	if !qh.init {
+		qh.init = true
+		qh.initCh <- strToError(resp.Error)
+		return
+	}
+
+	// Decode the query response
+	var rec queryRecord
+	if err := qh.client.dec.Decode(&rec); err != nil {
+		log.Printf("[ERR] Failed to decode query response: %v", err)
+		qh.client.deregisterHandler(qh.seq)
+		return
+	}
+
+	switch rec.Type {
+	case queryRecordAck:
+		select {
+		case qh.ackCh <- rec.From:
+		default:
+			log.Printf("[ERR] Dropping query ack, channel full")
+		}
+
+	case queryRecordResponse:
+		select {
+		case qh.respCh <- NodeResponse{rec.From, rec.Payload}:
+		default:
+			log.Printf("[ERR] Dropping query response, channel full")
+		}
+
+	case queryRecordDone:
+		// No further records coming
+		qh.client.deregisterHandler(qh.seq)
+
+	default:
+		log.Printf("[ERR] Unrecognized query record type: %s", rec.Type)
+	}
+}
+
+func (qh *queryHandler) Cleanup() {
+	if !qh.closed {
+		if !qh.init {
+			qh.init = true
+			qh.initCh <- fmt.Errorf("Stream closed")
+		}
+		if qh.ackCh != nil {
+			close(qh.ackCh)
+		}
+		if qh.respCh != nil {
+			close(qh.respCh)
+		}
+		qh.closed = true
+	}
+}
+
+// QueryParam is provided to query set various settings.
+type QueryParam struct {
+	FilterNodes []string            // A list of node names to restrict query to
+	FilterTags  map[string]string   // A map of tag name to regex to filter on
+	RequestAck  bool                // Should nodes ack the query receipt
+	Timeout     time.Duration       // Maximum query duration. Optional, will be set automatically.
+	Name        string              // Opaque query name
+	Payload     []byte              // Opaque query payload
+	AckCh       chan<- string       // Channel to send Ack replies on
+	RespCh      chan<- NodeResponse // Channel to send responses on
+}
+
+// Query initiates a new query message using the given parameters, and streams
+// acks and responses over the given channels. The channels will not block on
+// sends and should be buffered. At the end of the query, the channels will be
+// closed.
+func (c *RPCClient) Query(params *QueryParam) error {
+	// Setup the request
+	seq := c.getSeq()
+	header := requestHeader{
+		Command: queryCommand,
+		Seq:     seq,
+	}
+	req := queryRequest{
+		FilterNodes: params.FilterNodes,
+		FilterTags:  params.FilterTags,
+		RequestAck:  params.RequestAck,
+		Timeout:     params.Timeout,
+		Name:        params.Name,
+		Payload:     params.Payload,
+	}
+
+	// Create a query handler
+	initCh := make(chan error, 1)
+	handler := &queryHandler{
+		client: c,
+		initCh: initCh,
+		ackCh:  params.AckCh,
+		respCh: params.RespCh,
+		seq:    seq,
+	}
+	c.handleSeq(seq, handler)
+
+	// Send the request
+	if err := c.send(&header, &req); err != nil {
+		c.deregisterHandler(seq)
+		return err
+	}
+
+	// Wait for a response
+	select {
+	case err := <-initCh:
+		return err
+	case <-c.shutdownCh:
+		c.deregisterHandler(seq)
+		return clientClosed
+	}
+}
+
 // Stop is used to unsubscribe from logs or event streams
 func (c *RPCClient) Stop(handle StreamHandle) error {
 	// Deregister locally first to stop delivery
@@ -376,12 +681,28 @@ func (c *RPCClient) handshake() error {
 	return c.genericRPC(&header, &req, nil)
 }
 
+// auth is used to perform the initial authentication on connect
+func (c *RPCClient) auth(authKey string) error {
+	header := requestHeader{
+		Command: authCommand,
+		Seq:     c.getSeq(),
+	}
+	req := authRequest{
+		AuthKey: authKey,
+	}
+	return c.genericRPC(&header, &req, nil)
+}
+
 // genericRPC is used to send a request and wait for an
 // errorSequenceResponse, potentially returning an error
 func (c *RPCClient) genericRPC(header *requestHeader, req interface{}, resp interface{}) error {
 	// Setup a response handler
 	errCh := make(chan error, 1)
 	handler := func(respHeader *responseHeader) {
+		// If we get an auth error, we should not wait for a request body
+		if respHeader.Error == authRequired {
+			goto SEND_ERR
+		}
 		if resp != nil {
 			err := c.dec.Decode(resp)
 			if err != nil {
@@ -389,6 +710,7 @@ func (c *RPCClient) genericRPC(header *requestHeader, req interface{}, resp inte
 				return
 			}
 		}
+	SEND_ERR:
 		errCh <- strToError(respHeader.Error)
 	}
 	c.handleSeq(header.Seq, &seqCallback{handler: handler})

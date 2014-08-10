@@ -23,11 +23,12 @@ type AgentMDNS struct {
 	seen     map[string]struct{}
 	server   *mdns.Server
 	replay   bool
+	iface    *net.Interface
 }
 
 // NewAgentMDNS is used to create a new AgentMDNS
 func NewAgentMDNS(agent *Agent, logOutput io.Writer, replay bool,
-	node, discover string, bind net.IP, port int) (*AgentMDNS, error) {
+	node, discover string, iface *net.Interface, bind net.IP, port int) (*AgentMDNS, error) {
 	// Create the service
 	service := &mdns.MDNSService{
 		Instance: node,
@@ -40,8 +41,14 @@ func NewAgentMDNS(agent *Agent, logOutput io.Writer, replay bool,
 		return nil, err
 	}
 
+	// Configure mdns server
+	conf := &mdns.Config{
+		Zone:  service,
+		Iface: iface,
+	}
+
 	// Create the server
-	server, err := mdns.NewServer(&mdns.Config{Zone: service})
+	server, err := mdns.NewServer(conf)
 	if err != nil {
 		return nil, err
 	}
@@ -54,6 +61,7 @@ func NewAgentMDNS(agent *Agent, logOutput io.Writer, replay bool,
 		seen:     make(map[string]struct{}),
 		server:   server,
 		replay:   replay,
+		iface:    iface,
 	}
 
 	// Start the background workers
@@ -109,7 +117,12 @@ func (m *AgentMDNS) run() {
 
 // poll is invoked periodically to check for new hosts
 func (m *AgentMDNS) poll(hosts chan *mdns.ServiceEntry) {
-	if err := mdns.Lookup(mdnsName(m.discover), hosts); err != nil {
+	params := mdns.QueryParam{
+		Service:   mdnsName(m.discover),
+		Interface: m.iface,
+		Entries:   hosts,
+	}
+	if err := mdns.Query(&params); err != nil {
 		m.logger.Printf("[ERR] agent.mdns: Failed to poll for new hosts: %v", err)
 	}
 }

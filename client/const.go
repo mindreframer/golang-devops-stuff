@@ -3,6 +3,7 @@ package client
 import (
 	"github.com/hashicorp/serf/serf"
 	"net"
+	"time"
 )
 
 const (
@@ -10,15 +11,25 @@ const (
 )
 
 const (
-	handshakeCommand  = "handshake"
-	eventCommand      = "event"
-	forceLeaveCommand = "force-leave"
-	joinCommand       = "join"
-	membersCommand    = "members"
-	streamCommand     = "stream"
-	stopCommand       = "stop"
-	monitorCommand    = "monitor"
-	leaveCommand      = "leave"
+	handshakeCommand       = "handshake"
+	eventCommand           = "event"
+	forceLeaveCommand      = "force-leave"
+	joinCommand            = "join"
+	membersCommand         = "members"
+	membersFilteredCommand = "members-filtered"
+	streamCommand          = "stream"
+	stopCommand            = "stop"
+	monitorCommand         = "monitor"
+	leaveCommand           = "leave"
+	installKeyCommand      = "install-key"
+	useKeyCommand          = "use-key"
+	removeKeyCommand       = "remove-key"
+	listKeysCommand        = "list-keys"
+	tagsCommand            = "tags"
+	queryCommand           = "query"
+	respondCommand         = "respond"
+	authCommand            = "auth"
+	statsCommand           = "stats"
 )
 
 const (
@@ -29,6 +40,15 @@ const (
 	monitorExists         = "Monitor already exists"
 	invalidFilter         = "Invalid event filter"
 	streamExists          = "Stream with given sequence exists"
+	invalidQueryID        = "No pending queries matching ID"
+	authRequired          = "Authentication required"
+	invalidAuthToken      = "Invalid authentication token"
+)
+
+const (
+	queryRecordAck      = "ack"
+	queryRecordResponse = "response"
+	queryRecordDone     = "done"
 )
 
 // Request header is sent before each request
@@ -45,6 +65,10 @@ type responseHeader struct {
 
 type handshakeRequest struct {
 	Version int32
+}
+
+type authRequest struct {
+	AuthKey string
 }
 
 type eventRequest struct {
@@ -66,8 +90,26 @@ type joinResponse struct {
 	Num int32
 }
 
+type membersFilteredRequest struct {
+	Tags   map[string]string
+	Status string
+	Name   string
+}
+
 type membersResponse struct {
 	Members []Member
+}
+
+type keyRequest struct {
+	Key string
+}
+
+type keyResponse struct {
+	Messages map[string]string
+	Keys     map[string]int
+	NumNodes int
+	NumErr   int
+	NumResp  int
 }
 
 type monitorRequest struct {
@@ -82,6 +124,37 @@ type stopRequest struct {
 	Stop uint64
 }
 
+type tagsRequest struct {
+	Tags       map[string]string
+	DeleteTags []string
+}
+
+type queryRequest struct {
+	FilterNodes []string
+	FilterTags  map[string]string
+	RequestAck  bool
+	Timeout     time.Duration
+	Name        string
+	Payload     []byte
+}
+
+type respondRequest struct {
+	ID      uint64
+	Payload []byte
+}
+
+type queryRecord struct {
+	Type    string
+	From    string
+	Payload []byte
+}
+
+// NodeResponse is used to return the response of a query
+type NodeResponse struct {
+	From    string
+	Payload []byte
+}
+
 type logRecord struct {
 	Log string
 }
@@ -94,18 +167,20 @@ type userEventRecord struct {
 	Coalesce bool
 }
 
+// Member is used to represent a single member of the
+// Serf cluster
 type Member struct {
-	Name        string
-	Addr        net.IP
-	Port        uint16
+	Name        string // Node name
+	Addr        net.IP // Address of the Serf node
+	Port        uint16 // Gossip port used by Serf
 	Tags        map[string]string
 	Status      string
-	ProtocolMin uint8
-	ProtocolMax uint8
-	ProtocolCur uint8
-	DelegateMin uint8
-	DelegateMax uint8
-	DelegateCur uint8
+	ProtocolMin uint8 // Minimum supported Memberlist protocol
+	ProtocolMax uint8 // Maximum supported Memberlist protocol
+	ProtocolCur uint8 // Currently set Memberlist protocol
+	DelegateMin uint8 // Minimum supported Serf protocol
+	DelegateMax uint8 // Maximum supported Serf protocol
+	DelegateCur uint8 // Currently set Serf protocol
 }
 
 type memberEventRecord struct {

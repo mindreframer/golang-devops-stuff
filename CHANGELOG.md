@@ -1,4 +1,162 @@
-## 0.4.2 (Unreleased)
+## 0.6.3 (July 10, 2014)
+
+IMPROVEMENTS:
+
+* Added `statsite_addr` configuration to stream to statsite
+
+BUG FIXES:
+
+* Fixed issue with mDNS flooding when using IPv4 and IPv6
+* Fixed issue with reloading event handlers
+
+MISC:
+
+* Improved failure detection reliability under load
+* Reduced fsync() use in snapshot file
+* Improved snapshot file performance
+* Additional logging to help debug flapping
+
+## 0.6.2 (June 16, 2014)
+
+IMPROVEMENTS:
+
+* Added `syslog_facility` configuration to set facility
+
+BUG FIXES:
+
+* Fixed memory leak in in-memory stats system
+* Fixed issue that would cause syslog to deadlock
+
+MISC:
+
+* Fixed missing prefixes on some log messages
+* Docs fixes
+
+## 0.6.1 (May 29, 2014)
+
+BUG FIXES:
+
+* On Windows, a "failed to decode request header" error will no
+  longer be shown on every RPC request.
+
+* Avoiding holding a lock which can cause monitor/stream commands to
+  fail when an event handler is blocking
+
+* Fixing conflict response decoding errors
+
+IMPROVEMENTS:
+
+* Improved agent CLI usage documentation
+
+* Warn if an event handler is slow, potentially blocking other events
+
+## 0.6.0 (May 8, 2014)
+
+FEATURES:
+
+ * Support for key rotation when using encryption. This adds a new
+ `serf keys` command, and a `-keyring-file` configuration. Thanks
+ to @ryanuber.
+
+ * New `-tags-file` can be specified to persist changes to tags made
+ via the RPC interface. Thanks to @ryanuber.
+
+ * New `serf info` command to provide operator debugging information,
+ and to get info about the local node.
+
+ * Adding `-retry-join` flag to agent which enables retrying the join
+ until success or `-retry-max` attempts have been made.
+
+IMPROVEMENTS:
+
+ * New `-rejoin` flag can be used along with a snapshot file to
+ automatically rejoin a cluster.
+
+ * Agent uses circular buffer to invoke handlers, guards against unbounded
+ output lengths.
+
+ * Adding support for logging to syslog
+
+ * The SERF_RPC_ADDR environment variable can be used instead of the
+ `-rpc-addr` flags. Thanks to @lalyos [GH-209].
+
+ * `serf query` can now output the results in a JSON format.
+
+ * Unknown configuration directives generate an error [GH-186].
+ Thanks to @vincentbernat.
+
+BUG FIXES:
+
+ * Fixing environmental variables with invalid characters. [GH-200].
+ Thanks to @arschles.
+
+ * Fixing issue with tag changes with hard restart before
+   failure detection.
+
+ * Fixing issue with reconnect when using dynamic ports.
+
+MISC:
+
+ * Improved logging of various error messages
+
+ * Improved debian packaging. Thanks to @vincentbernat.
+
+## 0.5.0 (March 12, 2014)
+
+FEATURES:
+
+ * New `query` command provides a request/response mechanism to do realtime
+ queries across the cluster. [GH-139]
+
+ * Automatic conflict resolution. Serf will detect name conflicts, and use an
+ internal query to determine which node is in the minority and perform a shutdown.
+ [GH-167] [GH-119]
+
+ * New `reachability` command can be used to help diagnose network and configuration
+ issues.
+
+ * Added `member-reap` event to get notified of when Serf removes a failed or left
+ node from the cluster. The reap interval is controlled by `reconnect_timeout` and
+ `tombstone_timeout` respectively. [GH-172]
+
+IMPROVEMENTS:
+
+ * New Recipes section on the site to share Serf tips. Thanks to @ryanuber. [GH-177]
+
+ * `members` command has new `-name` filter flag. Thanks to @ryanuber [GH-164]
+
+ * New RPC command "members-filtered" to move filtering logic to the agent.
+ Thanks to @ryanuber. [GH-149]
+
+ * `reconnect_interval` and `reconnect_timeout` can be provided to configure
+ agent behavior for attempting to reconnect to failed nodes. [GH-155]
+
+ * `tombstone_interval` can be provided to configure the reap time for nodes
+ that have gracefully left. [GH_172]
+
+ * Agent can be provided `rpc_auth` config to require that RPC is authenticated.
+ All commands can take a `-rpc-auth` flag now. [GH-148]
+
+BUG FIXES:
+
+ * Fixed config folder in Upstart script. Thanks to @llchen223. [GH-174]
+
+ * Event handlers are correctly invoked when BusyBox is the shell. [GH-156]
+
+ * Event handlers were not being invoked with the correct SERF_TAG_* values
+ if tags were changed using the `tags` command. [GH-169]
+
+MISC:
+
+  * Support for protocol version 1 (Serf 0.2) has been removed. Serf 0.5 cannot
+  join a cluster that has members running version 0.2.
+
+## 0.4.5 (Febuary 25, 2014)
+
+FEATURES:
+
+ * New `tags` command is available to dynamically update tags without
+ reloading the agent. Thanks to @ryanuber. [GH-126]
 
 IMPROVEMENTS:
 
@@ -6,10 +164,22 @@ IMPROVEMENTS:
 
  * `members` can filter on any tag thanks to @hmrm [GH-124]
 
+ * Added vagrant demo to make a simple cluster
+
+ * `members` now columnizes the output thanks to @ryanuber [GH-138]
+
+ * Agent passes its own environment variables through thanks to @mcroydon [GH-142]
+
+ * `-iface` flag can be used to bind to interfaces [GH-145]
+
 BUG FIXES:
 
  * -config-dir would cause protocol to be set to 0 if there are no
  configuration files in the directory [GH-129]
+
+ * Event handlers can filter on 'member-update'
+
+ * User event handler appends new line, this was being omitted
 
 ## 0.4.1 (Febuary 3, 2014)
 
