@@ -2,8 +2,9 @@ package common
 
 import (
 	"encoding/json"
-	steno "github.com/cloudfoundry/gosteno"
 	"sync"
+
+	steno "github.com/cloudfoundry/gosteno"
 )
 
 type LogCounter struct {
@@ -20,15 +21,13 @@ func NewLogCounter() *LogCounter {
 
 func (lc *LogCounter) AddRecord(record *steno.Record) {
 	lc.Lock()
-	defer lc.Unlock()
-
 	lc.counts[record.Level.Name] += 1
+	lc.Unlock()
 }
 
 func (lc *LogCounter) GetCount(key string) int {
 	lc.Lock()
 	defer lc.Unlock()
-
 	return lc.counts[key]
 }
 
@@ -40,5 +39,7 @@ func (lc *LogCounter) GetCodec() steno.Codec {
 }
 
 func (lc *LogCounter) MarshalJSON() ([]byte, error) {
+	lc.Lock()
+	defer lc.Unlock()
 	return json.Marshal(lc.counts)
 }

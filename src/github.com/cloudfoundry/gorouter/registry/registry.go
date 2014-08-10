@@ -5,56 +5,35 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cloudfoundry/gorouter/stats"
 	steno "github.com/cloudfoundry/gosteno"
 	"github.com/cloudfoundry/yagnats"
 
 	"github.com/cloudfoundry/gorouter/config"
-	"github.com/cloudfoundry/gorouter/log"
 	"github.com/cloudfoundry/gorouter/route"
 )
 
-type Registry struct {
+type RouteRegistry struct {
 	sync.RWMutex
 
-	*steno.Logger
-
-	*stats.ActiveApps
-	*stats.TopApps
+	logger *steno.Logger
 
 	byUri map[route.Uri]*route.Pool
-
-	table map[tableKey]*tableEntry
 
 	pruneStaleDropletsInterval time.Duration
 	dropletStaleThreshold      time.Duration
 
 	messageBus yagnats.NATSClient
 
+	ticker           *time.Ticker
 	timeOfLastUpdate time.Time
 }
 
-type tableKey struct {
-	addr string
-	uri  route.Uri
-}
+func NewRouteRegistry(c *config.Config, mbus yagnats.NATSClient) *RouteRegistry {
+	r := &RouteRegistry{}
 
-type tableEntry struct {
-	endpoint  *route.Endpoint
-	updatedAt time.Time
-}
-
-func NewRegistry(c *config.Config, mbus yagnats.NATSClient) *Registry {
-	r := &Registry{}
-
-	r.Logger = steno.NewLogger("router.registry")
-
-	r.ActiveApps = stats.NewActiveApps()
-	r.TopApps = stats.NewTopApps()
+	r.logger = steno.NewLogger("router.registry")
 
 	r.byUri = make(map[route.Uri]*route.Pool)
-
-	r.table = make(map[tableKey]*tableEntry)
 
 	r.pruneStaleDropletsInterval = c.PruneStaleDropletsInterval
 	r.dropletStaleThreshold = c.DropletStaleThreshold
@@ -64,194 +43,145 @@ func NewRegistry(c *config.Config, mbus yagnats.NATSClient) *Registry {
 	return r
 }
 
-func (registry *Registry) Register(uri route.Uri, endpoint *route.Endpoint) {
-	registry.Lock()
-	defer registry.Unlock()
+func (r *RouteRegistry) Register(uri route.Uri, endpoint *route.Endpoint) {
+	t := time.Now()
+	r.Lock()
 
 	uri = uri.ToLower()
 
-	key := tableKey{
-		addr: endpoint.CanonicalAddr(),
-		uri:  uri,
-	}
-
-	var endpointToRegister *route.Endpoint
-
-	entry, found := registry.table[key]
-	if found {
-		endpointToRegister = entry.endpoint
-	} else {
-		endpointToRegister = endpoint
-		entry = &tableEntry{endpoint: endpoint}
-
-		registry.table[key] = entry
-	}
-
-	pool, found := registry.byUri[uri]
+	pool, found := r.byUri[uri]
 	if !found {
-		pool = route.NewPool()
-		registry.byUri[uri] = pool
+		pool = route.NewPool(r.dropletStaleThreshold / 4)
+		r.byUri[uri] = pool
 	}
 
-	pool.Add(endpointToRegister)
+	pool.Put(endpoint)
 
-	entry.updatedAt = time.Now()
-
-	registry.timeOfLastUpdate = time.Now()
+	r.timeOfLastUpdate = t
+	r.Unlock()
 }
 
-func (registry *Registry) Unregister(uri route.Uri, endpoint *route.Endpoint) {
-	registry.Lock()
-	defer registry.Unlock()
+func (r *RouteRegistry) Unregister(uri route.Uri, endpoint *route.Endpoint) {
+	r.Lock()
 
 	uri = uri.ToLower()
 
-	key := tableKey{
-		addr: endpoint.CanonicalAddr(),
-		uri:  uri,
+	pool, found := r.byUri[uri]
+	if found {
+		pool.Remove(endpoint)
+
+		if pool.IsEmpty() {
+			delete(r.byUri, uri)
+		}
 	}
 
-	registry.unregisterUri(key)
+	r.Unlock()
 }
 
-func (r *Registry) Lookup(uri route.Uri) (*route.Endpoint, bool) {
+func (r *RouteRegistry) Lookup(uri route.Uri) *route.Pool {
 	r.RLock()
-	defer r.RUnlock()
 
-	pool, ok := r.lookupByUri(uri)
-	if !ok {
-		return nil, false
-	}
-
-	return pool.Sample()
-}
-
-func (r *Registry) LookupByPrivateInstanceId(uri route.Uri, p string) (*route.Endpoint, bool) {
-	r.RLock()
-	defer r.RUnlock()
-
-	pool, ok := r.lookupByUri(uri)
-	if !ok {
-		return nil, false
-	}
-
-	return pool.FindByPrivateInstanceId(p)
-}
-
-func (r *Registry) lookupByUri(uri route.Uri) (*route.Pool, bool) {
 	uri = uri.ToLower()
-	pool, ok := r.byUri[uri]
-	return pool, ok
+	pool := r.byUri[uri]
+
+	r.RUnlock()
+
+	return pool
 }
 
-func (registry *Registry) StartPruningCycle() {
-	go registry.checkAndPrune()
-}
+func (r *RouteRegistry) StartPruningCycle() {
+	if r.pruneStaleDropletsInterval > 0 {
+		r.Lock()
+		r.ticker = time.NewTicker(r.pruneStaleDropletsInterval)
+		r.Unlock()
 
-func (registry *Registry) PruneStaleDroplets() {
-	if registry.isStateStale() {
-		log.Info("State is stale; NOT pruning")
-		registry.pauseStaleTracker()
-		return
+		go func() {
+			for {
+				select {
+				case <-r.ticker.C:
+					r.logger.Debug("Start to check and prune stale droplets")
+					if r.isStateStale() {
+						r.logger.Info("State is stale; NOT pruning")
+						r.pauseStaleTracker()
+						break
+					}
+
+					r.pruneStaleDroplets()
+
+				}
+			}
+		}()
 	}
-
-	registry.Lock()
-	defer registry.Unlock()
-
-	registry.pruneStaleDroplets()
 }
 
-func (r *Registry) CaptureRoutingRequest(x *route.Endpoint, t time.Time) {
-	if x.ApplicationId != "" {
-		r.ActiveApps.Mark(x.ApplicationId, t)
-		r.TopApps.Mark(x.ApplicationId, t)
+func (r *RouteRegistry) StopPruningCycle() {
+	r.Lock()
+	if r.ticker != nil {
+		r.ticker.Stop()
 	}
+	r.Unlock()
 }
 
-func (registry *Registry) NumUris() int {
+func (registry *RouteRegistry) NumUris() int {
 	registry.RLock()
-	defer registry.RUnlock()
+	uriCount := len(registry.byUri)
+	registry.RUnlock()
 
-	return len(registry.byUri)
+	return uriCount
 }
 
-func (r *Registry) TimeOfLastUpdate() time.Time {
-	return r.timeOfLastUpdate
-}
-
-func (r *Registry) NumEndpoints() int {
+func (r *RouteRegistry) TimeOfLastUpdate() time.Time {
 	r.RLock()
-	defer r.RUnlock()
+	t := r.timeOfLastUpdate
+	r.RUnlock()
 
-	mapForSize := make(map[string]bool)
-	for _, entry := range r.table {
-		mapForSize[entry.endpoint.CanonicalAddr()] = true
-	}
-
-	return len(mapForSize)
+	return t
 }
 
-func (r *Registry) MarshalJSON() ([]byte, error) {
+func (r *RouteRegistry) NumEndpoints() int {
+	r.RLock()
+	uris := make(map[string]struct{})
+	f := func(endpoint *route.Endpoint) {
+		uris[endpoint.CanonicalAddr()] = struct{}{}
+	}
+	for _, pool := range r.byUri {
+		pool.Each(f)
+	}
+	r.RUnlock()
+
+	return len(uris)
+}
+
+func (r *RouteRegistry) MarshalJSON() ([]byte, error) {
 	r.RLock()
 	defer r.RUnlock()
 
 	return json.Marshal(r.byUri)
 }
 
-func (registry *Registry) isStateStale() bool {
-	return !registry.messageBus.Ping()
+func (r *RouteRegistry) isStateStale() bool {
+	return !r.messageBus.Ping()
 }
 
-func (registry *Registry) pruneStaleDroplets() {
-	for key, entry := range registry.table {
-		if !registry.isEntryStale(entry) {
-			continue
-		}
-
-		log.Infof("Pruning stale droplet: %v, uri: %s", entry, key.uri)
-		registry.unregisterUri(key)
-	}
-}
-
-func (r *Registry) isEntryStale(entry *tableEntry) bool {
-	return entry.updatedAt.Add(r.dropletStaleThreshold).Before(time.Now())
-}
-
-func (registry *Registry) pauseStaleTracker() {
-	for _, entry := range registry.table {
-		entry.updatedAt = time.Now()
-	}
-}
-
-func (r *Registry) checkAndPrune() {
-	if r.pruneStaleDropletsInterval == 0 {
-		return
-	}
-
-	tick := time.Tick(r.pruneStaleDropletsInterval)
-	for {
-		select {
-		case <-tick:
-			log.Debug("Start to check and prune stale droplets")
-			r.PruneStaleDroplets()
+func (r *RouteRegistry) pruneStaleDroplets() {
+	r.Lock()
+	pruneTime := time.Now().Add(-r.dropletStaleThreshold)
+	for k, pool := range r.byUri {
+		pool.PruneBefore(pruneTime)
+		if pool.IsEmpty() {
+			delete(r.byUri, k)
 		}
 	}
+	r.Unlock()
 }
 
-func (registry *Registry) unregisterUri(key tableKey) {
-	entry, found := registry.table[key]
-	if !found {
-		return
+func (r *RouteRegistry) pauseStaleTracker() {
+	r.Lock()
+	t := time.Now()
+
+	for _, pool := range r.byUri {
+		pool.MarkUpdated(t)
 	}
 
-	endpoints, found := registry.byUri[key.uri]
-	if found {
-		endpoints.Remove(entry.endpoint)
-
-		if endpoints.IsEmpty() {
-			delete(registry.byUri, key.uri)
-		}
-	}
-
-	delete(registry.table, key)
+	r.Unlock()
 }

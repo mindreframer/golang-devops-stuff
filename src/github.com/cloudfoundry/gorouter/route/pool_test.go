@@ -1,142 +1,155 @@
-package route
+package route_test
 
 import (
-	. "launchpad.net/gocheck"
-	"math"
+	. "github.com/cloudfoundry/gorouter/route"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+	"time"
 )
 
-type PSuite struct{}
+var _ = Describe("Pool", func() {
+	var pool *Pool
 
-func init() {
-	Suite(&PSuite{})
-}
+	BeforeEach(func() {
+		pool = NewPool(2 * time.Minute)
+	})
 
-func (s *PSuite) TestPoolAddingAndRemoving(c *C) {
-	pool := NewPool()
+	Context("Put", func() {
+		It("adds endpoints", func() {
+			endpoint := &Endpoint{}
 
-	endpoint := &Endpoint{}
+			b := pool.Put(endpoint)
+			Ω(b).Should(BeTrue())
+		})
 
-	pool.Add(endpoint)
+		It("handles duplicate endpoints", func() {
+			endpoint := &Endpoint{}
 
-	foundEndpoint, found := pool.Sample()
-	c.Assert(found, Equals, true)
-	c.Assert(foundEndpoint, Equals, endpoint)
+			pool.Put(endpoint)
+			b := pool.Put(endpoint)
+			Ω(b).Should(BeFalse())
+		})
 
-	pool.Remove(endpoint)
+		It("handles equivalent (duplicate) endpoints", func() {
+			endpoint1 := NewEndpoint("", "1.2.3.4", 5678, "", nil)
+			endpoint2 := NewEndpoint("", "1.2.3.4", 5678, "", nil)
 
-	_, found = pool.Sample()
-	c.Assert(found, Equals, false)
-}
+			pool.Put(endpoint1)
+			Ω(pool.Put(endpoint2)).Should(BeFalse())
+		})
+	})
 
-func (s *PSuite) TestPoolAddingDoesNotDuplicate(c *C) {
-	pool := NewPool()
+	Context("Remove", func() {
+		It("removes endpoints", func() {
+			endpoint := &Endpoint{}
+			pool.Put(endpoint)
 
-	endpoint := &Endpoint{}
+			b := pool.Remove(endpoint)
+			Ω(b).Should(BeTrue())
+			Ω(pool.IsEmpty()).Should(BeTrue())
+		})
 
-	pool.Add(endpoint)
-	pool.Add(endpoint)
+		It("fails to remove an endpoint that doesn't exist", func() {
+			endpoint := &Endpoint{}
 
-	foundEndpoint, found := pool.Sample()
-	c.Assert(found, Equals, true)
-	c.Assert(foundEndpoint, Equals, endpoint)
+			b := pool.Remove(endpoint)
+			Ω(b).Should(BeFalse())
+		})
+	})
 
-	pool.Remove(endpoint)
+	Context("IsEmpty", func() {
+		It("starts empty", func() {
+			Ω(pool.IsEmpty()).To(BeTrue())
+		})
 
-	_, found = pool.Sample()
-	c.Assert(found, Equals, false)
-}
+		It("not empty after adding an endpoint", func() {
+			endpoint := &Endpoint{}
+			pool.Put(endpoint)
 
-func (s *PSuite) TestPoolAddingEquivalentEndpointsDoesNotDuplicate(c *C) {
-	pool := NewPool()
+			Ω(pool.IsEmpty()).Should(BeFalse())
+		})
 
-	endpoint1 := &Endpoint{Host: "1.2.3.4", Port: 5678}
-	endpoint2 := &Endpoint{Host: "1.2.3.4", Port: 5678}
+		It("is empty after removing everything", func() {
+			endpoint := &Endpoint{}
+			pool.Put(endpoint)
+			pool.Remove(endpoint)
 
-	pool.Add(endpoint1)
-	pool.Add(endpoint2)
+			Ω(pool.IsEmpty()).To(BeTrue())
+		})
+	})
 
-	_, found := pool.Sample()
-	c.Assert(found, Equals, true)
+	Context("PruneBefore", func() {
+		It("prunes endpoints that haven't been updated", func() {
+			e1 := NewEndpoint("", "1.2.3.4", 5678, "", nil)
+			e2 := NewEndpoint("", "5.6.7.8", 1234, "", nil)
+			pool.Put(e1)
+			pool.Put(e2)
 
-	pool.Remove(endpoint1)
+			t := time.Now().Add(1 * time.Second)
+			pool.PruneBefore(t)
+			Ω(pool.IsEmpty()).Should(BeTrue())
+		})
 
-	_, found = pool.Sample()
-	c.Assert(found, Equals, false)
-}
+		It("does not prune updated endpoints", func() {
+			e1 := NewEndpoint("", "1.2.3.4", 5678, "", nil)
+			e2 := NewEndpoint("", "5.6.7.8", 1234, "", nil)
+			pool.Put(e1)
+			pool.Put(e2)
 
-func (s *PSuite) TestPoolIsEmptyInitially(c *C) {
-	c.Assert(NewPool().IsEmpty(), Equals, true)
-}
+			t := time.Now().Add(-1 * time.Second)
+			pool.PruneBefore(t)
+			Ω(pool.IsEmpty()).Should(BeFalse())
 
-func (s *PSuite) TestPoolIsEmptyAfterRemovingEverything(c *C) {
-	pool := NewPool()
+			iter := pool.Endpoints("")
+			n1 := iter.Next()
+			n2 := iter.Next()
+			Ω(n1).ShouldNot(Equal(n2))
+		})
+	})
 
-	endpoint := &Endpoint{}
+	Context("MarkUpdated", func() {
+		It("updates all endpoints", func() {
+			e1 := NewEndpoint("", "1.2.3.4", 5678, "", nil)
 
-	pool.Add(endpoint)
+			pool.Put(e1)
 
-	c.Assert(pool.IsEmpty(), Equals, false)
+			t := time.Time{}.Add(1 * time.Second)
+			pool.PruneBefore(t)
+			Ω(pool.IsEmpty()).Should(BeFalse())
 
-	pool.Remove(endpoint)
+			pool.MarkUpdated(t)
+			pool.PruneBefore(t)
+			Ω(pool.IsEmpty()).Should(BeFalse())
 
-	c.Assert(pool.IsEmpty(), Equals, true)
-}
+			pool.PruneBefore(t.Add(1 * time.Microsecond))
+			Ω(pool.IsEmpty()).Should(BeTrue())
+		})
+	})
 
-func (s *PSuite) TestPoolFindByPrivateInstanceId(c *C) {
-	pool := NewPool()
+	Context("Each", func() {
+		It("applies a function to each endpoint", func() {
+			e1 := NewEndpoint("", "1.2.3.4", 5678, "", nil)
+			e2 := NewEndpoint("", "5.6.7.8", 1234, "", nil)
+			pool.Put(e1)
+			pool.Put(e2)
 
-	endpointFoo := &Endpoint{Host: "1.2.3.4", Port: 1234, PrivateInstanceId: "foo"}
-	endpointBar := &Endpoint{Host: "5.6.7.8", Port: 5678, PrivateInstanceId: "bar"}
+			endpoints := make(map[string]*Endpoint)
+			pool.Each(func(e *Endpoint) {
+				endpoints[e.CanonicalAddr()] = e
+			})
+			Ω(endpoints).Should(HaveLen(2))
+			Ω(endpoints[e1.CanonicalAddr()]).Should(Equal(e1))
+			Ω(endpoints[e2.CanonicalAddr()]).Should(Equal(e2))
+		})
+	})
 
-	pool.Add(endpointFoo)
-	pool.Add(endpointBar)
+	It("marshals json", func() {
+		e := NewEndpoint("", "1.2.3.4", 5678, "", nil)
+		pool.Put(e)
 
-	foundEndpoint, found := pool.FindByPrivateInstanceId("foo")
-	c.Assert(found, Equals, true)
-	c.Assert(foundEndpoint, Equals, endpointFoo)
+		json, err := pool.MarshalJSON()
+		Ω(err).ToNot(HaveOccurred())
 
-	foundEndpoint, found = pool.FindByPrivateInstanceId("bar")
-	c.Assert(found, Equals, true)
-	c.Assert(foundEndpoint, Equals, endpointBar)
-
-	_, found = pool.FindByPrivateInstanceId("quux")
-	c.Assert(found, Equals, false)
-}
-
-func (s *PSuite) TestPoolSamplingIsRandomish(c *C) {
-	pool := NewPool()
-
-	endpoint1 := &Endpoint{Host: "1.2.3.4", Port: 5678}
-	endpoint2 := &Endpoint{Host: "5.6.7.8", Port: 1234}
-
-	pool.Add(endpoint1)
-	pool.Add(endpoint2)
-
-	var occurrences1, occurrences2 int
-
-	for i := 0; i < 200; i += 1 {
-		foundEndpoint, _ := pool.Sample()
-		if foundEndpoint == endpoint1 {
-			occurrences1 += 1
-		} else {
-			occurrences2 += 1
-		}
-	}
-
-	c.Assert(occurrences1, Not(Equals), 0)
-	c.Assert(occurrences2, Not(Equals), 0)
-
-	// they should be arbitrarily close
-	c.Assert(math.Abs(float64(occurrences1-occurrences2)) < 50, Equals, true)
-}
-
-func (s *PSuite) TestPoolMarshalsAsJSON(c *C) {
-	pool := NewPool()
-
-	pool.Add(&Endpoint{Host: "1.2.3.4", Port: 5678})
-
-	json, err := pool.MarshalJSON()
-	c.Assert(err, IsNil)
-
-	c.Assert(string(json), Equals, `["1.2.3.4:5678"]`)
-}
+		Ω(string(json)).To(Equal(`["1.2.3.4:5678"]`))
+	})
+})

@@ -1,26 +1,29 @@
 package test
 
 import (
+	"github.com/cloudfoundry/gorouter/common"
+	"github.com/cloudfoundry/gorouter/route"
+	"github.com/cloudfoundry/yagnats"
+	. "github.com/onsi/gomega"
+
 	"encoding/json"
 	"errors"
 	"fmt"
-	. "launchpad.net/gocheck"
 	"net/http"
+	"sync"
 	"time"
-
-	"github.com/cloudfoundry/gorouter/common"
-	"github.com/cloudfoundry/yagnats"
-	"github.com/cloudfoundry/gorouter/route"
 )
 
 type TestApp struct {
+	mutex sync.Mutex
+
 	port       uint16      // app listening port
 	rPort      uint16      // router listening port
 	urls       []route.Uri // host registered host name
 	mbusClient yagnats.NATSClient
 	tags       map[string]string
 	mux        *http.ServeMux
-	stopped	   bool
+	stopped    bool
 }
 
 func NewTestApp(urls []route.Uri, rPort uint16, mbusClient yagnats.NATSClient, tags map[string]string) *TestApp {
@@ -60,10 +63,10 @@ func (a *TestApp) Listen() {
 	go server.ListenAndServe()
 }
 
-func (a *TestApp) RegisterRepeatedly(duration time.Duration){
-	a.stopped = false
+func (a *TestApp) RegisterRepeatedly(duration time.Duration) {
+	a.start()
 	for {
-		if a.stopped {
+		if a.isStopped() {
 			break
 		}
 		a.Register()
@@ -72,6 +75,7 @@ func (a *TestApp) RegisterRepeatedly(duration time.Duration){
 }
 
 func (a *TestApp) Register() {
+	uuid, _ := common.GenerateUUID()
 	rm := registerMessage{
 		Host: "localhost",
 		Port: a.port,
@@ -80,7 +84,7 @@ func (a *TestApp) Register() {
 		Dea:  "dea",
 		App:  "0",
 
-		PrivateInstanceId: common.GenerateUUID(),
+		PrivateInstanceId: uuid,
 	}
 
 	b, _ := json.Marshal(rm)
@@ -99,12 +103,13 @@ func (a *TestApp) Unregister() {
 
 	b, _ := json.Marshal(rm)
 	a.mbusClient.Publish("router.unregister", b)
-	a.stopped = true
+
+	a.stop()
 }
 
-func (a *TestApp) VerifyAppStatus(status int, c *C) {
+func (a *TestApp) VerifyAppStatus(status int) {
 	check := a.CheckAppStatus(status)
-	c.Assert(check, IsNil)
+	Ω(check).ShouldNot(HaveOccurred())
 }
 
 func (a *TestApp) CheckAppStatus(status int) error {
@@ -123,15 +128,23 @@ func (a *TestApp) CheckAppStatus(status int) error {
 	return nil
 }
 
-// Types imported from router
-const (
-	VcapBackendHeader = "X-Vcap-Backend"
-	VcapRouterHeader  = "X-Vcap-Router"
-	VcapTraceHeader   = "X-Vcap-Trace"
+func (a *TestApp) start() {
+	a.mutex.Lock()
+	a.stopped = false
+	a.mutex.Unlock()
+}
 
-	VcapCookieId    = "__VCAP_ID__"
-	StickyCookieKey = "JSESSIONID"
-)
+func (a *TestApp) stop() {
+	a.mutex.Lock()
+	a.stopped = true
+	a.mutex.Unlock()
+}
+
+func (a *TestApp) isStopped() bool {
+	a.mutex.Lock()
+	defer a.mutex.Unlock()
+	return a.stopped
+}
 
 type registerMessage struct {
 	Host string            `json:"host"`

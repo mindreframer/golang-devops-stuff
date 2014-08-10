@@ -1,77 +1,79 @@
-package stats
+package stats_test
 
 import (
-	. "launchpad.net/gocheck"
+	. "github.com/cloudfoundry/gorouter/stats"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
 	"time"
 )
 
-type TopAppsSuite struct {
-	*TopApps
-}
+var _ = Describe("TopApps", func() {
 
-var _ = Suite(&TopAppsSuite{})
+	var topApps *TopApps
 
-func (s *TopAppsSuite) SetUpTest(c *C) {
-	s.TopApps = NewTopApps()
-}
+	BeforeEach(func() {
+		topApps = NewTopApps()
+	})
 
-func (s *TopAppsSuite) checkHeapLen(c *C, n int) {
-	c.Check(s.t.Len(), Equals, n)
-	c.Check(s.n.Len(), Equals, n)
-}
+	It("marks application ids", func() {
+		topApps.Mark("a", time.Unix(1, 0))
+		topApps.Mark("b", time.Unix(1, 0))
+		apps := topApps.TopSince(time.Unix(0, 0), 5)
+		Ω(apps).To(HaveLen(2))
+	})
 
-func (s *TopAppsSuite) TestMark(c *C) {
-	s.Mark("a", time.Unix(1, 0))
-	s.checkHeapLen(c, 1)
+	It("mark updates existing application ids", func() {
+		topApps.Mark("b", time.Unix(1, 0))
+		topApps.Mark("b", time.Unix(1, 0))
 
-	s.Mark("b", time.Unix(1, 0))
-	s.checkHeapLen(c, 2)
+		apps := topApps.TopSince(time.Unix(0, 0), 5)
+		Ω(apps).To(HaveLen(1))
+	})
 
-	s.Mark("b", time.Unix(1, 0))
-	s.checkHeapLen(c, 2)
-}
-
-func (s *TopAppsSuite) TestTrim(c *C) {
-	for i, x := range []string{"a", "b", "c"} {
-		s.Mark(x, time.Unix(int64(i), 0))
-	}
-
-	s.checkHeapLen(c, 3)
-
-	s.Trim(time.Unix(0, 0))
-	s.checkHeapLen(c, 2)
-
-	s.Trim(time.Unix(1, 0))
-	s.checkHeapLen(c, 1)
-
-	s.Trim(time.Unix(2, 0))
-	s.checkHeapLen(c, 0)
-
-	s.Trim(time.Unix(3, 0))
-	s.checkHeapLen(c, 0)
-}
-
-func (s *TopAppsSuite) TestTopSince(c *C) {
-	f := func(x ...topAppsTopEntry) []topAppsTopEntry {
-		if x == nil {
-			x = make([]topAppsTopEntry, 0)
+	It("trims aging application ids", func() {
+		for i, x := range []string{"a", "b", "c"} {
+			topApps.Mark(x, time.Unix(int64(i+1), 0))
 		}
-		return x
-	}
 
-	g := func(x string, y int64) topAppsTopEntry {
-		return topAppsTopEntry{x, y}
-	}
+		apps := topApps.TopSince(time.Unix(0, 0), 5)
+		Ω(apps).To(HaveLen(3))
 
-	x := []string{"a", "b", "c"}
-	for i, y := range x {
-		for j := 0; j < len(x); j++ {
-			s.Mark(y, time.Unix(int64(i+j), 0))
+		topApps.Trim(time.Unix(1, 0))
+		apps = topApps.TopSince(time.Unix(1, 0), 5)
+		Ω(apps).To(HaveLen(2))
+
+		topApps.Trim(time.Unix(2, 0))
+		apps = topApps.TopSince(time.Unix(2, 0), 5)
+		Ω(apps).To(HaveLen(1))
+
+		topApps.Trim(time.Unix(3, 0))
+		apps = topApps.TopSince(time.Unix(3, 0), 5)
+		Ω(apps).To(HaveLen(0))
+	})
+
+	It("reports top application ids", func() {
+		f := func(x ...TopAppsTopEntry) []TopAppsTopEntry {
+			if x == nil {
+				x = make([]TopAppsTopEntry, 0)
+			}
+			return x
 		}
-	}
 
-	c.Check(s.TopSince(time.Unix(2, 0), 3), DeepEquals, f(g("c", 3), g("b", 2), g("a", 1)))
-	c.Check(s.TopSince(time.Unix(3, 0), 3), DeepEquals, f(g("c", 2), g("b", 1)))
-	c.Check(s.TopSince(time.Unix(4, 0), 3), DeepEquals, f(g("c", 1)))
-	c.Check(s.TopSince(time.Unix(5, 0), 3), DeepEquals, f())
-}
+		g := func(x string, y int64) TopAppsTopEntry {
+			return TopAppsTopEntry{x, y}
+		}
+
+		x := []string{"a", "b", "c"}
+		for i, y := range x {
+			for j := 0; j < len(x); j++ {
+				topApps.Mark(y, time.Unix(int64(i+j), 0))
+			}
+		}
+
+		Ω(topApps.TopSince(time.Unix(2, 0), 3)).To(Equal(f(g("c", 3), g("b", 2), g("a", 1))))
+		Ω(topApps.TopSince(time.Unix(3, 0), 3)).To(Equal(f(g("c", 2), g("b", 1))))
+		Ω(topApps.TopSince(time.Unix(4, 0), 3)).To(Equal(f(g("c", 1))))
+		Ω(topApps.TopSince(time.Unix(5, 0), 3)).To(Equal(f()))
+	})
+})

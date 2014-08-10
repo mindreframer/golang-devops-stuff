@@ -1,29 +1,15 @@
-package common
+package common_test
 
 import (
-	. "launchpad.net/gocheck"
-	"sync"
+	. "github.com/cloudfoundry/gorouter/common"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
 
-type HealthzSuite struct {
-}
-
-var _ = Suite(&HealthzSuite{})
-
-func (s *HealthzSuite) SetUpTest(c *C) {
-	Component = VcapComponent{
-		Config: map[string]interface{}{"ip": "localhost", "port": 8080},
-	}
-}
-
-func (s *HealthzSuite) TearDownTest(c *C) {
-	Component = VcapComponent{}
-}
-
-func (s *HealthzSuite) TestJsonMarshal(c *C) {
-	healthz := &Healthz{
-		LockableObject: &sync.Mutex{},
-	}
-	ok := healthz.Value()
-	c.Assert(ok, Equals, "ok")
-}
+var _ = Describe("Healthz", func() {
+	It("has a Value", func() {
+		healthz := &Healthz{}
+		ok := healthz.Value()
+		Ω(ok).Should(Equal("ok"))
+	})
+})

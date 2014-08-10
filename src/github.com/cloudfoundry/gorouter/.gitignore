@@ -7,3 +7,6 @@ bin/*
 /tmp
 *.iml
 .idea/
+tags
+.DS_Store
+*.coverprofile

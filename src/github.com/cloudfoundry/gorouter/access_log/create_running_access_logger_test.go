@@ -1,42 +1,49 @@
-package access_log
+package access_log_test
 
 import (
-	. "launchpad.net/gocheck"
+	. "github.com/cloudfoundry/gorouter/access_log"
+
 	"github.com/cloudfoundry/gorouter/config"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
 
-type CreateRunningAccessLoggerSuite struct{}
-var _ = Suite(&CreateRunningAccessLoggerSuite{})
+var _ = Describe("AccessLog", func() {
 
-func (s *CreateRunningAccessLoggerSuite) TestCreateNullAccessLoggerIfNoAccesLogAndNoLoggregatorUrl(c *C) {
-	config := config.DefaultConfig()
-	c.Assert(CreateRunningAccessLogger(config), FitsTypeOf, &NullAccessLogger{})
-}
+	It("creates null access loger if no access log and no loggregregator url", func() {
+		config := config.DefaultConfig()
+		Ω(CreateRunningAccessLogger(config)).To(BeAssignableToTypeOf(&NullAccessLogger{}))
+	})
 
-func (s *CreateRunningAccessLoggerSuite) TestCreatesRealAccessLoggerIfNoAccesLogButLoggregatorUrl(c *C) {
-	config := config.DefaultConfig()
-	config.LoggregatorConfig.Url = "10.10.3.13:4325"
-	config.AccessLog = ""
-	c.Assert(CreateRunningAccessLogger(config), FitsTypeOf, &FileAndLoggregatorAccessLogger{})
-}
+	It("creates an access log when loggegrator url specified", func() {
+		config := config.DefaultConfig()
+		config.LoggregatorConfig.Url = "10.10.3.13:4325"
+		config.AccessLog = ""
 
-func (s *CreateRunningAccessLoggerSuite) TestCreatesRealAccessLoggerIfAccesLogButNoLoggregatorUrl(c *C) {
-	config := config.DefaultConfig()
-	config.AccessLog = "/dev/null"
-	c.Assert(CreateRunningAccessLogger(config), FitsTypeOf, &FileAndLoggregatorAccessLogger{})
-}
+		Ω(CreateRunningAccessLogger(config)).To(BeAssignableToTypeOf(&FileAndLoggregatorAccessLogger{}))
+	})
 
-func (s *CreateRunningAccessLoggerSuite) TestCreatesRealAccessLoggerIfBothAccesLogAndLoggregatorUrl(c *C) {
-	config := config.DefaultConfig()
-	config.LoggregatorConfig.Url = "10.10.3.13:4325"
-	config.AccessLog = "/dev/null"
-	c.Assert(CreateRunningAccessLogger(config), FitsTypeOf, &FileAndLoggregatorAccessLogger{})
-}
+	It("creates an access log if an access log is specified", func() {
+		config := config.DefaultConfig()
+		config.AccessLog = "/dev/null"
 
-func (s *CreateRunningAccessLoggerSuite) TestPanicsIfInvalidAccessLogLocation(c *C) {
-	config := config.DefaultConfig()
-	config.AccessLog = "/this\\should/panic"
-	c.Assert(func() {
-			CreateRunningAccessLogger(config)
-		}, PanicMatches, "open /this\\\\should/panic: no such file or directory")
-}
+		Ω(CreateRunningAccessLogger(config)).To(BeAssignableToTypeOf(&FileAndLoggregatorAccessLogger{}))
+	})
+
+	It("creates an AccessLogger if both access log and loggregator url are specififed", func() {
+		config := config.DefaultConfig()
+		config.LoggregatorConfig.Url = "10.10.3.13:4325"
+		config.AccessLog = "/dev/null"
+
+		Ω(CreateRunningAccessLogger(config)).To(BeAssignableToTypeOf(&FileAndLoggregatorAccessLogger{}))
+	})
+
+	It("reports an error if the access log location is invalid", func() {
+		config := config.DefaultConfig()
+		config.AccessLog = "/this\\is/illegal"
+
+		a, err := CreateRunningAccessLogger(config)
+		Ω(err).To(HaveOccurred())
+		Ω(a).To(BeNil())
+	})
+})

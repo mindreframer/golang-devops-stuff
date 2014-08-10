@@ -1,110 +1,96 @@
-package http
+package http_test
 
 import (
-	. "launchpad.net/gocheck"
+	. "github.com/cloudfoundry/gorouter/common/http"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
 	"net"
 	"net/http"
 )
 
-type BasicAuthSuite struct {
-	Listener net.Listener
-}
+var _ = Describe("http", func() {
+	var listener net.Listener
 
-var _ = Suite(&BasicAuthSuite{})
+	AfterEach(func() {
+		if listener != nil {
+			listener.Close()
+		}
+	})
 
-func (s *BasicAuthSuite) TearDownTest(c *C) {
-	if s.Listener != nil {
-		s.Listener.Close()
-	}
-}
+	bootstrap := func(x Authenticator) *http.Request {
+		var err error
 
-func (s *BasicAuthSuite) Bootstrap(x Authenticator) *http.Request {
-	var err error
+		h := func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}
 
-	h := func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}
+		y := &BasicAuth{http.HandlerFunc(h), x}
 
-	y := &BasicAuth{http.HandlerFunc(h), x}
+		z := &http.Server{Handler: y}
 
-	z := &http.Server{Handler: y}
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		Ω(err).ShouldNot(HaveOccurred())
 
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		panic(err)
-	}
+		go z.Serve(l)
 
-	go z.Serve(l)
+		// Keep listener around such that test teardown can close it
+		listener = l
 
-	// Keep listener around such that test teardown can close it
-	s.Listener = l
-
-	r, err := http.NewRequest("GET", "http://"+l.Addr().String(), nil)
-	if err != nil {
-		panic(err)
+		r, err := http.NewRequest("GET", "http://"+l.Addr().String(), nil)
+		Ω(err).ShouldNot(HaveOccurred())
+		return r
 	}
 
-	return r
-}
+	Context("Unauthorized", func() {
+		It("without credentials", func() {
+			req := bootstrap(nil)
 
-func (s *BasicAuthSuite) TestNoCredentials(c *C) {
-	req := s.Bootstrap(nil)
+			resp, err := http.DefaultClient.Do(req)
+			Ω(err).ShouldNot(HaveOccurred())
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
+			Ω(resp.StatusCode).Should(Equal(http.StatusUnauthorized))
+		})
 
-	c.Check(resp.StatusCode, Equals, http.StatusUnauthorized)
-}
+		It("with invalid header", func() {
+			req := bootstrap(nil)
 
-func (s *BasicAuthSuite) TestInvalidHeader(c *C) {
-	req := s.Bootstrap(nil)
+			req.Header.Set("Authorization", "invalid")
 
-	req.Header.Set("Authorization", "invalid")
+			resp, err := http.DefaultClient.Do(req)
+			Ω(err).ShouldNot(HaveOccurred())
+			Ω(resp.StatusCode).Should(Equal(http.StatusUnauthorized))
+		})
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
+		It("with bad credentials", func() {
+			f := func(u, p string) bool {
+				Ω(u).Should(Equal("user"))
+				Ω(p).Should(Equal("bad"))
+				return false
+			}
 
-	c.Check(resp.StatusCode, Equals, http.StatusUnauthorized)
-}
+			req := bootstrap(f)
 
-func (s *BasicAuthSuite) TestBadCredentials(c *C) {
-	f := func(u, p string) bool {
-		c.Check(u, Equals, "user")
-		c.Check(p, Equals, "bad")
-		return false
-	}
+			req.SetBasicAuth("user", "bad")
 
-	req := s.Bootstrap(f)
+			resp, err := http.DefaultClient.Do(req)
+			Ω(err).ShouldNot(HaveOccurred())
+			Ω(resp.StatusCode).Should(Equal(http.StatusUnauthorized))
+		})
+	})
+	It("succeeds with good credentials", func() {
+		f := func(u, p string) bool {
+			Ω(u).Should(Equal("user"))
+			Ω(p).Should(Equal("good"))
+			return true
+		}
 
-	req.SetBasicAuth("user", "bad")
+		req := bootstrap(f)
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
+		req.SetBasicAuth("user", "good")
 
-	c.Check(resp.StatusCode, Equals, http.StatusUnauthorized)
-}
-
-func (s *BasicAuthSuite) TestGoodCredentials(c *C) {
-	f := func(u, p string) bool {
-		c.Check(u, Equals, "user")
-		c.Check(p, Equals, "good")
-		return true
-	}
-
-	req := s.Bootstrap(f)
-
-	req.SetBasicAuth("user", "good")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		panic(err)
-	}
-
-	c.Check(resp.StatusCode, Equals, http.StatusOK)
-}
+		resp, err := http.DefaultClient.Do(req)
+		Ω(err).ShouldNot(HaveOccurred())
+		Ω(resp.StatusCode).Should(Equal(http.StatusOK))
+	})
+})

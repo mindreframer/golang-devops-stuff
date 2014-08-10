@@ -1,116 +1,125 @@
-package config
+package config_test
 
 import (
-	. "launchpad.net/gocheck"
+	. "github.com/cloudfoundry/gorouter/config"
+
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
 	"time"
 )
 
-type ConfigSuite struct {
-	*Config
-}
+var _ = Describe("Config", func() {
+	var config *Config
 
-var _ = Suite(&ConfigSuite{})
+	BeforeEach(func() {
+		config = DefaultConfig()
+	})
 
-func (s *ConfigSuite) SetUpTest(c *C) {
-	s.Config = DefaultConfig()
-}
+	Describe("Initialize", func() {
 
-func (s *ConfigSuite) TestStatus(c *C) {
-	var b = []byte(`
+		It("sets status config", func() {
+			var b = []byte(`
 status:
   port: 1234
   user: user
   pass: pass
 `)
 
-	c.Check(s.Status.Port, Equals, uint16(8082))
-	c.Check(s.Status.User, Equals, "")
-	c.Check(s.Status.Pass, Equals, "")
+			config.Initialize(b)
 
-	s.Config.Initialize(b)
+			Ω(config.Status.Port).To(Equal(uint16(1234)))
+			Ω(config.Status.User).To(Equal("user"))
+			Ω(config.Status.Pass).To(Equal("pass"))
 
-	c.Check(s.Status.Port, Equals, uint16(1234))
-	c.Check(s.Status.User, Equals, "user")
-	c.Check(s.Status.Pass, Equals, "pass")
-}
+		})
 
-func (s *ConfigSuite) TestEndpointTimeout(c *C) {
-	var b = []byte(`
+		It("sets endpoint timeout", func() {
+			var b = []byte(`
 endpoint_timeout: 10
 `)
 
-	c.Check(s.EndpointTimeoutInSeconds, Equals, 60)
+			config.Initialize(b)
 
-	s.Config.Initialize(b)
+			Ω(config.EndpointTimeoutInSeconds).To(Equal(10))
+		})
 
-	c.Check(s.EndpointTimeoutInSeconds, Equals, 10)
-}
+		It("sets drain timeout", func() {
+			var b = []byte(`
+drain_timeout: 10
+`)
 
-func (s *ConfigSuite) TestNats(c *C) {
-	var b = []byte(`
+			config.Initialize(b)
+
+			Ω(config.DrainTimeoutInSeconds).To(Equal(10))
+		})
+
+		It("sets nats config", func() {
+			var b = []byte(`
 nats:
   - host: remotehost
     port: 4223
     user: user
     pass: pass
 `)
+			config.Initialize(b)
 
-	c.Assert(len(s.Nats), Not(Equals), 0)
-	c.Check(s.Nats[0].Host, Equals, "localhost")
-	c.Check(s.Nats[0].Port, Equals, uint16(4222))
-	c.Check(s.Nats[0].User, Equals, "")
-	c.Check(s.Nats[0].Pass, Equals, "")
+			Ω(config.Nats).To(HaveLen(1))
+			Ω(config.Nats[0].Host).To(Equal("remotehost"))
+			Ω(config.Nats[0].Port).To(Equal(uint16(4223)))
+			Ω(config.Nats[0].User).To(Equal("user"))
+			Ω(config.Nats[0].Pass).To(Equal("pass"))
+		})
 
-	s.Config.Initialize(b)
-
-	c.Assert(len(s.Nats), Not(Equals), 0)
-	c.Check(s.Nats[0].Host, Equals, "remotehost")
-	c.Check(s.Nats[0].Port, Equals, uint16(4223))
-	c.Check(s.Nats[0].User, Equals, "user")
-	c.Check(s.Nats[0].Pass, Equals, "pass")
-}
-
-func (s *ConfigSuite) TestLogging(c *C) {
-	var b = []byte(`
+		It("sets logging config", func() {
+			var b = []byte(`
 logging:
   file: /tmp/file
   syslog: syslog
   level: debug2
 `)
+			config.Initialize(b)
 
-	c.Check(s.Logging.File, Equals, "")
-	c.Check(s.Logging.Syslog, Equals, "")
-	c.Check(s.Logging.Level, Equals, "debug")
+			Ω(config.Logging.File).To(Equal("/tmp/file"))
+			Ω(config.Logging.Syslog).To(Equal("syslog"))
+			Ω(config.Logging.Level).To(Equal("debug2"))
+		})
 
-	s.Config.Initialize(b)
-
-	c.Check(s.Logging.File, Equals, "/tmp/file")
-	c.Check(s.Logging.Syslog, Equals, "syslog")
-	c.Check(s.Logging.Level, Equals, "debug2")
-}
-
-func (s *ConfigSuite) TestLoggregator(c *C) {
-	var b = []byte(`
+		It("configures loggreggator", func() {
+			var b = []byte(`
 loggregatorConfig:
   url: 10.10.16.14:3456
 `)
 
-	c.Check(s.LoggregatorConfig.Url, Equals, "")
+			config.Initialize(b)
 
-	s.Config.Initialize(b)
+			Ω(config.LoggregatorConfig.Url).To(Equal("10.10.16.14:3456"))
 
-	c.Check(s.LoggregatorConfig.Url, Equals, "10.10.16.14:3456")
-}
+		})
 
-func (s *ConfigSuite) TestConfig(c *C) {
-	var b = []byte(`
+		It("sets the rest of config", func() {
+			var b = []byte(`
 port: 8082
 index: 1
-pidfile: /tmp/pidfile
 go_max_procs: 2
 trace_key: "foo"
 access_log: "/tmp/access_log"
+`)
 
+			config.Initialize(b)
+
+			Ω(config.Port).To(Equal(uint16(8082)))
+			Ω(config.Index).To(Equal(uint(1)))
+			Ω(config.GoMaxProcs).To(Equal(2))
+			Ω(config.TraceKey).To(Equal("foo"))
+			Ω(config.AccessLog).To(Equal("/tmp/access_log"))
+		})
+
+	})
+
+	Describe("Process", func() {
+		It("converts intervals to durations", func() {
+			var b = []byte(`
 publish_start_message_interval: 1
 prune_stale_droplets_interval: 2
 droplet_stale_threshold: 3
@@ -118,33 +127,41 @@ publish_active_apps_interval: 4
 start_response_delay_interval: 15
 `)
 
-	c.Check(s.Port, Equals, uint16(8081))
-	c.Check(s.Index, Equals, uint(0))
-	c.Check(s.Pidfile, Equals, "")
-	c.Check(s.GoMaxProcs, Equals, 8)
-	c.Check(s.TraceKey, Equals, "")
-	c.Check(s.AccessLog, Equals, "")
+			config.Initialize(b)
+			config.Process()
 
-	c.Check(s.PublishStartMessageIntervalInSeconds, Equals, 30)
-	c.Check(s.PruneStaleDropletsInterval, Equals, 30*time.Second)
-	c.Check(s.DropletStaleThreshold, Equals, 120*time.Second)
-	c.Check(s.PublishActiveAppsInterval, Equals, 0*time.Second)
-	c.Check(s.StartResponseDelayInterval, Equals, 5*time.Second)
+			Ω(config.PublishStartMessageIntervalInSeconds).To(Equal(1))
+			Ω(config.PruneStaleDropletsInterval).To(Equal(2 * time.Second))
+			Ω(config.DropletStaleThreshold).To(Equal(3 * time.Second))
+			Ω(config.PublishActiveAppsInterval).To(Equal(4 * time.Second))
+			Ω(config.StartResponseDelayInterval).To(Equal(15 * time.Second))
+		})
 
-	s.Config.Initialize(b)
+		Describe("Timeout", func() {
+			It("converts timeouts to a duration", func() {
+				var b = []byte(`
+endpoint_timeout: 10
+drain_timeout: 15
+`)
 
-	s.Config.Process()
+				config.Initialize(b)
+				config.Process()
 
-	c.Check(s.Port, Equals, uint16(8082))
-	c.Check(s.Index, Equals, uint(1))
-	c.Check(s.Pidfile, Equals, "/tmp/pidfile")
-	c.Check(s.GoMaxProcs, Equals, 2)
-	c.Check(s.TraceKey, Equals, "foo")
-	c.Check(s.AccessLog, Equals, "/tmp/access_log")
+				Ω(config.EndpointTimeout).To(Equal(10 * time.Second))
+				Ω(config.DrainTimeout).To(Equal(15 * time.Second))
+			})
 
-	c.Check(s.PublishStartMessageIntervalInSeconds, Equals, 1)
-	c.Check(s.PruneStaleDropletsInterval, Equals, 2*time.Second)
-	c.Check(s.DropletStaleThreshold, Equals, 3*time.Second)
-	c.Check(s.PublishActiveAppsInterval, Equals, 4*time.Second)
-	c.Check(s.StartResponseDelayInterval, Equals, 15*time.Second)
-}
+			It("defaults to the EndpointTimeout when not set", func() {
+				var b = []byte(`
+endpoint_timeout: 10
+`)
+
+				config.Initialize(b)
+				config.Process()
+
+				Ω(config.EndpointTimeout).To(Equal(10 * time.Second))
+				Ω(config.DrainTimeout).To(Equal(10 * time.Second))
+			})
+		})
+	})
+})

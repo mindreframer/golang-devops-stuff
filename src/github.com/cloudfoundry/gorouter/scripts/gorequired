@@ -1,0 +1,14 @@
+#!/bin/sh
+
+set -e -x -u
+
+if ! which go 2>/dev/null; then
+  echo "Go is not installed."
+  exit 1
+fi
+
+if [ "${GOPATH:-}" = "" ]; then
+  echo "GOPATH empty or not set."
+  exit 1
+fi
+echo "GOPATH=$GOPATH"

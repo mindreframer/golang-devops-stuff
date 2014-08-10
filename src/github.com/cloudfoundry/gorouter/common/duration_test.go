@@ -1,62 +1,66 @@
-package common
+package common_test
 
 import (
+	. "github.com/cloudfoundry/gorouter/common"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
+
 	"encoding/json"
 	"fmt"
-	. "launchpad.net/gocheck"
 	"time"
 )
 
-type DurationSuite struct {
-}
+var _ = Describe("Durations", func() {
+	Context("Duration", func() {
+		It("supports JSON", func() {
+			d := Duration(123456)
+			var i interface{} = &d
 
-var _ = Suite(&DurationSuite{})
+			_, ok := i.(json.Marshaler)
+			Ω(ok).Should(BeTrue())
 
-func (s *DurationSuite) TestJsonInterface(c *C) {
-	d := Duration(123456)
-	var i interface{} = &d
+			_, ok = i.(json.Unmarshaler)
+			Ω(ok).Should(BeTrue())
+		})
 
-	_, ok := i.(json.Marshaler)
-	c.Assert(ok, Equals, true)
+		It("marshals JSON", func() {
+			d := Duration(time.Hour*36 + time.Second*10)
+			b, err := json.Marshal(d)
+			Ω(err).ShouldNot(HaveOccurred())
+			Ω(string(b)).To(Equal(`"1d:12h:0m:10s"`))
+		})
 
-	_, ok = i.(json.Unmarshaler)
-	c.Assert(ok, Equals, true)
-}
+		It("unmarshals JSON", func() {
+			d := Duration(time.Hour*36 + time.Second*20)
+			b, err := json.Marshal(d)
+			Ω(err).ShouldNot(HaveOccurred())
 
-func (s *DurationSuite) TestMarshalJSON(c *C) {
-	d := Duration(time.Hour*36 + time.Second*10)
-	b, err := json.Marshal(d)
-	c.Assert(err, IsNil)
-	c.Assert(string(b), Equals, `"1d:12h:0m:10s"`)
-}
+			var dd Duration
+			dd.UnmarshalJSON(b)
+			Ω(dd).To(Equal(d))
+		})
+	})
 
-func (s *DurationSuite) TestUnmarshalJSON(c *C) {
-	d := Duration(time.Hour*36 + time.Second*20)
-	b, err := json.Marshal(d)
-	c.Assert(err, IsNil)
+	Context("Time", func() {
+		It("marshals JSON", func() {
+			n := time.Now()
+			f := "2006-01-02 15:04:05 -0700"
 
-	var dd Duration
-	dd.UnmarshalJSON(b)
-	c.Assert(dd, Equals, d)
-}
+			t := Time(n)
+			b, e := json.Marshal(t)
+			Ω(e).ShouldNot(HaveOccurred())
+			Ω(string(b)).To(Equal(fmt.Sprintf(`"%s"`, n.Format(f))))
+		})
 
-func (s *DurationSuite) TestTimeMarshalJSON(c *C) {
-	n := time.Now()
-	f := "2006-01-02 15:04:05 -0700"
+		It("unmarshals JSON", func() {
+			t := Time(time.Unix(time.Now().Unix(), 0)) // The precision of Time is 'second'
+			b, err := json.Marshal(t)
+			Ω(err).ShouldNot(HaveOccurred())
 
-	t := Time(n)
-	b, e := json.Marshal(t)
-	c.Assert(e, IsNil)
-	c.Assert(string(b), Equals, fmt.Sprintf(`"%s"`, n.Format(f)))
-}
-
-func (s *DurationSuite) TestTimeUnmarshalJSON(c *C) {
-	t := Time(time.Unix(time.Now().Unix(), 0)) // The precision of Time is 'second'
-	b, err := json.Marshal(t)
-	c.Assert(err, IsNil)
-
-	var tt Time
-	err = tt.UnmarshalJSON(b)
-	c.Assert(err, IsNil)
-	c.Assert(tt, Equals, t)
-}
+			var tt Time
+			err = tt.UnmarshalJSON(b)
+			Ω(err).ShouldNot(HaveOccurred())
+			Ω(tt).To(Equal(t))
+		})
+	})
+})

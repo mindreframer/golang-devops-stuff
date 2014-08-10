@@ -1,15 +1,15 @@
-package common
+package common_test
 
 import (
-	. "launchpad.net/gocheck"
+	. "github.com/cloudfoundry/gorouter/common"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 )
 
-type CommonSuite struct{}
-
-var _ = Suite(&CommonSuite{})
-
-func (s *CommonSuite) TestUUID(c *C) {
-	uuid := GenerateUUID()
-
-	c.Check(len(uuid), Equals, 32)
-}
+var _ = Describe("common", func() {
+	It("createsa uuid", func() {
+		uuid, err := GenerateUUID()
+		Ω(err).ShouldNot(HaveOccurred())
+		Ω(uuid).Should(HaveLen(36))
+	})
+})

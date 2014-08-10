@@ -1,352 +1,317 @@
-package registry
+package registry_test
 
 import (
-	"encoding/json"
-	"time"
-
-	"github.com/cloudfoundry/yagnats/fakeyagnats"
-	. "launchpad.net/gocheck"
+	. "github.com/cloudfoundry/gorouter/registry"
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/gomega"
 
 	"github.com/cloudfoundry/gorouter/config"
 	"github.com/cloudfoundry/gorouter/route"
+	"github.com/cloudfoundry/yagnats/fakeyagnats"
+
+	"encoding/json"
+	"time"
 )
 
-type RegistrySuite struct {
-	*Registry
+var _ = Describe("RouteRegistry", func() {
+	var r *RouteRegistry
+	var messageBus *fakeyagnats.FakeYagnats
 
-	messageBus *fakeyagnats.FakeYagnats
-}
-
-var _ = Suite(&RegistrySuite{})
-
-var fooEndpoint, barEndpoint, bar2Endpoint *route.Endpoint
-
-func (s *RegistrySuite) SetUpTest(c *C) {
+	var fooEndpoint, barEndpoint, bar2Endpoint *route.Endpoint
 	var configObj *config.Config
 
-	configObj = config.DefaultConfig()
-	configObj.DropletStaleThreshold = 10 * time.Millisecond
-
-	s.messageBus = fakeyagnats.New()
-	s.Registry = NewRegistry(configObj, s.messageBus)
-
-	fooEndpoint = &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-
-		ApplicationId: "12345",
-		Tags: map[string]string{
-			"runtime":   "ruby18",
-			"framework": "sinatra",
-		},
-	}
-
-	barEndpoint = &route.Endpoint{
-		Host: "192.168.1.2",
-		Port: 4321,
-
-		ApplicationId: "54321",
-		Tags: map[string]string{
-			"runtime":   "javascript",
-			"framework": "node",
-		},
-	}
-
-	bar2Endpoint = &route.Endpoint{
-		Host: "192.168.1.3",
-		Port: 1234,
-
-		ApplicationId: "54321",
-		Tags: map[string]string{
-			"runtime":   "javascript",
-			"framework": "node",
-		},
-	}
-}
-
-func (s *RegistrySuite) TestRegister(c *C) {
-	s.Register("foo", fooEndpoint)
-	s.Register("fooo", fooEndpoint)
-	c.Check(s.NumUris(), Equals, 2)
-	firstUpdateTime := s.timeOfLastUpdate
-
-	s.Register("bar", barEndpoint)
-	s.Register("baar", barEndpoint)
-	c.Check(s.NumUris(), Equals, 4)
-	secondUpdateTime := s.timeOfLastUpdate
-
-	c.Assert(secondUpdateTime.After(firstUpdateTime), Equals, true)
-}
-
-func (s *RegistrySuite) TestRegisterIgnoreDuplicates(c *C) {
-	s.Register("bar", barEndpoint)
-	s.Register("baar", barEndpoint)
-
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 1)
-
-	s.Register("bar", barEndpoint)
-	s.Register("baar", barEndpoint)
-
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 1)
-
-	s.Unregister("bar", barEndpoint)
-
-	c.Check(s.NumUris(), Equals, 1)
-	c.Check(s.NumEndpoints(), Equals, 1)
-
-	s.Unregister("baar", barEndpoint)
-
-	c.Check(s.NumUris(), Equals, 0)
-	c.Check(s.NumEndpoints(), Equals, 0)
-}
-
-func (s *RegistrySuite) TestRegisterUppercase(c *C) {
-	m1 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
-
-	m2 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1235,
-	}
-
-	s.Register("foo", m1)
-	s.Register("FOO", m2)
-
-	c.Check(s.NumUris(), Equals, 1)
-}
-
-func (s *RegistrySuite) TestRegisterDoesntReplaceSameEndpoint(c *C) {
-	m1 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
-
-	m2 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
-
-	s.Register("foo", m1)
-	s.Register("bar", m2)
-
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 1)
-}
-
-func (s *RegistrySuite) TestUnregister(c *C) {
-	s.Register("bar", barEndpoint)
-	s.Register("baar", barEndpoint)
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 1)
-
-	s.Register("bar", bar2Endpoint)
-	s.Register("baar", bar2Endpoint)
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 2)
-
-	s.Unregister("bar", barEndpoint)
-	s.Unregister("baar", barEndpoint)
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 1)
+	BeforeEach(func() {
+		configObj = config.DefaultConfig()
+		configObj.PruneStaleDropletsInterval = 50 * time.Millisecond
+		configObj.DropletStaleThreshold = 10 * time.Millisecond
+
+		messageBus = fakeyagnats.New()
+		r = NewRouteRegistry(configObj, messageBus)
+		fooEndpoint = route.NewEndpoint("12345", "192.168.1.1", 1234,
+			"id1", map[string]string{
+				"runtime":   "ruby18",
+				"framework": "sinatra",
+			})
+
+		barEndpoint = route.NewEndpoint("54321", "192.168.1.2", 4321,
+			"id2", map[string]string{
+				"runtime":   "javascript",
+				"framework": "node",
+			})
+
+		bar2Endpoint = route.NewEndpoint("54321", "192.168.1.3", 1234,
+			"id3", map[string]string{
+				"runtime":   "javascript",
+				"framework": "node",
+			})
+	})
+
+	Context("Register", func() {
+		It("records and tracks time of last update", func() {
+			r.Register("foo", fooEndpoint)
+			r.Register("fooo", fooEndpoint)
+			Ω(r.NumUris()).To(Equal(2))
+			firstUpdateTime := r.TimeOfLastUpdate()
+
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
+			Ω(r.NumUris()).To(Equal(4))
+			secondUpdateTime := r.TimeOfLastUpdate()
+
+			Ω(secondUpdateTime.After(firstUpdateTime)).To(BeTrue())
+		})
+
+		It("ignores duplicates", func() {
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
+
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(1))
+
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
+
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(1))
+		})
+
+		It("ignores case", func() {
+			m1 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
+			m2 := route.NewEndpoint("", "192.168.1.1", 1235, "", nil)
+
+			r.Register("foo", m1)
+			r.Register("FOO", m2)
+
+			Ω(r.NumUris()).To(Equal(1))
+		})
+
+		It("allows multiple uris for the same endpoint", func() {
+			m1 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
+			m2 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
+
+			r.Register("foo", m1)
+			r.Register("bar", m2)
+
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(1))
+		})
+	})
+	Context("Unregister", func() {
+
+		It("removes uris and endpoints", func() {
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(1))
+
+			r.Register("bar", bar2Endpoint)
+			r.Register("baar", bar2Endpoint)
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(2))
+
+			r.Unregister("bar", barEndpoint)
+			r.Unregister("baar", barEndpoint)
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(1))
+
+			r.Unregister("bar", bar2Endpoint)
+			r.Unregister("baar", bar2Endpoint)
+			Ω(r.NumUris()).To(Equal(0))
+			Ω(r.NumEndpoints()).To(Equal(0))
+		})
+
+		It("ignores uri case and matches endpoint", func() {
+			m1 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
+			m2 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
 
-	s.Unregister("bar", bar2Endpoint)
-	s.Unregister("baar", bar2Endpoint)
-	c.Check(s.NumUris(), Equals, 0)
-	c.Check(s.NumEndpoints(), Equals, 0)
-}
-
-func (s *RegistrySuite) TestUnregisterUppercase(c *C) {
-	m1 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
-
-	m2 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
-
-	s.Register("foo", m1)
-	s.Unregister("FOO", m2)
+			r.Register("foo", m1)
+			r.Unregister("FOO", m2)
 
-	c.Check(s.NumUris(), Equals, 0)
-}
+			Ω(r.NumUris()).To(Equal(0))
+		})
 
-func (s *RegistrySuite) TestUnregisterDoesntDemolish(c *C) {
-	m1 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
+		It("removes the specific url/endpoint combo", func() {
+			m1 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
+			m2 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
 
-	m2 := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
+			r.Register("foo", m1)
+			r.Register("bar", m1)
 
-	s.Register("foo", m1)
-	s.Register("bar", m1)
+			r.Unregister("foo", m2)
 
-	s.Unregister("foo", m2)
+			Ω(r.NumUris()).To(Equal(1))
+		})
+	})
 
-	c.Check(s.NumUris(), Equals, 1)
-}
+	Context("Lookup", func() {
+		It("case insensitive lookup", func() {
+			m := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
 
-func (s *RegistrySuite) TestLookup(c *C) {
-	m := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
+			r.Register("foo", m)
 
-	s.Register("foo", m)
+			p1 := r.Lookup("foo")
+			p2 := r.Lookup("FOO")
+			Ω(p1).To(Equal(p2))
 
-	var b *route.Endpoint
-	var ok bool
+			iter := p1.Endpoints("")
+			Ω(iter.Next().CanonicalAddr()).To(Equal("192.168.1.1:1234"))
+		})
 
-	b, ok = s.Lookup("foo")
-	c.Assert(ok, Equals, true)
-	c.Check(b.CanonicalAddr(), Equals, "192.168.1.1:1234")
+		It("selects one of the routes", func() {
+			m1 := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
+			m2 := route.NewEndpoint("", "192.168.1.1", 1235, "", nil)
 
-	b, ok = s.Lookup("FOO")
-	c.Assert(ok, Equals, true)
-	c.Check(b.CanonicalAddr(), Equals, "192.168.1.1:1234")
-}
+			r.Register("bar", m1)
+			r.Register("barr", m1)
 
-func (s *RegistrySuite) TestLookupDoubleRegister(c *C) {
-	m1 := &route.Endpoint{
-		Host: "192.168.1.2",
-		Port: 1234,
-	}
+			r.Register("bar", m2)
+			r.Register("barr", m2)
 
-	m2 := &route.Endpoint{
-		Host: "192.168.1.2",
-		Port: 1235,
-	}
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(2))
 
-	s.Register("bar", m1)
-	s.Register("barr", m1)
+			p := r.Lookup("bar")
+			Ω(p).ShouldNot(BeNil())
+			e := p.Endpoints("").Next()
+			Ω(e).ShouldNot(BeNil())
+			Ω(e.CanonicalAddr()).To(MatchRegexp("192.168.1.1:123[4|5]"))
+		})
+	})
+	Context("Prunes Stale Droplets", func() {
 
-	s.Register("bar", m2)
-	s.Register("barr", m2)
+		AfterEach(func() {
+			r.StopPruningCycle()
+		})
 
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 2)
-}
+		It("removes stale droplets", func() {
+			r.Register("foo", fooEndpoint)
+			r.Register("fooo", fooEndpoint)
 
-func (s *RegistrySuite) TestPruneStaleApps(c *C) {
-	s.Register("foo", fooEndpoint)
-	s.Register("fooo", fooEndpoint)
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
 
-	s.Register("bar", barEndpoint)
-	s.Register("baar", barEndpoint)
+			Ω(r.NumUris()).To(Equal(4))
+			Ω(r.NumEndpoints()).To(Equal(2))
 
-	c.Check(s.NumUris(), Equals, 4)
-	c.Check(s.NumEndpoints(), Equals, 2)
+			r.StartPruningCycle()
+			time.Sleep(configObj.PruneStaleDropletsInterval + 10*time.Millisecond)
 
-	time.Sleep(s.dropletStaleThreshold + 1*time.Millisecond)
-	s.PruneStaleDroplets()
+			Ω(r.NumUris()).To(Equal(0))
+			Ω(r.NumEndpoints()).To(Equal(0))
+		})
 
-	s.Register("bar", bar2Endpoint)
-	s.Register("baar", bar2Endpoint)
+		It("skips fresh droplets", func() {
+			endpoint := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
 
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 1)
-}
+			r.Register("foo", endpoint)
+			r.Register("bar", endpoint)
 
-func (s *RegistrySuite) TestPruningIsByUriNotJustAddr(c *C) {
-	endpoint := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
+			r.Register("foo", endpoint)
 
-	s.Register("foo", endpoint)
-	s.Register("bar", endpoint)
+			Ω(r.NumUris()).To(Equal(2))
+			Ω(r.NumEndpoints()).To(Equal(1))
 
-	s.Register("foo", endpoint)
+			r.StartPruningCycle()
+			time.Sleep(configObj.PruneStaleDropletsInterval + 10*time.Millisecond)
 
-	c.Check(s.NumUris(), Equals, 2)
-	c.Check(s.NumEndpoints(), Equals, 1)
+			r.Register("foo", endpoint)
 
-	time.Sleep(s.dropletStaleThreshold + 1*time.Millisecond)
+			r.StopPruningCycle()
+			Ω(r.NumUris()).To(Equal(1))
+			Ω(r.NumEndpoints()).To(Equal(1))
 
-	s.Register("foo", endpoint)
+			p := r.Lookup("foo")
+			Ω(p).ShouldNot(BeNil())
+			Ω(p.Endpoints("").Next()).To(Equal(endpoint))
 
-	s.PruneStaleDroplets()
+			p = r.Lookup("bar")
+			Ω(p).Should(BeNil())
+		})
 
-	c.Check(s.NumUris(), Equals, 1)
-	c.Check(s.NumEndpoints(), Equals, 1)
+		It("disables pruning when NATS is unavailable", func() {
+			r.Register("foo", fooEndpoint)
+			r.Register("fooo", fooEndpoint)
 
-	foundEndpoint, found := s.Lookup("foo")
-	c.Check(found, Equals, true)
-	c.Check(foundEndpoint, DeepEquals, endpoint)
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
 
-	_, found = s.Lookup("bar")
-	c.Check(found, Equals, false)
-}
+			Ω(r.NumUris()).To(Equal(4))
+			Ω(r.NumEndpoints()).To(Equal(2))
 
-func (s *RegistrySuite) TestPruneStaleAppsWhenStateStale(c *C) {
-	s.Register("foo", fooEndpoint)
-	s.Register("fooo", fooEndpoint)
+			messageBus.OnPing(func() bool { return false })
+			r.StartPruningCycle()
+			time.Sleep(configObj.PruneStaleDropletsInterval + 10*time.Millisecond)
 
-	s.Register("bar", barEndpoint)
-	s.Register("baar", barEndpoint)
+			Ω(r.NumUris()).To(Equal(4))
+			Ω(r.NumEndpoints()).To(Equal(2))
+		})
 
-	c.Check(s.NumUris(), Equals, 4)
-	c.Check(s.NumEndpoints(), Equals, 2)
+		It("does not block when pruning", func() {
+			// when pruning stale droplets,
+			// and the stale check takes a while,
+			// and a read request comes in (i.e. from Lookup),
+			// the read request completes before the stale check
 
-	time.Sleep(s.dropletStaleThreshold + 1*time.Millisecond)
+			r.Register("foo", fooEndpoint)
+			r.Register("fooo", fooEndpoint)
 
-	s.messageBus.PingResponse = false
+			barrier := make(chan struct{})
 
-	time.Sleep(s.dropletStaleThreshold + 1*time.Millisecond)
+			messageBus.OnPing(func() bool {
+				barrier <- struct{}{}
+				<-barrier
+				return false
+			})
 
-	s.PruneStaleDroplets()
+			r.StartPruningCycle()
+			<-barrier
 
-	c.Check(s.NumUris(), Equals, 4)
-	c.Check(s.NumEndpoints(), Equals, 2)
-}
+			p := r.Lookup("foo")
+			barrier <- struct{}{}
+			Ω(p).ShouldNot(BeNil())
+		})
+	})
 
-func (s *RegistrySuite) TestPruneStaleDropletsDoesNotDeadlock(c *C) {
-	// when pruning stale droplets,
-	// and the stale check takes a while,
-	// and a read request comes in (i.e. from Lookup),
-	// the read request completes before the stale check
+	Context("Varz data", func() {
+		It("NumUris", func() {
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
 
-	s.Register("foo", fooEndpoint)
-	s.Register("fooo", fooEndpoint)
+			Ω(r.NumUris()).To(Equal(2))
 
-	completeSequence := make(chan string)
+			r.Register("foo", fooEndpoint)
 
-	s.messageBus.OnPing = func() bool {
-		time.Sleep(5 * time.Second)
-		completeSequence <- "stale"
-		return false
-	}
+			Ω(r.NumUris()).To(Equal(3))
+		})
 
-	go s.PruneStaleDroplets()
+		It("NumEndpoints", func() {
+			r.Register("bar", barEndpoint)
+			r.Register("baar", barEndpoint)
 
-	go func() {
-		s.Lookup("foo")
-		completeSequence <- "lookup"
-	}()
+			Ω(r.NumEndpoints()).To(Equal(1))
 
-	firstCompleted := <-completeSequence
+			r.Register("foo", fooEndpoint)
 
-	c.Assert(firstCompleted, Equals, "lookup")
-}
+			Ω(r.NumEndpoints()).To(Equal(2))
+		})
 
-func (s *RegistrySuite) TestInfoMarshalling(c *C) {
-	m := &route.Endpoint{
-		Host: "192.168.1.1",
-		Port: 1234,
-	}
+		It("TimeOfLastUpdate", func() {
+			start := time.Now()
+			r.Register("bar", barEndpoint)
+			t := r.TimeOfLastUpdate()
+			end := time.Now()
 
-	s.Register("foo", m)
-	marshalled, err := json.Marshal(s)
-	c.Check(err, IsNil)
+			Ω(start.Before(t)).Should(BeTrue())
+			Ω(end.After(t)).Should(BeTrue())
+		})
+	})
 
-	c.Check(string(marshalled), Equals, "{\"foo\":[\"192.168.1.1:1234\"]}")
-}
+	It("marshals", func() {
+		m := route.NewEndpoint("", "192.168.1.1", 1234, "", nil)
+		r.Register("foo", m)
+
+		marshalled, err := json.Marshal(r)
+		Ω(err).NotTo(HaveOccurred())
+		Ω(string(marshalled)).To(Equal(`{"foo":["192.168.1.1:1234"]}`))
+	})
+})

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/cloudfoundry/gorouter/proxy"
 	"github.com/cloudfoundry/gorouter/route"
 )
 
@@ -19,7 +20,7 @@ func NewStickyApp(urls []route.Uri, rPort uint16, mbusClient yagnats.NATSClient,
 func stickyHandler(port uint16) func(http.ResponseWriter, *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie := &http.Cookie{
-			Name:  StickyCookieKey,
+			Name:  proxy.StickyCookieKey,
 			Value: "xxx",
 		}
 		http.SetCookie(w, cookie)

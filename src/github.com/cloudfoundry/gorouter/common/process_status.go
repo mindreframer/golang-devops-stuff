@@ -9,7 +9,7 @@ import (
 const RefreshInterval time.Duration = time.Second * 1
 
 type ProcessStatus struct {
-	sync.Mutex
+	sync.RWMutex
 	rusage      *syscall.Rusage
 	lastCpuTime int64
 	stopSignal  chan bool
@@ -44,6 +44,8 @@ func (p *ProcessStatus) Update() {
 		log.Fatal(e.Error())
 	}
 
+	p.Lock()
+	defer p.Unlock()
 	p.MemRss = int64(p.rusage.Maxrss)
 
 	t := p.rusage.Utime.Nano() + p.rusage.Stime.Nano()

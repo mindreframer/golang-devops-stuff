@@ -7,15 +7,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/cloudfoundry/gorouter/log"
 	"github.com/cloudfoundry/gorouter/route"
-
-	"github.com/cloudfoundry/loggregatorlib/emitter"
 )
 
 type AccessLogRecord struct {
 	Request       *http.Request
-	Response      *http.Response
+	StatusCode    int
 	RouteEndpoint *route.Endpoint
 	StartedAt     time.Time
 	FirstByteAt   time.Time
@@ -36,7 +33,7 @@ func (r *AccessLogRecord) FormatRequestHeader(k string) (v string) {
 }
 
 func (r *AccessLogRecord) ResponseTime() float64 {
-	return float64(r.FinishedAt.UnixNano() - r.StartedAt.UnixNano())/float64(time.Second)
+	return float64(r.FinishedAt.UnixNano()-r.StartedAt.UnixNano()) / float64(time.Second)
 }
 
 func (r *AccessLogRecord) makeRecord() *bytes.Buffer {
@@ -45,17 +42,17 @@ func (r *AccessLogRecord) makeRecord() *bytes.Buffer {
 	fmt.Fprintf(b, `[%s] `, r.FormatStartedAt())
 	fmt.Fprintf(b, `"%s %s %s" `, r.Request.Method, r.Request.URL.RequestURI(), r.Request.Proto)
 
-	if r.Response == nil {
+	if r.StatusCode == 0 {
 		fmt.Fprintf(b, "MissingResponseStatusCode ")
 	} else {
-		fmt.Fprintf(b, `%d `, r.Response.StatusCode)
+		fmt.Fprintf(b, `%d `, r.StatusCode)
 	}
-
 
 	fmt.Fprintf(b, `%d `, r.BodyBytesSent)
 	fmt.Fprintf(b, `"%s" `, r.FormatRequestHeader("Referer"))
 	fmt.Fprintf(b, `"%s" `, r.FormatRequestHeader("User-Agent"))
 	fmt.Fprintf(b, `%s `, r.Request.RemoteAddr)
+	fmt.Fprintf(b, `vcap_request_id:%s `, r.FormatRequestHeader("X-Vcap-Request-Id"))
 
 	if r.ResponseTime() < 0 {
 		fmt.Fprintf(b, "response_time:MissingFinishedAt ")
@@ -78,17 +75,19 @@ func (r *AccessLogRecord) WriteTo(w io.Writer) (int64, error) {
 	return recordBuffer.WriteTo(w)
 }
 
-func (r *AccessLogRecord) Emit(e emitter.Emitter) {
-	if r.RouteEndpoint == nil {
-		return
+func (r *AccessLogRecord) ApplicationId() string {
+	if r.RouteEndpoint == nil || r.RouteEndpoint.ApplicationId == "" {
+		return ""
 	}
 
-	if r.RouteEndpoint.ApplicationId == "" {
-		return
+	return r.RouteEndpoint.ApplicationId
+}
+
+func (r *AccessLogRecord) LogMessage() string {
+	if r.ApplicationId() == "" {
+		return ""
 	}
+
 	recordBuffer := r.makeRecord()
-	message := recordBuffer.String()
-	log.Debugf("Logging to the loggregator: %s", message)
-	e.Emit(r.RouteEndpoint.ApplicationId, message)
-
+	return recordBuffer.String()
 }

@@ -1,0 +1,29 @@
+#!/bin/bash
+
+set -e -x -u
+
+
+export DROPSONDE_ORIGIN="gorouter_test/0"
+
+function printStatus {
+      if [ $? -eq 0 ]; then
+          echo -e "\nSWEET SUITE SUCCESS"
+      else
+          echo -e "\nSUITE FAILURE"
+      fi
+  }
+
+trap printStatus EXIT
+
+. $(dirname $0)/gorequired
+
+#Download & Install gnatsd into GOPATH (or use pre-installed version)
+go get -v github.com/apcera/gnatsd
+
+. $(dirname $0)/godep-env
+
+#Install ginkgo from Godeps into Godeps workspace
+go install -v github.com/onsi/ginkgo/ginkgo
+
+#Run all tests
+ginkgo -r -failOnPending -randomizeAllSpecs -skipMeasurements=true -race "$@"
