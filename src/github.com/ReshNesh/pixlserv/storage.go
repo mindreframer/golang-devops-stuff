@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"image"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -165,13 +164,14 @@ func (s *s3Storage) init() error {
 }
 
 func (s *s3Storage) loadImage(imagePath string) (image.Image, string, error) {
-	data, err := s.bucket.Get(imagePath)
+	rc, err := s.bucket.GetReader(imagePath)
 	if err != nil {
 		return nil, "", err
 	}
+	defer rc.Close()
 
 	format := strings.TrimLeft(filepath.Ext(imagePath), ".")
-	image, err := readImage(data, format)
+	image, err := readImage(rc, format)
 	if err != nil {
 		return nil, "", err
 	}
@@ -248,18 +248,13 @@ func (s *gcsStorage) loadImage(imagePath string) (image.Image, string, error) {
 	}
 
 	resp, err := s.client.Get(obj.Media.Link)
-	buf := &bytes.Buffer{}
-	_, err = io.Copy(buf, resp.Body)
 	if err != nil {
 		return nil, "", err
 	}
-	err = resp.Body.Close()
-	if err != nil {
-		return nil, "", err
-	}
+	defer resp.Body.Close()
 
 	format := strings.TrimLeft(filepath.Ext(imagePath), ".")
-	image, err := readImage(buf.Bytes(), format)
+	image, err := readImage(resp.Body, format)
 	if err != nil {
 		return nil, "", err
 	}
