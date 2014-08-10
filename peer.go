@@ -17,9 +17,10 @@ type Peer struct {
 	Name              string `json:"name"`
 	ConnectionString  string `json:"connectionString"`
 	prevLogIndex      uint64
-	mutex             sync.RWMutex
 	stopChan          chan bool
 	heartbeatInterval time.Duration
+	lastActivity      time.Time
+	sync.RWMutex
 }
 
 //------------------------------------------------------------------------------
@@ -55,16 +56,22 @@ func (p *Peer) setHeartbeatInterval(duration time.Duration) {
 
 // Retrieves the previous log index.
 func (p *Peer) getPrevLogIndex() uint64 {
-	p.mutex.RLock()
-	defer p.mutex.RUnlock()
+	p.RLock()
+	defer p.RUnlock()
 	return p.prevLogIndex
 }
 
 // Sets the previous log index.
 func (p *Peer) setPrevLogIndex(value uint64) {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+	p.Lock()
+	defer p.Unlock()
 	p.prevLogIndex = value
+}
+
+func (p *Peer) setLastActivity(now time.Time) {
+	p.Lock()
+	defer p.Unlock()
+	p.lastActivity = now
 }
 
 //------------------------------------------------------------------------------
@@ -81,13 +88,29 @@ func (p *Peer) setPrevLogIndex(value uint64) {
 func (p *Peer) startHeartbeat() {
 	p.stopChan = make(chan bool)
 	c := make(chan bool)
-	go p.heartbeat(c)
+
+	p.setLastActivity(time.Now())
+
+	p.server.routineGroup.Add(1)
+	go func() {
+		defer p.server.routineGroup.Done()
+		p.heartbeat(c)
+	}()
 	<-c
 }
 
 // Stops the peer heartbeat.
 func (p *Peer) stopHeartbeat(flush bool) {
+	p.setLastActivity(time.Time{})
+
 	p.stopChan <- flush
+}
+
+// LastActivity returns the last time any response was received from the peer.
+func (p *Peer) LastActivity() time.Time {
+	p.RLock()
+	defer p.RUnlock()
+	return p.lastActivity
 }
 
 //--------------------------------------
@@ -97,12 +120,13 @@ func (p *Peer) stopHeartbeat(flush bool) {
 // Clones the state of the peer. The clone is not attached to a server and
 // the heartbeat timer will not exist.
 func (p *Peer) clone() *Peer {
-	p.mutex.Lock()
-	defer p.mutex.Unlock()
+	p.Lock()
+	defer p.Unlock()
 	return &Peer{
 		Name:             p.Name,
 		ConnectionString: p.ConnectionString,
 		prevLogIndex:     p.prevLogIndex,
+		lastActivity:     p.lastActivity,
 	}
 }
 
@@ -153,7 +177,7 @@ func (p *Peer) flush() {
 	if entries != nil {
 		p.sendAppendEntriesRequest(newAppendEntriesRequest(term, prevLogIndex, prevLogTerm, p.server.log.CommitIndex(), p.server.name, entries))
 	} else {
-		p.sendSnapshotRequest(newSnapshotRequest(p.server.name, p.server.lastSnapshot))
+		p.sendSnapshotRequest(newSnapshotRequest(p.server.name, p.server.snapshot))
 	}
 }
 
@@ -174,8 +198,9 @@ func (p *Peer) sendAppendEntriesRequest(req *AppendEntriesRequest) {
 	}
 	traceln("peer.append.resp: ", p.server.Name(), "<-", p.Name)
 
+	p.setLastActivity(time.Now())
 	// If successful then update the previous log index.
-	p.mutex.Lock()
+	p.Lock()
 	if resp.Success() {
 		if len(req.Entries) > 0 {
 			p.prevLogIndex = req.Entries[len(req.Entries)-1].GetIndex()
@@ -221,7 +246,7 @@ func (p *Peer) sendAppendEntriesRequest(req *AppendEntriesRequest) {
 			debugln("peer.append.resp.decrement: ", p.Name, "; idx =", p.prevLogIndex)
 		}
 	}
-	p.mutex.Unlock()
+	p.Unlock()
 
 	// Attach the peer to resp, thus server can know where it comes from
 	resp.peer = p.Name
@@ -243,6 +268,8 @@ func (p *Peer) sendSnapshotRequest(req *SnapshotRequest) {
 
 	// If successful, the peer should have been to snapshot state
 	// Send it the snapshot!
+	p.setLastActivity(time.Now())
+
 	if resp.Success {
 		p.sendSnapshotRecoveryRequest()
 	} else {
@@ -254,7 +281,7 @@ func (p *Peer) sendSnapshotRequest(req *SnapshotRequest) {
 
 // Sends an Snapshot Recovery request to the peer through the transport.
 func (p *Peer) sendSnapshotRecoveryRequest() {
-	req := newSnapshotRecoveryRequest(p.server.name, p.server.lastSnapshot)
+	req := newSnapshotRecoveryRequest(p.server.name, p.server.snapshot)
 	debugln("peer.snap.recovery.send: ", p.Name)
 	resp := p.server.Transporter().SendSnapshotRecoveryRequest(p.server, p, req)
 
@@ -263,6 +290,7 @@ func (p *Peer) sendSnapshotRecoveryRequest() {
 		return
 	}
 
+	p.setLastActivity(time.Now())
 	if resp.Success {
 		p.prevLogIndex = req.LastIndex
 	} else {
@@ -283,6 +311,7 @@ func (p *Peer) sendVoteRequest(req *RequestVoteRequest, c chan *RequestVoteRespo
 	req.peer = p
 	if resp := p.server.Transporter().SendVoteRequest(p.server, p, req); resp != nil {
 		debugln("peer.vote.recv: ", p.server.Name(), "<-", p.Name)
+		p.setLastActivity(time.Now())
 		resp.peer = p
 		c <- resp
 	} else {
