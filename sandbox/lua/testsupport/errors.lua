@@ -9,8 +9,8 @@ function process_message ()
 
     if msg == "require unknown" then
         require("unknown")
-    elseif msg == "output() no arg" then
-        output()
+    elseif msg == "add_to_payload() no arg" then
+        add_to_payload()
     elseif msg == "out of memory" then
         for i=1,500 do
             data = data .. "012345678901234567890123456789010123456789012345678901234567890123456789012345678901234567890123456789"
@@ -34,10 +34,14 @@ function process_message ()
         read_message("Type", 0, -1)
     elseif msg == "output limit exceeded" then
         for i=1,15 do
-            output("012345678901234567890123456789010123456789012345678901234567890123456789012345678901234567890123456789")
+            add_to_payload("012345678901234567890123456789010123456789012345678901234567890123456789012345678901234567890123456789")
         end
     elseif msg == "read_config() must have a single argument" then
         read_config()
+    elseif msg == "read_next_field() takes no arguments" then
+        read_next_field("test")
+    elseif msg == "write_message() should not exist" then
+        write_message("Severity", 0)
     end
     return 0
 end

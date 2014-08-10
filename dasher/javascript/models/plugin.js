@@ -7,7 +7,8 @@ define(
     "use strict";
 
     /**
-    * Plugin model representing any of the four plugin types: inputs, decoders, filters, or outputs.
+    * Plugin model representing any of the five plugin types: inputs, decoders, filters,
+    * outputs, or encoders.
     *
     * @class Plugin
     *
@@ -81,6 +82,22 @@ define(
     * @property {Object} MatchAvgDuration
     * @property {Number} MatchAvgDuration.value
     * @property {String} MatchAvgDuration.representation
+    */
+
+    /**
+    * Process message duration.
+    *
+    * @property {Object} ProcessMessageAvgDuration
+    * @property {Number} ProcessMessageAvgDuration.value
+    * @property {String} ProcessMessageAvgDuration.representation
+    */
+
+    /**
+    * Process message failures.
+    *
+    * @property {Object} ProcessMessageFailures
+    * @property {Number} ProcessMessageFailures.value
+    * @property {String} ProcessMessageFailures.representation
     */
 
     return Plugin;
