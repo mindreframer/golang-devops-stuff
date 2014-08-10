@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sort"
 )
 
 type Tag struct {
@@ -26,9 +27,6 @@ func getInstances(config Config) (clouds CloudInstances) {
 
 	for name, cfg := range config {
 		for k, v := range cfg {
-			cfg["name"] = name
-			cfg["provider"] = k
-
 			if k == "provider" {
 				switch v {
 				case "aws":
@@ -59,8 +57,12 @@ func getInstances(config Config) (clouds CloudInstances) {
 	return
 }
 
-func getMatchedInstances(clouds CloudInstances, filter string) (matched []StrMap) {
+type SortByTagValue []StrMap
+func (a SortByTagValue) Len() int           { return len(a) }
+func (a SortByTagValue) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a SortByTagValue) Less(i, j int) bool { return a[i]["tag_value"] < a[j]["tag_value"]}
 
+func getMatchedInstances(clouds CloudInstances, filter string) (matched []StrMap) {
 	// Fuzzy matching, like SublimeText
 	filter = strings.Join(strings.Split(filter, ""), ".*?")
 
@@ -72,7 +74,7 @@ func getMatchedInstances(clouds CloudInstances, filter string) (matched []StrMap
 				if rHost.MatchString(cloud + tag.Value) {
 					matched = append(matched, StrMap{
 						"cloud":     cloud,
-						"addr":      addr,
+						"addr":      addr,						
 						"tag_name":  tag.Name,
 						"tag_value": tag.Value,
 					})
@@ -82,8 +84,10 @@ func getMatchedInstances(clouds CloudInstances, filter string) (matched []StrMap
 			}
 		}
 	}
+	
+	sort.Sort(SortByTagValue(matched))
 
-	return
+	return 
 }
 
 func formatMatchedInstance(inst StrMap) string {
@@ -100,14 +104,13 @@ func main() {
 
 	match := getMatchedInstances(instances, hostname)
 
+	var matched_instance map[string]string	
+
 	if len(match) == 0 {
 		fmt.Println("Can't find cloud instance, trying to connect anyway")
 	} else if len(match) == 1 {
-		hostname = match[0]["addr"]
-		fmt.Println("Found clound instance:")
-		fmt.Println(formatMatchedInstance(match[0]))
+		matched_instance = match[0]
 	} else {
-		fmt.Println("Found multiple instances:")
 		for i, host := range match {
 			fmt.Println(strconv.Itoa(i+1)+") ", formatMatchedInstance(host))
 		}
@@ -120,10 +123,26 @@ func main() {
 			log.Fatal("Wrong index")
 		}
 
-		hostname = match[i-1]["addr"]
+		matched_instance = match[i-1]
 	}
 
-	args[arg_idx] = joinHostname(user, hostname)
+	if matched_instance != nil {
+		hostname = matched_instance["addr"]
+		default_user := config[matched_instance["cloud"]]["default_user"]
+
+		if len(user) == 0 && len(default_user) > 0 {
+			user = default_user
+		}
+
+		fmt.Println("Connecting to instance:")
+		fmt.Println(formatMatchedInstance(matched_instance))
+	}
+	
+	if len(args) == 0 {
+		args = append(args, joinHostname(user, hostname))
+	} else {
+		args[arg_idx] = joinHostname(user, hostname)
+	}
 
 	cmd := exec.Command("ssh", args...)
 	cmd.Stdin = os.Stdin
