@@ -2,37 +2,13 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
-	"html/template"
+	"github.com/golang/glog"
 )
 
-var page = `<html>
-  <body>
-    {{template "content" .Content}}
-  </body>
-</html>`
-
-var content = `{{define "content"}}
-<div>
-   <p>{{.Title}}</p>
-   <p>{{.Content}}</p>
-</div>
-{{end}}`
-
-type Content struct {
-   Title string
-   Content string
-}
-
-type Page struct {
-    Content *Content
-}
-
 type domainResolver interface {
-	resolve(domain string) (http.Handler, bool)
-	redirectToStatusPage(domainName string) (string)
+	resolve(domain string) (http.Handler, error)
 	init()
 }
 
@@ -45,34 +21,63 @@ func NewProxy(c *Config, resolver domainResolver) *proxy {
 	return &proxy{c, resolver}
 }
 
-func (p *proxy) start() {
-	log.Printf("Listening on port %d", p.config.port)
-	http.HandleFunc("/", p.OnRequest)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", p.config.port), nil))
+type proxyHandler func(http.ResponseWriter, *http.Request) (*Config, error)
+
+func (ph proxyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+
+	defer func() {
+		if r := recover(); r != nil {
+			http.Error(w, "An error occured serving request", 500)
+			glog.Errorf("Recovered from error : %s", r)
+		}
+	}()
+
+	if c, err := ph(w, r); err != nil {
+		ph.OnError(w, r, err, c)
+	}
 }
 
-func (p *proxy) OnRequest(w http.ResponseWriter, r *http.Request) {
-	host := hostnameOf(r.Host)
-	// Check if host is in pending, stopping or error state
-	redirect := p.domainResolver.redirectToStatusPage(host)
-	if redirect != "" {
-		pagedata := &Page{Content: &Content{Title:"Status", Content:redirect}}
-		tmpl, err := template.New("page").Parse(page)
-    tmpl, err = tmpl.Parse(content)
-		if(err==nil){
-			tmpl.Execute(w, pagedata)
+func (ph proxyHandler) OnError(w http.ResponseWriter, r *http.Request, error error, c *Config) {
+	if stError, ok := error.(StatusError); ok {
+		sp := &StatusPage{c, stError}
+		// Check if status is passivated -> setting expected state = started
+		if sp.error.computedStatus == PASSIVATED_STATUS {
+			reactivate(sp, c)
 		}
-		return
+		sp.serve(w, r)
+	} else {
+		sp := &StatusPage{c, StatusError{"notfound", nil}}
+		sp.serve(w, r)
+	}
+}
+
+
+
+func (p *proxy) start() {
+	glog.Infof("Listening on port %d", p.config.port)
+	http.Handle("/__static__/", http.FileServer(http.Dir(p.config.templateDir)))
+	http.Handle("/", proxyHandler(p.proxy))
+	glog.Fatalf("%s", http.ListenAndServe(fmt.Sprintf(":%d", p.config.port), nil))
+
+}
+
+
+func (p *proxy) proxy(w http.ResponseWriter, r *http.Request) (*Config, error) {
+
+	if p.config.forceFwSsl &&  "https" != r.Header.Get("x-forwarded-proto") {
+
+		http.Redirect(w, r, fmt.Sprintf("https://%s%s", hostnameOf(r.Host), r.URL.String() ), http.StatusMovedPermanently)
+		return p.config, nil
 	}
 
-	server, found := p.domainResolver.resolve(host)
 
-	if found {
+	host := hostnameOf(r.Host)
+	if server, err := p.domainResolver.resolve(host); err != nil {
+		return p.config, err
+	} else {
 		server.ServeHTTP(w, r)
-		return
+		return p.config, nil
 	}
-
-	http.NotFound(w, r)
 }
 
 func hostnameOf(host string) string {
@@ -83,4 +88,13 @@ func hostnameOf(host string) string {
 	}
 
 	return hostname
+}
+
+func reactivate(sp *StatusPage, c *Config) {
+	client, _ := c.getEtcdClient()
+	_, error := client.Set(c.servicePrefix+"/"+sp.error.status.service.name+"/"+sp.error.status.service.index+"/status/expected", STARTED_STATUS, 0)
+	if (error != nil) {
+		glog.Errorf("Fail: setting expected state = 'started' for instance %s. Error:%s", sp.error.status.service.name, error)
+	}
+	glog.Infof("Instance %s is ready for re-activation", sp.error.status.service.name)
 }

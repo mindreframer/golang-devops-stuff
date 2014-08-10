@@ -1,5 +1,10 @@
+
+
+
 Gogeta
 ======
+
+[![Build Status](https://travis-ci.org/arkenio/gogeta.png?branch=master)](https://travis-ci.org/arkenio/gogeta)
 
 Gogeta is a dynamic reverse proxy which configuration is based on [etcd](https://github.com/coreos/etcd). It provides real time dynamic reconfiguration of routes without having to restart the process.
 
@@ -10,20 +15,57 @@ How it works
 ------------
 
 It is basically an HTTP cluster router that holds its configuration in etcd. Default behavior
-is to use the IoEtcdResolver :
+is to use the IoEtcdResolver. For instance, when running gogeta like this :
 
+        gogeta -etcdAddress="http://172.17.42.1:4001" \
+               -domainDir="/domains" \
+               -serviceDir="/services" \
+               -templateDir="/usr/local/go/src/github.com/nuxeo/gogeta/templates"
+
+Here is the workflow of the request
   * client asks for mycustomdomain.com
-  * proxy looks at `/nuxeo.io/domains/mycustomdomain.com/[type,value]`
-  * if type is io container we look for `/nuxeo.io/envs/{value}/[ip,port]`
-  * the request is proxied to `http://{ip}:{port}/`
-  * if type is uri
-  * the requestion is proxies to the value `/nuxeo.io/domains/mycustomdomain.com/value`
+  * proxy looks at `/domains/mycustomdomain.com/[type,value]`
+  * if `type` is `service` we look for `/services/{value}/1/location` which value is in the form
 
-It also provides to custom resolvers :
+        {"host":"172.13.4.3","port":42567}
 
-  * EnvResolver : it serves `http://{envid}.local/ to the host referenced at `/nuxeo.io/envs/{envid}/[ip,port]`
-  * DummyResolver : it always proxies to `http://localhost:8080/`
+  * the request is proxied to `http://{host}:{port}/`
 
+  * if `type` is uri
+  * the request is proxied to the value of `/domains/mycustomdomain.com/value`
+
+
+It is possible to have several instances of a service by differenciating them with the `serviceIndex`
+key part :
+
+    /services/myService/1/location
+    /services/myService/2/location
+
+Gogeta will loadbalance the requests on those two instances using a round robin implementation.
+
+
+Sample configuration
+--------------------
+
+To summarize, here are the keys needed to proxy `customdomain.com` to `172.41.4.5:42654`
+
+
+    /services/myService/location = {"host":"172.41.4.5", "port": 42654}
+    /domains/mycustomdomain.com/type = service
+    /domains/mycustomdomain.com/value = myService
+
+
+Service Status
+--------------
+
+Optionnaly, services may have a status. This is a directory that is held at `/services/{serviceName}/{serviceIndex}/status`.
+It holds three values:
+
+ * `current` :  The current status of the service in [stopped|starting|started|stopping]
+ * `expected`: The expected status of the service [stopped|started]
+ * `alive`: a heartbeat that the service must update.
+
+Based on those values, Gogeta will serve wait pages with the according HTTP status code.
 
 Configuration
 -------------
@@ -31,9 +73,10 @@ Configuration
 Several parameters allow to configure the way the proxy behave :
 
  * `domainDir` allows to select the prefix of the key where it watches for domain
- * `envDir` allows to select the prefix of the key where it watches for environments
+ * `serviceDir` allows to select the prefix of the key where it watches for environments
  * `etcdAddress` specify the address of the `etcd` server
  * `port` port to listen
+ * `templateDir` a template directory for eroor status page
  * `resolverType` : choose the resolver to use
     * `Env` : EnvResolver
     * `Dummy` : DummyResolver
