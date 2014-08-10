@@ -1,29 +1,35 @@
-package helixdns
+package main
 
 import (
   "github.com/miekg/dns"
   "testing"
 )
 
-var etcdAddress = ""
-
-type FakeClient struct {}
-
-func (f FakeClient) Get(address string) (Response, error) {
-  etcdAddress = address
-  return nil, nil
+type FakeClient struct {
+  Result string
 }
+
+func (f *FakeClient) Get(address string) (Response, error) {
+  f.Result = address
+  return EtcdResponse{}, nil
+}
+
+func (f FakeClient) WatchForChanges() {}
 
 func TestServer_looksUpCorrectEntry(t *testing.T) {
 
-  client   := &FakeClient{}
+  client   := &FakeClient{ Result: "" }
   server   := &HelixServer{ Port: 1000, Client: client }
   question := &dns.Question{ Name: "foo.example.com.", Qtype: 1}
 
-  server.getResponse(*question)
+  response, _ := server.getResponse(*question)
 
-  if etcdAddress != "helix/com/example/foo/A" {
-    t.Errorf("Incorrect address: %s", etcdAddress)
+  if response == nil {
+    t.Errorf("Returned nil for etcd lookup")
+  }
+
+  if client.Result != "helix/com/example/foo/A" {
+    t.Errorf("Incorrect address: %s", client.Result)
   }
 
 }

@@ -7,11 +7,15 @@
 ## Build Instructions
 
     go get github.com/mrwilson/helixdns
-    make install
+
+    go build -o hdns github.com/mrwilson/helixdns
 
 ## Uses
 
-    hdns -port=<port-to-run-on> -etcd-address=<address-of-etcd-instance>
+    hdns
+      -port=<port-to-run-on>
+      -etcd-address=<address-of-etcd-instance>
+      -forward=<address-of-forwarding-nameserver>
 
 ## SRV Records
 
@@ -27,4 +31,4 @@
 
 ## TODO
 
- * Other types of record that aren't A, AAAA, or SRV.
+ * Other types of record that aren't A, AAAA, CNAME, PTR, or SRV.

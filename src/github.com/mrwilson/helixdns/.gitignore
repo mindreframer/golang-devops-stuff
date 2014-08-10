@@ -1,1 +1,8 @@
 *.etcd
+.DS_Store
+helixdns
+*.exe
+*.exe~
+repos/
+vendor/
+.vendor/
