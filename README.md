@@ -1,9 +1,10 @@
+[![Stories in Ready](https://badge.waffle.io/oleiade/trousseau.png?label=ready&title=Ready)](https://waffle.io/oleiade/trousseau)
 ![Trousseau, a portable encrypted keyring](https://dl.dropboxusercontent.com/u/2497327/Github/trousseau/trousseau-animation.gif)
 
 ## What
 
 *Trousseau* is a **gpg** encrypted key-value store designed to be a *simple*, *safe* and *trustworthy* place for your data.
-It stores data in a single multi-recipients encrypted file and can supports both local and remote storage sources (S3 and ssh so far) import/export.
+It stores data in a single multi-recipients encrypted file and can supports both local and remote storage sources (S3, ssh, gist so far) import/export.
 
 Create a *trousseau* store, specify which *gpg* recipients are allowed to open and modify it, add some key-value pairs to it, export it to S3 for example, and re-import it on another device. As simple as that.
 
@@ -82,14 +83,10 @@ Coming soon (Don't be shy, if you feel like you could do it, just send pull requ
 <div class="subsection-break"></div>
 ### Build it
 
-1. First, make sure you have a `Go <http://http://golang.org/>` language compiler **>= 1.1.2** (*mandatory*) and `git <http://gitscm.org>` installed.
-2. Make sure you have the following go system dependencies in your `$PATH`: `bzr, svn, hg, git`
-3. Then, just build and copy the `./bin/trousseau` executable to a system *PATH* location
-
-```bash
-make
-sudo cp ./bin/trousseau /usr/local/bin/trousseau
-```
+1. First, make sure you have a [Go](http://http://golang.org/) language compiler **>= 1.2** (*mandatory*) and [git](http://gitscm.org) installed.
+2. Make sure you have the following go system dependencies in your ``$PATH``: ``bzr, svn, hg, git``
+3. Ensure your [GOPATH](http://golang.org/doc/code.html#GOPATH) is properly set.
+4. Run ``make``
 
 <div class="section-break"></div>
 ## Prerequisities
@@ -141,6 +138,12 @@ Ultimately, you can pass you gpg passphrase through the command line global opti
 $ trousseau --passhphrase mysupperdupperpassphrase get abc
 ```
 
+### Environment
+
+Trousseau behavior can be controlled through the system environment:
+
+* *TROUSSEAU_STORE* : if you want to have multiple trousseau data store, set this environment variable to the path of the one you want to use. Default is ``$HOME/.trousseau``
+
 <div class="section-break"></div>
 ## Let's get started
 
@@ -161,7 +164,9 @@ First use of **trousseau** requires the data store to be created. A **trousseau*
 #### First steps with the data store
 
 ```bash
-$ trousseau create 4B7D890,28EA78B  # create a trousseau for two gpg recipients
+# create a trousseau for two gpg recipients
+# both key ids and key email are supported.
+$ trousseau create 4B7D890,foo@bar.com 
 trousseau created at $HOME/.trousseau
 ```
 
@@ -194,8 +199,8 @@ Once your trousseau has been created, you're now able to read, write, list, dele
 <div class="break"></div>
 #### API
 
-* **get** KEY : Outputs the stored KEY-value pair
-* **set** KEY VALUE : Sets the provided key-value pair in store
+* **get** KEY [--file]: Outputs the stored KEY-value pair, whether on *stdout* or in pointed ``--file`` option path.
+* **set** KEY [VALUE | --file] : Sets the provided key-value pair in store using provided value or extracting it from path pointed by ``--file`` option.
 * **del** KEY : Deletes provided key from the store
 * **keys** : Lists the stored keys
 * **show** : Lists the stored key-value pairs
@@ -211,24 +216,31 @@ $ trousseau show
 # Let's add some data into it
 $ trousseau set abc 123
 $ trousseau set "easy as" "do re mi"
-$ trousseau set oleiade-private-key "`cat ~/.ssh/id_rsa`"
+
+# set action supports a --file flag to use the content
+# of a file as value
+$ trousseau set myuser.ssh.public_key --file ~/.ssh/id_rsa.pub
 
 
 # Now let's make sure data has been added
 $ trousseau keys
 abc
 easy as
-oleiade-private-key
+myuser.ssh.public_key
 
+# Let's check values too
 $ trousseau get abc
 123
 
 $ trousseau show
 abc: 123
 easy as: do re mi
-oleiade-private-key: --- BEGIN PRIVATE KEY ---
+myuser.ssh.public_key: ssh-rsa 1289eu102ij30192u3e0912e
 ...
 
+# Whenever you want to export a key value to a file, just use
+# the get command --file option
+$ trousseau get myuser.ssh.public_key --file /home/myuser/id_rsa.pub
 
 # Now if you don't need a key anymore, just drop it.
 $ trousseau del abc  # Now the song lacks something doesn't it?
@@ -238,8 +250,7 @@ $ trousseau del abc  # Now the song lacks something doesn't it?
 ### Importing/Exporting to remote storage
 
 Trousseau was built with data remote storage in mind. Therefore it provides *push* and *pull* actions to export and import the trousseau data store to remote destinations.
-As of today S3 and SSH storages are available (more are to come).
-Moreover, 
+As of today S3, SSH and gist storages are available (more are to come).
 
 <div class="break"></div>
 #### API
@@ -298,8 +309,14 @@ abc: 123
 easy as: do re mi
 
 # To push it using scp we need to provide it a couple of
-# basic options
-$ trousseau push scp://user:password@host:port/remote_file_path
+# basic options.
+# Nota: In order for your remote password not to appear
+# in your shell history, we strongly advise you to use
+# the push/pull --ask-password option instead of supplying
+# the password through the dsn.
+$ trousseau push --ask-password scp://user:@host:port/remote_file_path
+Password: 
+Trousseau data store succesfully pushed to ssh remote storage
 
 
 # Now that data store has been pushed to the remote storage
@@ -309,7 +326,45 @@ $ rm ~/.trousseau
 $ trousseau show
 Trousseau unconfigured: no data store
 
-$ trousseau pull scp://user:password@host:port/remote_file_path
+$ trousseau pull --ask-password scp://user:@host:port/remote_file_path
+Password:
+Trousseau data store succesfully pulled from ssh remote storage
+
+$ trousseau show
+abc: 123
+easy as: do re mi
+```
+
+#### Gist example
+
+To use the gist remote storage support, you will need to generate a Github [personal access token](https://github.com/settings/applications#personal-access-tokens).
+Once you've generated one, use it as the dsn *password* field as in the following example:
+
+```bash
+# We start with a non-empty trousseau data store
+$ trousseau show
+abc: 123
+easy as: do re mi
+
+# Nota:
+# * Gist remote storage doesn't use the host and port dsn fields,
+#   but you still need to provide their ':' separator
+$ trousseau push gist://user:mysuppedupertoken@:/gist_name
+Password: 
+Trousseau data store succesfully pushed to gist remote storage
+
+
+# Now that data store has been pushed to gist
+# let's remove the local data store and pull it
+# once again to ensure it worked
+$ rm ~/.trousseau
+$ trousseau show
+Trousseau unconfigured: no data store
+
+$ trousseau pull gist://user:mysupperduppertoken@:/gist_name
+Password:
+Trousseau data store succesfully pulled from gist
+
 $ trousseau show
 abc: 123
 easy as: do re mi

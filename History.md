@@ -1,4 +1,79 @@
 
+0.3.0 / 2013-04-21
+==================
+
+*User experience*
+ * Add verbose flag
+ * Fix #47 add a --file flag to get action
+ * Fix #76 disable default data store truncate on open
+ * Fix #75 prevent from removing the last recipient
+
+*Code and design*
+ * Enhance error reporting when public keys are missing
+ * Implement a custom PgpError type to enhance encryption errors tracking
+ * Allow gnupg keyring files to be selected via sys env
+ * Simplify keyring and encryption/decryption actions definition
+ * Rename keyring related openpgp args to be more obvious
+ * Refactor decryption init to avoid global states
+ * Refactor encryption init to avoid global states
+ * Add goxc configuration file
+ * Replace deprecated go.crypto/ssh package with gosshold/ssh
+ * Implement verbosity option through commands
+ * Add logrus logger in trousseau package
+
+0.2.6 / 2014-04-17
+==================
+
+ * Fix #69 clean command-line output for its parsing to be easier
+ * Fix #65 Add support for trousseau store selection through env
+ * Fix #67 empty key field
+
+0.2.5 / 2014-04-16
+==================
+
+ * Add a --file option to the set action
+
+0.2.4 / 2014-02-26 
+==================
+
+ * Add gist remote storage usage instructions to README
+ * Rename subcommands to commands
+ * Move vagrant provisioning script into scripts folder
+ * Refactor build to use both a simple Makefile and build script
+ * Move trousseau package files in trousseau dir
+ * Fix #1: Made error message more obvious when gnupg keyring cannot be opened
+ * Remove gnupg globals from trousseau package
+ * Throw fatal error when no passphrase
+ * Enhance logging on missing passphrase or data store
+ * Update error message when no passphrase are supplied
+ * Fix #42: add the ability to declare recipients using their mail
+ * Update openpgp encryption/decryption features naming
+ * Fix #55: remove passphrase cmdline option
+ * Update README scp example to use --ask-password [ref#59]
+
+0.2.3 / 2014-02-18 
+==================
+
+ * Scp push/pull support for --ask-password option
+ * Unified store encryption handling
+ * Add encryption algorithm selection constants
+ * Move encryption/decryption functionalities in the crypto package
+ * Add openpgp encryption package
+
+0.2.2 / 2014-02-12 
+==================
+
+ * Implement import command merging strategies
+
+0.2.1 / 2014-02-12 
+==================
+
+ * Add: gist remote storage support
+ * Fix: project dir linking to gopath
+ * Add: an install rule to Makefile.
+ * Merge branch 'hotfix/0.2_homebrew_formula' into develop
+ * Fix homebrew formula
+
 0.2.0 / 2013-12-02 
 ==================
 
