@@ -1,67 +1,77 @@
 package main
 
 import (
-  "encoding/json"
-  "log"
-  "os"
-  "time"
+	"encoding/json"
+	"log"
+	"os"
+	"time"
 )
 
+const default_NetworkConfig_Timeout int64 = 15
+
+const default_FileConfig_DeadTime string = "24h"
+
 type Config struct {
-  Network NetworkConfig `json:network`
-  Files   []FileConfig  `json:files`
+	Network NetworkConfig `json:network`
+	Files   []FileConfig  `json:files`
 }
 
 type NetworkConfig struct {
-  Servers        []string `json:servers`
-  SSLCertificate string   `json:"ssl certificate"`
-  SSLKey         string   `json:"ssl key"`
-  SSLCA          string   `json:"ssl ca"`
-  Timeout        int64    `json:timeout`
-  timeout        time.Duration
+	Servers        []string `json:servers`
+	SSLCertificate string   `json:"ssl certificate"`
+	SSLKey         string   `json:"ssl key"`
+	SSLCA          string   `json:"ssl ca"`
+	Timeout        int64    `json:timeout`
+	timeout        time.Duration
 }
 
 type FileConfig struct {
   Paths  []string          `json:paths`
   Fields map[string]string `json:fields`
-  //DeadTime time.Duration `json:"dead time"`
+  DeadTime string `json:"dead time"`
+  deadtime time.Duration
 }
 
 func LoadConfig(path string) (config Config, err error) {
-  config_file, err := os.Open(path)
-  if err != nil {
-    log.Printf("Failed to open config file '%s': %s\n", path, err)
-    return
-  }
+	config_file, err := os.Open(path)
+	if err != nil {
+		log.Printf("Failed to open config file '%s': %s\n", path, err)
+		return
+	}
 
-  fi, _ := config_file.Stat()
-  if fi.Size() > (10 << 20) {
-    log.Printf("Config file too large? Aborting, just in case. '%s' is %d bytes\n",
-      path, fi)
-    return
-  }
+	fi, _ := config_file.Stat()
+	if fi.Size() > (10 << 20) {
+		log.Printf("Config file too large? Aborting, just in case. '%s' is %d bytes\n",
+			path, fi)
+		return
+	}
 
-  buffer := make([]byte, fi.Size())
-  _, err = config_file.Read(buffer)
-  log.Printf("%s\n", buffer)
+	buffer := make([]byte, fi.Size())
+	_, err = config_file.Read(buffer)
+	log.Printf("%s\n", buffer)
 
-  err = json.Unmarshal(buffer, &config)
-  if err != nil {
-    log.Printf("Failed unmarshalling json: %s\n", err)
-    return
-  }
+	err = json.Unmarshal(buffer, &config)
+	if err != nil {
+		log.Printf("Failed unmarshalling json: %s\n", err)
+		return
+	}
 
   if config.Network.Timeout == 0 {
-    config.Network.Timeout = 15
+    config.Network.Timeout = default_NetworkConfig_Timeout
   }
 
-  config.Network.timeout = time.Duration(config.Network.Timeout) * time.Second
+	config.Network.timeout = time.Duration(config.Network.Timeout) * time.Second
 
-  //for _, fileconfig := range config.Files {
-  //if fileconfig.DeadTime == 0 {
-  //fileconfig.DeadTime = 24 * time.Hour
-  //}
-  //}
+  for k, _ := range config.Files {
+    if config.Files[k].DeadTime == "" {
+      config.Files[k].DeadTime = default_FileConfig_DeadTime
+    }
+    config.Files[k].deadtime, err = time.ParseDuration(config.Files[k].DeadTime)
+    if err != nil {
+      log.Printf("Failed to parse dead time duration '%s'. Error was: %s\n", config.Files[k].DeadTime, err)
+      return
+    }
+  }
 
-  return
+	return
 }
