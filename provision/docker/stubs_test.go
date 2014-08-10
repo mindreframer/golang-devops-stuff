@@ -5,18 +5,21 @@
 package docker
 
 import (
+	"bufio"
 	"fmt"
 	"github.com/fsouza/go-dockerclient"
-	"github.com/globocom/config"
-	"github.com/globocom/docker-cluster/cluster"
-	"github.com/globocom/docker-cluster/storage"
-	etesting "github.com/globocom/tsuru/exec/testing"
+	"github.com/tsuru/config"
+	"github.com/tsuru/docker-cluster/cluster"
+	etesting "github.com/tsuru/tsuru/exec/testing"
+	"github.com/tsuru/tsuru/safe"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync/atomic"
+	"time"
 )
 
 func startTestListener(addr string) net.Listener {
@@ -127,8 +130,8 @@ func startDockerTestServer(containerPort string, calls *int64) (func(), *httptes
 	}))
 	var err error
 	oldCluster := dockerCluster()
-	dCluster, err = cluster.New(nil, storage.Redis("localhost:6379", "tests"),
-		cluster.Node{ID: "server", Address: server.URL},
+	dCluster, err = cluster.New(nil, &cluster.MapStorage{},
+		cluster.Node{Address: server.URL},
 	)
 	if err != nil {
 		panic(err)
@@ -160,31 +163,6 @@ func mockExecutor() (*etesting.FakeExecutor, func()) {
 	}
 }
 
-type mapStorage struct {
-	containers map[string]string
-}
-
-func (m *mapStorage) StoreContainer(containerID, hostID string) error {
-	if m.containers == nil {
-		m.containers = make(map[string]string)
-	}
-	m.containers[containerID] = hostID
-	return nil
-}
-
-func (m *mapStorage) RetrieveContainer(containerID string) (string, error) {
-	return m.containers[containerID], nil
-}
-
-func (m *mapStorage) RemoveContainer(containerID string) error {
-	delete(m.containers, containerID)
-	return nil
-}
-
-func (m *mapStorage) StoreImage(imageID, hostID string) error      { return nil }
-func (m *mapStorage) RetrieveImage(imageID string) (string, error) { return "", nil }
-func (m *mapStorage) RemoveImage(imageID string) error             { return nil }
-
 type fakeScheduler struct {
 	nodes     []cluster.Node
 	container *docker.Container
@@ -200,5 +178,61 @@ func (s *fakeScheduler) Schedule(config *docker.Config) (string, *docker.Contain
 
 func (s *fakeScheduler) Register(nodes ...cluster.Node) error {
 	s.nodes = append(s.nodes, nodes...)
+	return nil
+}
+
+type hijacker struct {
+	http.ResponseWriter
+	conn net.Conn
+	err  error
+}
+
+func (h *hijacker) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if h.err != nil {
+		return nil, nil, h.err
+	}
+	return h.conn, nil, nil
+}
+
+type fakeConn struct {
+	buf *safe.Buffer
+}
+
+func (c *fakeConn) Read(b []byte) (int, error) {
+	if c.buf != nil {
+		return c.buf.Read(b)
+	}
+	return 0, io.EOF
+}
+
+func (c *fakeConn) Write(b []byte) (int, error) {
+	if c.buf != nil {
+		return c.buf.Write(b)
+	}
+	return 0, io.ErrClosedPipe
+}
+
+func (c *fakeConn) Close() error {
+	c.buf = nil
+	return nil
+}
+
+func (c *fakeConn) LocalAddr() net.Addr {
+	return nil
+}
+
+func (c *fakeConn) RemoteAddr() net.Addr {
+	return nil
+}
+
+func (c *fakeConn) SetDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *fakeConn) SetReadDeadline(t time.Time) error {
+	return nil
+}
+
+func (c *fakeConn) SetWriteDeadline(t time.Time) error {
 	return nil
 }

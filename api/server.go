@@ -6,24 +6,52 @@ package api
 
 import (
 	"fmt"
-	"github.com/bmizerany/pat"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/app"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/provision"
+	"github.com/codegangsta/negroni"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/app"
+	"github.com/tsuru/tsuru/auth"
+	_ "github.com/tsuru/tsuru/auth/native"
+	_ "github.com/tsuru/tsuru/auth/oauth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/provision"
 	"net"
 	"net/http"
 )
+
+type TsuruHandler struct {
+	method string
+	path   string
+	h      http.Handler
+}
 
 func fatal(err error) {
 	log.Fatal(err.Error())
 }
 
-// RunServer starts Tsuru API server. The dry parameter indicates whether the
+var tsuruHandlerList []TsuruHandler
+
+//RegisterHandler inserts a handler on a list of handlers
+func RegisterHandler(path string, method string, h http.Handler) {
+	var th TsuruHandler
+	th.path = path
+	th.method = method
+	th.h = h
+	tsuruHandlerList = append(tsuruHandlerList, th)
+}
+
+func getAuthScheme() (string, error) {
+	name, err := config.GetString("auth:scheme")
+	if name == "" {
+		name = "native"
+	}
+	return name, err
+}
+
+// RunServer starts tsuru API server. The dry parameter indicates whether the
 // server should run in dry mode, not starting the HTTP listener (for testing
 // purposes).
-func RunServer(dry bool) {
+func RunServer(dry bool) http.Handler {
 	log.Init()
 	connString, err := config.GetString("database:url")
 	if err != nil {
@@ -35,91 +63,121 @@ func RunServer(dry bool) {
 	}
 	fmt.Printf("Using the database %q from the server %q.\n\n", dbName, connString)
 
-	m := pat.New()
+	m := &delayedRouter{}
 
-	m.Get("/schema/app", authorizationRequiredHandler(appSchema))
-	m.Get("/schema/service", authorizationRequiredHandler(serviceSchema))
-	m.Get("/schema/services", authorizationRequiredHandler(servicesSchema))
+	for _, handler := range tsuruHandlerList {
+		m.Add(handler.method, handler.path, handler.h)
+	}
 
-	m.Get("/services/instances", authorizationRequiredHandler(serviceInstances))
-	m.Get("/services/instances/:name", authorizationRequiredHandler(serviceInstance))
-	m.Del("/services/instances/:name", authorizationRequiredHandler(removeServiceInstance))
-	m.Post("/services/instances", authorizationRequiredHandler(createServiceInstance))
-	m.Put("/services/instances/:instance/:app", authorizationRequiredHandler(bindServiceInstance))
-	m.Del("/services/instances/:instance/:app", authorizationRequiredHandler(unbindServiceInstance))
-	m.Get("/services/instances/:instance/status", authorizationRequiredHandler(serviceInstanceStatus))
+	m.Add("Get", "/schema/app", authorizationRequiredHandler(appSchema))
+	m.Add("Get", "/schema/service", authorizationRequiredHandler(serviceSchema))
+	m.Add("Get", "/schema/services", authorizationRequiredHandler(servicesSchema))
 
-	m.Get("/services", authorizationRequiredHandler(serviceList))
-	m.Post("/services", authorizationRequiredHandler(serviceCreate))
-	m.Put("/services", authorizationRequiredHandler(serviceUpdate))
-	m.Del("/services/:name", authorizationRequiredHandler(serviceDelete))
-	m.Get("/services/:name", authorizationRequiredHandler(serviceInfo))
-	m.Get("/services/:name/plans", authorizationRequiredHandler(servicePlans))
-	m.Get("/services/:name/doc", authorizationRequiredHandler(serviceDoc))
-	m.Put("/services/:name/doc", authorizationRequiredHandler(serviceAddDoc))
-	m.Put("/services/:service/:team", authorizationRequiredHandler(grantServiceAccess))
-	m.Del("/services/:service/:team", authorizationRequiredHandler(revokeServiceAccess))
+	m.Add("Get", "/services/instances", authorizationRequiredHandler(serviceInstances))
+	m.Add("Get", "/services/instances/{name}", authorizationRequiredHandler(serviceInstance))
+	m.Add("Delete", "/services/instances/{name}", authorizationRequiredHandler(removeServiceInstance))
+	m.Add("Post", "/services/instances", authorizationRequiredHandler(createServiceInstance))
+	m.Add("Put", "/services/instances/{instance}/{app}", authorizationRequiredHandler(bindServiceInstance))
+	m.Add("Delete", "/services/instances/{instance}/{app}", authorizationRequiredHandler(unbindServiceInstance))
+	m.Add("Get", "/services/instances/{instance}/status", authorizationRequiredHandler(serviceInstanceStatus))
 
-	m.Del("/apps/:app", authorizationRequiredHandler(appDelete))
-	m.Get("/apps/:app", authorizationRequiredHandler(appInfo))
-	m.Post("/apps/:app/cname", authorizationRequiredHandler(setCName))
-	m.Del("/apps/:app/cname", authorizationRequiredHandler(unsetCName))
-	m.Post("/apps/:app/run", authorizationRequiredHandler(runCommand))
-	m.Get("/apps/:app/restart", authorizationRequiredHandler(restart))
-	m.Get("/apps/:app/start", authorizationRequiredHandler(start))
-	m.Get("/apps/:app/env", authorizationRequiredHandler(getEnv))
-	m.Post("/apps/:app/env", authorizationRequiredHandler(setEnv))
-	m.Del("/apps/:app/env", authorizationRequiredHandler(unsetEnv))
-	m.Get("/apps", authorizationRequiredHandler(appList))
-	m.Post("/apps", authorizationRequiredHandler(createApp))
-	m.Put("/apps/:app/units", authorizationRequiredHandler(addUnits))
-	m.Del("/apps/:app/units", authorizationRequiredHandler(removeUnits))
-	m.Put("/apps/:app/:team", authorizationRequiredHandler(grantAppAccess))
-	m.Del("/apps/:app/:team", authorizationRequiredHandler(revokeAppAccess))
-	m.Get("/apps/:app/log", authorizationRequiredHandler(appLog))
-	m.Post("/apps/:app/log", authorizationRequiredHandler(addLog))
+	m.AddAll("/services/proxy/{instance}", authorizationRequiredHandler(serviceProxy))
 
-	m.Get("/deploys", adminRequiredHandler(deploysList))
+	m.Add("Get", "/services", authorizationRequiredHandler(serviceList))
+	m.Add("Post", "/services", authorizationRequiredHandler(serviceCreate))
+	m.Add("Put", "/services", authorizationRequiredHandler(serviceUpdate))
+	m.Add("Delete", "/services/{name}", authorizationRequiredHandler(serviceDelete))
+	m.Add("Get", "/services/{name}", authorizationRequiredHandler(serviceInfo))
+	m.Add("Get", "/services/{name}/plans", authorizationRequiredHandler(servicePlans))
+	m.Add("Get", "/services/{name}/doc", authorizationRequiredHandler(serviceDoc))
+	m.Add("Put", "/services/{name}/doc", authorizationRequiredHandler(serviceAddDoc))
+	m.Add("Put", "/services/{service}/{team}", authorizationRequiredHandler(grantServiceAccess))
+	m.Add("Delete", "/services/{service}/{team}", authorizationRequiredHandler(revokeServiceAccess))
 
-	m.Get("/platforms", authorizationRequiredHandler(platformList))
+	m.Add("Delete", "/apps/{app}", authorizationRequiredHandler(appDelete))
+	m.Add("Get", "/apps/{app}", authorizationRequiredHandler(appInfo))
+	m.Add("Post", "/apps/{app}/cname", authorizationRequiredHandler(setCName))
+	m.Add("Delete", "/apps/{app}/cname", authorizationRequiredHandler(unsetCName))
+	runHandler := authorizationRequiredHandler(runCommand)
+	m.Add("Post", "/apps/{app}/run", runHandler)
+	m.Add("Post", "/apps/{app}/restart", authorizationRequiredHandler(restart))
+	m.Add("Post", "/apps/{app}/start", authorizationRequiredHandler(start))
+	m.Add("Post", "/apps/{app}/stop", authorizationRequiredHandler(stop))
+	m.Add("Get", "/apps/{app}/env", authorizationRequiredHandler(getEnv))
+	m.Add("Post", "/apps/{app}/env", authorizationRequiredHandler(setEnv))
+	m.Add("Delete", "/apps/{app}/env", authorizationRequiredHandler(unsetEnv))
+	m.Add("Get", "/apps", authorizationRequiredHandler(appList))
+	m.Add("Post", "/apps", authorizationRequiredHandler(createApp))
+	m.Add("Put", "/apps/{app}/units", authorizationRequiredHandler(addUnits))
+	m.Add("Delete", "/apps/{app}/units", authorizationRequiredHandler(removeUnits))
+	m.Add("Post", "/apps/{app}/units/{unit}", authorizationRequiredHandler(setUnitStatus))
+	m.Add("Put", "/apps/{app}/{team}", authorizationRequiredHandler(grantAppAccess))
+	m.Add("Delete", "/apps/{app}/{team}", authorizationRequiredHandler(revokeAppAccess))
+	m.Add("Get", "/apps/{app}/log", authorizationRequiredHandler(appLog))
+	logPostHandler := authorizationRequiredHandler(addLog)
+	m.Add("Post", "/apps/{app}/log", logPostHandler)
+
+	m.Add("Get", "/deploys", AdminRequiredHandler(deploysList))
+	m.Add("Get", "/deploys/{deploy}", AdminRequiredHandler(deployInfo))
+
+	m.Add("Get", "/platforms", authorizationRequiredHandler(platformList))
+	m.Add("Post", "/platforms", AdminRequiredHandler(platformAdd))
+	m.Add("Put", "/platforms/{name}", AdminRequiredHandler(platformUpdate))
 
 	// These handlers don't use :app on purpose. Using :app means that only
 	// the token generate for the given app is valid, but these handlers
 	// use a token generated for Gandalf.
-	m.Get("/apps/:appname/available", authorizationRequiredHandler(appIsAvailable))
-	m.Post("/apps/:appname/repository/clone", authorizationRequiredHandler(deploy))
-	m.Post("/apps/:appname/deploy", authorizationRequiredHandler(deploy))
+	m.Add("Get", "/apps/{appname}/available", authorizationRequiredHandler(appIsAvailable))
+	m.Add("Post", "/apps/{appname}/repository/clone", authorizationRequiredHandler(deploy))
+	m.Add("Post", "/apps/{appname}/deploy", authorizationRequiredHandler(deploy))
 
-	if registrationEnabled, _ := config.GetBool("auth:user-registration"); registrationEnabled {
-		m.Post("/users", Handler(createUser))
-	}
+	m.Add("Post", "/users", Handler(createUser))
+	m.Add("Get", "/auth/scheme", Handler(authScheme))
+	m.Add("Post", "/auth/login", Handler(login))
+	m.Add("Post", "/users/{email}/password", Handler(resetPassword))
+	m.Add("Post", "/users/{email}/tokens", Handler(login))
+	m.Add("Delete", "/users/tokens", authorizationRequiredHandler(logout))
+	m.Add("Put", "/users/password", authorizationRequiredHandler(changePassword))
+	m.Add("Delete", "/users", authorizationRequiredHandler(removeUser))
+	m.Add("Get", "/users/{email}/keys", authorizationRequiredHandler(listKeys))
+	m.Add("Post", "/users/keys", authorizationRequiredHandler(addKeyToUser))
+	m.Add("Delete", "/users/keys", authorizationRequiredHandler(removeKeyFromUser))
 
-	m.Post("/users/:email/password", Handler(resetPassword))
-	m.Post("/users/:email/tokens", Handler(login))
-	m.Del("/users/tokens", authorizationRequiredHandler(logout))
-	m.Put("/users/password", authorizationRequiredHandler(changePassword))
-	m.Del("/users", authorizationRequiredHandler(removeUser))
-	m.Get("/users/:email/keys", authorizationRequiredHandler(listKeys))
-	m.Post("/users/keys", authorizationRequiredHandler(addKeyToUser))
-	m.Del("/users/keys", authorizationRequiredHandler(removeKeyFromUser))
+	m.Add("Post", "/tokens", AdminRequiredHandler(generateAppToken))
 
-	m.Post("/tokens", adminRequiredHandler(generateAppToken))
+	m.Add("Delete", "/logs", AdminRequiredHandler(logRemove))
 
-	m.Del("/logs", adminRequiredHandler(logRemove))
+	m.Add("Get", "/teams", authorizationRequiredHandler(teamList))
+	m.Add("Post", "/teams", authorizationRequiredHandler(createTeam))
+	m.Add("Get", "/teams/{name}", authorizationRequiredHandler(getTeam))
+	m.Add("Delete", "/teams/{name}", authorizationRequiredHandler(removeTeam))
+	m.Add("Put", "/teams/{team}/{user}", authorizationRequiredHandler(addUserToTeam))
+	m.Add("Delete", "/teams/{team}/{user}", authorizationRequiredHandler(removeUserFromTeam))
 
-	m.Get("/teams", authorizationRequiredHandler(teamList))
-	m.Post("/teams", authorizationRequiredHandler(createTeam))
-	m.Get("/teams/:name", authorizationRequiredHandler(getTeam))
-	m.Del("/teams/:name", authorizationRequiredHandler(removeTeam))
-	m.Put("/teams/:team/:user", authorizationRequiredHandler(addUserToTeam))
-	m.Del("/teams/:team/:user", authorizationRequiredHandler(removeUserFromTeam))
+	m.Add("Get", "/healers", authorizationRequiredHandler(healers))
+	m.Add("Get", "/healers/{healer}", authorizationRequiredHandler(healer))
 
-	m.Get("/healers", authorizationRequiredHandler(healers))
-	m.Get("/healers/:healer", authorizationRequiredHandler(healer))
+	m.Add("Put", "/swap", authorizationRequiredHandler(swap))
 
-	m.Put("/swap", authorizationRequiredHandler(swap))
+	m.Add("Get", "/healthcheck/", http.HandlerFunc(healthcheck))
 
-	m.Get("/healthcheck/", http.HandlerFunc(healthcheck))
+	m.Add("Get", "/iaas/machines", AdminRequiredHandler(machinesList))
+	m.Add("Delete", "/iaas/machines/{machine_id}", AdminRequiredHandler(machineDestroy))
+
+	n := negroni.New()
+	n.Use(negroni.NewRecovery())
+	n.Use(negroni.NewLogger())
+	n.UseHandler(m)
+	n.Use(negroni.HandlerFunc(contextClearerMiddleware))
+	n.Use(negroni.HandlerFunc(flushingWriterMiddleware))
+	n.Use(negroni.HandlerFunc(errorHandlingMiddleware))
+	n.Use(negroni.HandlerFunc(setVersionHeadersMiddleware))
+	n.Use(negroni.HandlerFunc(authTokenMiddleware))
+	n.Use(&appLockMiddleware{excludedHandlers: []http.Handler{
+		logPostHandler,
+		runHandler,
+	}})
+	n.UseHandler(http.HandlerFunc(runDelayedHandler))
 
 	if !dry {
 		provisioner, err := getProvisioner()
@@ -131,7 +189,15 @@ func RunServer(dry bool) {
 			fatal(err)
 		}
 		fmt.Printf("Using %q provisioner.\n\n", provisioner)
-
+		scheme, err := getAuthScheme()
+		if err != nil {
+			fmt.Printf("Warning: configuration didn't declare a auth:scheme, using default scheme.\n")
+		}
+		app.AuthScheme, err = auth.GetScheme(scheme)
+		if err != nil {
+			fatal(err)
+		}
+		fmt.Printf("Using %q auth scheme.\n\n", scheme)
 		listen, err := config.GetString("listen")
 		if err != nil {
 			fatal(err)
@@ -147,15 +213,16 @@ func RunServer(dry bool) {
 				fatal(err)
 			}
 			fmt.Printf("tsuru HTTP/TLS server listening at %s...\n", listen)
-			fatal(http.ListenAndServeTLS(listen, certFile, keyFile, m))
+			fatal(http.ListenAndServeTLS(listen, certFile, keyFile, n))
 		} else {
 			listener, err := net.Listen("tcp", listen)
 			if err != nil {
 				fatal(err)
 			}
 			fmt.Printf("tsuru HTTP server listening at %s...\n", listen)
-			http.Handle("/", m)
+			http.Handle("/", n)
 			fatal(http.Serve(listener, nil))
 		}
 	}
+	return n
 }

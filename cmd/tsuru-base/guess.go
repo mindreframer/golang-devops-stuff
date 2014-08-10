@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,7 +7,7 @@ package tsuru
 import (
 	"errors"
 	"fmt"
-	"github.com/globocom/tsuru/git"
+	"github.com/tsuru/tsuru/git"
 	"launchpad.net/gnuflag"
 	"os"
 	"regexp"

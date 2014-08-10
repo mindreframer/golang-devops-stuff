@@ -1,11 +1,11 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package auth
 
 import (
-	"labix.org/v2/mgo/bson"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 )
 
@@ -199,6 +199,6 @@ func (s *S) TestGetTeam(c *gocheck.C) {
 	c.Assert(t.Name, gocheck.Equals, team.Name)
 	c.Assert(t.Users, gocheck.HasLen, 0)
 	t, err = GetTeam("wat")
-	c.Assert(err, gocheck.NotNil)
+	c.Assert(err, gocheck.Equals, ErrTeamNotFound)
 	c.Assert(t, gocheck.IsNil)
 }

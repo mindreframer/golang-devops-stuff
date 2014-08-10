@@ -1,18 +1,19 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package api
 
 import (
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/app"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/queue"
-	"github.com/globocom/tsuru/quota"
-	"github.com/globocom/tsuru/service"
-	tsuruTesting "github.com/globocom/tsuru/testing"
+	"github.com/gorilla/context"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/app"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/auth/native"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/quota"
+	"github.com/tsuru/tsuru/service"
+	tsuruTesting "github.com/tsuru/tsuru/testing"
 	"io"
 	"io/ioutil"
 	"launchpad.net/gocheck"
@@ -51,7 +52,10 @@ type S struct {
 	conn        *db.Storage
 	team        *auth.Team
 	user        *auth.User
-	token       *auth.Token
+	token       auth.Token
+	adminteam   *auth.Team
+	adminuser   *auth.User
+	admintoken  auth.Token
 	t           *tsuruTesting.T
 	provisioner *tsuruTesting.FakeProvisioner
 }
@@ -83,13 +87,24 @@ var HasAccessTo gocheck.Checker = &hasAccessToChecker{}
 
 func (s *S) createUserAndTeam(c *gocheck.C) {
 	s.user = &auth.User{Email: "whydidifall@thewho.com", Password: "123456", Quota: quota.Unlimited}
-	err := s.user.Create()
+	_, err := nativeScheme.Create(s.user)
+	c.Assert(err, gocheck.IsNil)
+	s.adminuser = &auth.User{Email: "myadmin@arrakis.com", Password: "123456", Quota: quota.Unlimited}
+	_, err = nativeScheme.Create(s.adminuser)
 	c.Assert(err, gocheck.IsNil)
 	s.team = &auth.Team{Name: "tsuruteam", Users: []string{s.user.Email}}
 	err = s.conn.Teams().Insert(s.team)
 	c.Assert(err, gocheck.IsNil)
-	s.token, err = s.user.CreateToken("123456")
+	s.adminteam = &auth.Team{Name: "admin", Users: []string{s.adminuser.Email}}
+	err = s.conn.Teams().Insert(s.adminteam)
+	c.Assert(err, gocheck.IsNil)
+	s.token, err = nativeScheme.Login(map[string]string{"email": s.user.Email, "password": "123456"})
+	c.Assert(err, gocheck.IsNil)
+	s.admintoken, err = nativeScheme.Login(map[string]string{"email": s.adminuser.Email, "password": "123456"})
+	c.Assert(err, gocheck.IsNil)
 }
+
+var nativeScheme = auth.ManagedScheme(native.NativeScheme{})
 
 func (s *S) SetUpSuite(c *gocheck.C) {
 	err := config.ReadConfigFile("testdata/config.yaml")
@@ -97,24 +112,21 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	s.createUserAndTeam(c)
 	s.t = &tsuruTesting.T{}
-	s.t.StartAmzS3AndIAM(c)
-	s.t.SetGitConfs(c)
 	s.provisioner = tsuruTesting.NewFakeProvisioner()
 	app.Provisioner = s.provisioner
+	app.AuthScheme = nativeScheme
 	p := app.Platform{Name: "zend"}
 	s.conn.Platforms().Insert(p)
 }
 
 func (s *S) TearDownSuite(c *gocheck.C) {
-	defer s.t.S3Server.Quit()
-	defer s.t.IamServer.Quit()
-	queue.Preempt()
 	s.conn.Apps().Database.DropDatabase()
 }
 
 func (s *S) TearDownTest(c *gocheck.C) {
 	s.t.RollbackGitConfs(c)
 	s.provisioner.Reset()
+	context.Purge(-1)
 }
 
 func (s *S) getTestData(p ...string) io.ReadCloser {
@@ -122,4 +134,8 @@ func (s *S) getTestData(p ...string) io.ReadCloser {
 	fp := path.Join(p...)
 	f, _ := os.OpenFile(fp, os.O_RDONLY, 0)
 	return f
+}
+
+func resetHandlers() {
+	tsuruHandlerList = []TsuruHandler{}
 }

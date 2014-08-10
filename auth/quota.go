@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,10 +6,10 @@ package auth
 
 import (
 	"errors"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/quota"
-	"labix.org/v2/mgo"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/quota"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 // ReserveApp reserves an app for the user, reserving it in the database. It's

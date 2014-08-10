@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -9,7 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/globocom/tsuru/cmd"
+	"github.com/tsuru/tsuru/cmd"
 	"io/ioutil"
 	"net/http"
 	"regexp"
@@ -21,7 +21,7 @@ const envSetValidationMessage = `You must specify environment variables in the f
 
 Example:
 
-  tsuru env-set NAME=value OTHER_NAME=value with spaces ANOTHER_NAME="using quotes"`
+  tsuru env-set NAME=value OTHER_NAME="value with spaces" ANOTHER_NAME='using single quotes'`
 
 type EnvGet struct {
 	GuessingCommand
@@ -43,14 +43,18 @@ func (c *EnvGet) Run(context *cmd.Context, client *cmd.Client) error {
 	if err != nil {
 		return err
 	}
-	var variables map[string]string
+	var variables []map[string]interface{}
 	err = json.Unmarshal(b, &variables)
 	if err != nil {
 		return err
 	}
 	formatted := make([]string, 0, len(variables))
-	for name, value := range variables {
-		formatted = append(formatted, name+"="+value)
+	for _, v := range variables {
+		value := "*** (private variable)"
+		if v["public"].(bool) {
+			value = v["value"].(string)
+		}
+		formatted = append(formatted, fmt.Sprintf("%s=%s", v["name"], value))
 	}
 	sort.Strings(formatted)
 	fmt.Fprintln(context.Stdout, strings.Join(formatted, "\n"))
@@ -77,16 +81,16 @@ func (c *EnvSet) Run(context *cmd.Context, client *cmd.Client) error {
 	if err != nil {
 		return err
 	}
-	raw := strings.Join(context.Args, " ")
-	regex := regexp.MustCompile(`(\w+=[^=]+)(\s|$)`)
+	raw := strings.Join(context.Args, "\n")
+	regex := regexp.MustCompile(`(\w+=[^\n$]+)(\n|$)`)
 	decls := regex.FindAllStringSubmatch(raw, -1)
-	if len(decls) < 1 {
+	if len(decls) < 1 || len(decls) != len(context.Args) {
 		return errors.New(envSetValidationMessage)
 	}
 	variables := make(map[string]string, len(decls))
 	for _, v := range decls {
 		parts := strings.Split(v[1], "=")
-		variables[parts[0]] = parts[1]
+		variables[parts[0]] = strings.Join(parts[1:], "=")
 	}
 	var buf bytes.Buffer
 	json.NewEncoder(&buf).Encode(variables)

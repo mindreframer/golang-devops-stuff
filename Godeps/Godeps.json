@@ -1,27 +1,29 @@
 {
-	"ImportPath": "github.com/globocom/tsuru",
-	"GoVersion": "devel +7e1a4e190b02 Thu Dec 19 13:02:06 2013 +0900",
+	"ImportPath": "github.com/tsuru/tsuru",
+	"GoVersion": "go1.3",
 	"Packages": [
 		"./..."
 	],
 	"Deps": [
 		{
 			"ImportPath": "code.google.com/p/go.crypto/bcrypt",
-			"Comment": "null-184",
-			"Rev": "cd1eea1eb82851fe9cde1d062406ca60c935ce24"
+			"Comment": "null-209",
+			"Rev": "23b39e4e860172e1983ded00a9d2f7e42b7683d0"
 		},
 		{
 			"ImportPath": "code.google.com/p/go.crypto/blowfish",
-			"Comment": "null-184",
-			"Rev": "cd1eea1eb82851fe9cde1d062406ca60c935ce24"
+			"Comment": "null-209",
+			"Rev": "23b39e4e860172e1983ded00a9d2f7e42b7683d0"
 		},
 		{
-			"ImportPath": "github.com/adeven/redis",
-			"Rev": "6a7dfb6ac870f9bf9cece7fb7181dd31cf59f7a8"
+			"ImportPath": "code.google.com/p/go.crypto/ssh",
+			"Comment": "null-209",
+			"Rev": "23b39e4e860172e1983ded00a9d2f7e42b7683d0"
 		},
 		{
-			"ImportPath": "github.com/adeven/redismq",
-			"Rev": "ec92d9cf876da73ed9659011d2a19c5ca325d2e7"
+			"ImportPath": "code.google.com/p/goauth2/oauth",
+			"Comment": "weekly-44",
+			"Rev": "696c088491246273e92442aa66b5281e5bb34faa"
 		},
 		{
 			"ImportPath": "github.com/bmizerany/pat",
@@ -32,46 +34,18 @@
 			"Rev": "5b56f4f917c7f54e3822b9c64df54da596b63c1d"
 		},
 		{
-			"ImportPath": "github.com/flaviamissi/go-elb/aws",
-			"Rev": "cf2b00bae0a0e4444486ff232d441ba838935462"
-		},
-		{
-			"ImportPath": "github.com/flaviamissi/go-elb/elb",
-			"Rev": "cf2b00bae0a0e4444486ff232d441ba838935462"
+			"ImportPath": "github.com/codegangsta/negroni",
+			"Comment": "v0.1-4-ga13766a",
+			"Rev": "a13766a8c2572caeb14341b7de158aff2fd00fa9"
 		},
 		{
 			"ImportPath": "github.com/fsouza/go-dockerclient",
-			"Comment": "0.2.1-25-g08fe80a",
-			"Rev": "08fe80a1c0c8ef39e40c6b275564eb34b3589ef7"
+			"Comment": "0.2.1-213-g1f11e8a",
+			"Rev": "1f11e8a150726e38edba83abe7bf3ea4d81ca737"
 		},
 		{
 			"ImportPath": "github.com/garyburd/redigo/redis",
-			"Rev": "8736767bf9f75f2374aac103059362a5c322d211"
-		},
-		{
-			"ImportPath": "github.com/globocom/commandmocker",
-			"Rev": "b758415df160f5ecffca83dd46c8065b1576cf6c"
-		},
-		{
-			"ImportPath": "github.com/globocom/config",
-			"Rev": "caf5fe2f55dfaf63564a929bda3d722181e6d770"
-		},
-		{
-			"ImportPath": "github.com/globocom/docker-cluster/cluster",
-			"Rev": "71f976ebcadf09ca99ed472946ce5e4d2de63567"
-		},
-		{
-			"ImportPath": "github.com/globocom/docker-cluster/storage",
-			"Rev": "71f976ebcadf09ca99ed472946ce5e4d2de63567"
-		},
-		{
-			"ImportPath": "github.com/globocom/gandalf/testing",
-			"Comment": "0.2.0-14-gb287fb0",
-			"Rev": "b287fb0995ee3486da397ade6c870617d2f00315"
-		},
-		{
-			"ImportPath": "github.com/globocom/go-gandalfclient",
-			"Rev": "874ca26886fc17186993bb02d66655145e0e1c0b"
+			"Rev": "6628c86d6a89ce7983c7c9b5e98c1df795fbd256"
 		},
 		{
 			"ImportPath": "github.com/gorilla/context",
@@ -83,20 +57,45 @@
 		},
 		{
 			"ImportPath": "github.com/howeyc/fsnotify",
+			"Comment": "v0.8.13",
 			"Rev": "5102fde921d31f59c6e45d835aa01f0213aade0f"
 		},
 		{
-			"ImportPath": "github.com/kr/beanstalk",
-			"Rev": "4011ceaa3ceeeeb8f38e541d2e8efceba6d0b86e"
+			"ImportPath": "github.com/tsuru/commandmocker",
+			"Rev": "adc1ee2fa7604e1663b2564ca1283d71c9153cac"
 		},
 		{
-			"ImportPath": "github.com/vmihailenco/bufio",
-			"Rev": "5a6706bb583bf168d886202cb376c877e9c85521"
+			"ImportPath": "github.com/tsuru/config",
+			"Rev": "f4d6d39615a37c66a013448cda92c2d3f889bdec"
 		},
 		{
-			"ImportPath": "labix.org/v2/mgo",
-			"Comment": "253",
-			"Rev": "gustavo@niemeyer.net-20130906162000-1oo19qtbrtr6xk98"
+			"ImportPath": "github.com/tsuru/docker-cluster/cluster",
+			"Rev": "d92e499ad2065b5bc4bf1ca427bc589aae645d5d"
+		},
+		{
+			"ImportPath": "github.com/tsuru/docker-cluster/log",
+			"Rev": "d92e499ad2065b5bc4bf1ca427bc589aae645d5d"
+		},
+		{
+			"ImportPath": "github.com/tsuru/docker-cluster/storage",
+			"Rev": "d92e499ad2065b5bc4bf1ca427bc589aae645d5d"
+		},
+		{
+			"ImportPath": "github.com/tsuru/gandalf/testing",
+			"Comment": "0.4.1-97-gca97e83",
+			"Rev": "ca97e8380d8c4cc8390ec73d33e7a4b28e18cf53"
+		},
+		{
+			"ImportPath": "github.com/tsuru/go-gandalfclient",
+			"Rev": "6805596abf1c1bd4ab6dc871384d4ed8148a638e"
+		},
+		{
+			"ImportPath": "gopkg.in/mgo.v2",
+			"Rev": "dc255bb679efa273b6544a03261c4053505498a4"
+		},
+		{
+			"ImportPath": "gopkg.in/v1/yaml",
+			"Rev": "4914593b9558e85597f08346c798aea8f6fb899f"
 		},
 		{
 			"ImportPath": "launchpad.net/gnuflag",
@@ -105,33 +104,18 @@
 		},
 		{
 			"ImportPath": "launchpad.net/goamz/aws",
-			"Comment": "43",
+			"Comment": "50",
 			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
 		},
 		{
 			"ImportPath": "launchpad.net/goamz/ec2",
-			"Comment": "43",
-			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
-		},
-		{
-			"ImportPath": "launchpad.net/goamz/iam",
-			"Comment": "43",
-			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
-		},
-		{
-			"ImportPath": "launchpad.net/goamz/s3",
-			"Comment": "43",
+			"Comment": "50",
 			"Rev": "gustavo@niemeyer.net-20131004171246-efk7aix6irtazp2m"
 		},
 		{
 			"ImportPath": "launchpad.net/gocheck",
-			"Comment": "85",
+			"Comment": "87",
 			"Rev": "gustavo@niemeyer.net-20130302024745-6ikofwq2c03h7giu"
-		},
-		{
-			"ImportPath": "launchpad.net/goyaml",
-			"Comment": "50",
-			"Rev": "gustavo@niemeyer.net-20130620163049-221erv1tss39x0xe"
 		}
 	]
 }

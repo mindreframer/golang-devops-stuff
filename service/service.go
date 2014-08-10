@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,14 +6,15 @@ package service
 
 import (
 	"errors"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"labix.org/v2/mgo/bson"
-	"strings"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"gopkg.in/mgo.v2/bson"
+	"regexp"
 )
 
 type Service struct {
 	Name         string `bson:"_id"`
+	Password     string
 	Endpoint     map[string]string
 	OwnerTeams   []string `bson:"owner_teams"`
 	Teams        []string
@@ -61,10 +62,10 @@ func (s *Service) Delete() error {
 
 func (s *Service) getClient(endpoint string) (cli *Client, err error) {
 	if e, ok := s.Endpoint[endpoint]; ok {
-		if !strings.HasPrefix(e, "http://") {
+		if p, _ := regexp.MatchString("^https?://", e); !p {
 			e = "http://" + e
 		}
-		cli = &Client{endpoint: e}
+		cli = &Client{endpoint: e, username: s.Name, password: s.Password}
 	} else {
 		err = errors.New("Unknown endpoint: " + endpoint)
 	}

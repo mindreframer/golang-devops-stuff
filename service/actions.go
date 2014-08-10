@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,12 +6,12 @@ package service
 
 import (
 	stderrors "errors"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/log"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/log"
+	"gopkg.in/mgo.v2/bson"
 	"net/http"
 	"sync"
 )
@@ -36,7 +36,11 @@ var createServiceInstance = action.Action{
 		if !ok {
 			return nil, stderrors.New("Second parameter must be a ServiceInstance.")
 		}
-		err = endpoint.Create(&instance)
+		user, ok := ctx.Params[2].(string)
+		if !ok {
+			return nil, stderrors.New("Third parameter must be a string.")
+		}
+		err = endpoint.Create(&instance, user)
 		if err != nil {
 			return nil, err
 		}

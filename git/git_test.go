@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -147,7 +147,7 @@ func (s *S) TestGetRemoteURL(c *gocheck.C) {
 		expected string
 		err      error
 	}{
-		{"origin", "git@github.com:globocom/tsuru-django-sample.git", nil},
+		{"origin", "git@github.com:tsuru/tsuru-django-sample.git", nil},
 		{"tsuru", "git@tsuruhost.com:gopher.git", nil},
 		{"wut", "", errors.New(`Remote "wut" not found.`)},
 	}
@@ -161,32 +161,5 @@ func (s *S) TestGetRemoteURL(c *gocheck.C) {
 		if !reflect.DeepEqual(d.err, err) {
 			c.Errorf("RemoteURL(%q): Want error %q. Got %q.", d.name, d.err, err)
 		}
-	}
-}
-
-func BenchmarkGetRemoteURL(b *testing.B) {
-	tmpdir, err := filepath.EvalSymlinks(os.TempDir())
-	if err != nil {
-		b.Fatal(err)
-	}
-	repoPath := path.Join(tmpdir, "git-bench")
-	err = os.MkdirAll(repoPath, 0755)
-	if err != nil {
-		b.Fatal(err)
-	}
-	cmd := exec.Command("git", "init")
-	cmd.Dir = repoPath
-	err = cmd.Run()
-	if err != nil {
-		b.Fatal(err)
-	}
-	err = exec.Command("cp", "testdata/gitconfig", path.Join(repoPath, ".git", "config")).Run()
-	if err != nil {
-		b.Fatal(err)
-	}
-	for i := 0; i < b.N; i++ {
-		repo, _ := OpenRepository(repoPath)
-		repo.RemoteURL("origin")
-		repo.RemoteURL("tsuru")
 	}
 }

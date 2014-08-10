@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,12 +6,12 @@ package api
 
 import (
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/testing"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/testing"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 )
 
@@ -86,7 +86,7 @@ func (s *ActionsSuite) TestAddKeyInGandalfActionBackward(c *gocheck.C) {
 
 func (s *ActionsSuite) TestAddKeyInDatabaseActionForward(c *gocheck.C) {
 	key := &auth.Key{Name: "mysshkey", Content: "my-ssh-key"}
-	u := &auth.User{Email: "me@gmail.com", Password: "123456"}
+	u := &auth.User{Email: "me@gmail.com"}
 	err := u.Create()
 	defer s.conn.Users().Remove(bson.M{"email": u.Email})
 	c.Assert(err, gocheck.IsNil)
@@ -103,7 +103,7 @@ func (s *ActionsSuite) TestAddKeyInDatabaseActionForward(c *gocheck.C) {
 
 func (s *ActionsSuite) TestAddKeyInDatabaseActionBackward(c *gocheck.C) {
 	key := &auth.Key{Name: "mysshkey", Content: "my-ssh-key"}
-	u := &auth.User{Email: "me@gmail.com", Password: "123456"}
+	u := &auth.User{Email: "me@gmail.com"}
 	u.AddKey(*key)
 	err := u.Create()
 	c.Assert(err, gocheck.IsNil)
@@ -122,7 +122,7 @@ func (s *ActionsSuite) TestAddUserToTeamInGandalfActionForward(c *gocheck.C) {
 	h := testHandler{}
 	ts := testing.StartGandalfTestServer(&h)
 	defer ts.Close()
-	u := &auth.User{Email: "nobody@gmail.com", Password: "123456"}
+	u := &auth.User{Email: "nobody@gmail.com"}
 	err := u.Create()
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Users().Remove(bson.M{"email": u.Email})
@@ -141,7 +141,7 @@ func (s *ActionsSuite) TestAddUserToTeamInGandalfActionBackward(c *gocheck.C) {
 	h := testHandler{}
 	ts := testing.StartGandalfTestServer(&h)
 	defer ts.Close()
-	u := &auth.User{Email: "nobody@gmail.com", Password: "123456"}
+	u := &auth.User{Email: "nobody@gmail.com"}
 	err := u.Create()
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Users().Remove(bson.M{"email": u.Email})
@@ -175,7 +175,7 @@ func (s *ActionsSuite) TestAddUserToTeamInDatabaseActionForward(c *gocheck.C) {
 }
 
 func (s *ActionsSuite) TestAddUserToTeamInDatabaseActionBackward(c *gocheck.C) {
-	u := &auth.User{Email: "nobody@gmail.com", Password: "123456"}
+	u := &auth.User{Email: "nobody@gmail.com"}
 	err := u.Create()
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Users().Remove(bson.M{"email": u.Email})

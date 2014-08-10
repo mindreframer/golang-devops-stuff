@@ -6,72 +6,37 @@ package docker
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"github.com/fsouza/go-dockerclient"
-	"github.com/fsouza/go-dockerclient/testing"
-	"github.com/globocom/config"
-	"github.com/globocom/docker-cluster/cluster"
-	"github.com/globocom/tsuru/app"
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/db"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/docker-cluster/cluster"
+	"github.com/tsuru/tsuru/app"
+	"github.com/tsuru/tsuru/cmd"
+	"github.com/tsuru/tsuru/cmd/testing"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
+	"net/http"
+	"sync"
 )
 
-type SchedulerSuite struct {
-	storage *db.Storage
-}
-
-var _ = gocheck.Suite(&SchedulerSuite{})
-
-func (s *SchedulerSuite) SetUpSuite(c *gocheck.C) {
-	var err error
-	config.Set("database:url", "127.0.0.1:27017")
-	config.Set("database:name", "docker_scheduler_tests")
-	config.Set("docker:repository-namespace", "tsuru")
-	config.Set("docker:collection", "docker_unit_tests")
-	s.storage, err = db.Conn()
-	c.Assert(err, gocheck.IsNil)
-}
-
-func (s *SchedulerSuite) TearDownSuite(c *gocheck.C) {
-	s.storage.Apps().Database.DropDatabase()
-	s.storage.Close()
-}
-
-func (s *SchedulerSuite) TestSchedulerSchedule(c *gocheck.C) {
-	server0, err := testing.NewServer(nil)
-	c.Assert(err, gocheck.IsNil)
-	defer server0.Stop()
-	server1, err := testing.NewServer(nil)
-	c.Assert(err, gocheck.IsNil)
-	defer server1.Stop()
-	server2, err := testing.NewServer(nil)
-	c.Assert(err, gocheck.IsNil)
-	defer server2.Stop()
-	var buf bytes.Buffer
-	client, _ := docker.NewClient(server0.URL())
-	client.PullImage(docker.PullImageOptions{Repository: "tsuru/python", OutputStream: &buf})
-	client, _ = docker.NewClient(server1.URL())
-	client.PullImage(docker.PullImageOptions{Repository: "tsuru/python", OutputStream: &buf})
-	client, _ = docker.NewClient(server2.URL())
-	client.PullImage(docker.PullImageOptions{Repository: "tsuru/python", OutputStream: &buf})
+func (s *S) TestSchedulerSchedule(c *gocheck.C) {
 	a1 := app.App{Name: "impius", Teams: []string{"tsuruteam", "nodockerforme"}}
 	a2 := app.App{Name: "mirror", Teams: []string{"tsuruteam"}}
 	a3 := app.App{Name: "dedication", Teams: []string{"nodockerforme"}}
 	cont1 := container{ID: "1", Name: "impius1", AppName: a1.Name}
 	cont2 := container{ID: "2", Name: "mirror1", AppName: a2.Name}
 	cont3 := container{ID: "3", Name: "dedication1", AppName: a3.Name}
-	err = s.storage.Apps().Insert(a1, a2, a3)
+	err := s.storage.Apps().Insert(a1, a2, a3)
 	c.Assert(err, gocheck.IsNil)
 	defer s.storage.Apps().RemoveAll(bson.M{"name": bson.M{"$in": []string{a1.Name, a2.Name, a3.Name}}})
 	coll := s.storage.Collection(schedulerCollection)
-	err = coll.Insert(
-		node{ID: "server0", Address: server0.URL(), Teams: []string{"tsuruteam"}},
-		node{ID: "server1", Address: server1.URL(), Teams: []string{"tsuruteam"}},
-		node{ID: "server2", Address: server2.URL()},
-	)
+	p := Pool{Name: "pool1", Teams: []string{
+		"tsuruteam",
+		"nodockerforme",
+	}}
+	err = coll.Insert(p)
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
+	defer coll.RemoveAll(bson.M{"_id": p.Name})
 	contColl := collection()
 	err = contColl.Insert(
 		cont1, cont2, cont3,
@@ -79,54 +44,85 @@ func (s *SchedulerSuite) TestSchedulerSchedule(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	defer contColl.RemoveAll(bson.M{"name": bson.M{"$in": []string{cont1.Name, cont2.Name, cont3.Name}}})
 	var scheduler segregatedScheduler
-	config := docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/python"}
-	opts := docker.CreateContainerOptions{Name: cont1.Name, Config: &config}
-	node, _, err := scheduler.Schedule(opts)
+	clusterInstance, err := cluster.New(&scheduler, &cluster.MapStorage{})
 	c.Assert(err, gocheck.IsNil)
-	c.Check(node, gocheck.Equals, "server1")
-	config = docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/python"}
-	opts = docker.CreateContainerOptions{Name: cont2.Name, Config: &config}
-	node, _, err = scheduler.Schedule(opts)
+	err = clusterInstance.Register("http://url0:1234", map[string]string{"pool": "pool1"})
 	c.Assert(err, gocheck.IsNil)
-	c.Check(node == "server0" || node == "server1", gocheck.Equals, true)
-	config = docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/python"}
-	opts = docker.CreateContainerOptions{Name: cont3.Name, Config: &config}
-	node, _, err = scheduler.Schedule(opts)
+	err = clusterInstance.Register("http://url1:1234", map[string]string{"pool": "pool1"})
 	c.Assert(err, gocheck.IsNil)
-	c.Check(node, gocheck.Equals, "server2")
+	err = clusterInstance.Register("http://url2:1234", map[string]string{"pool": "pool1"})
+	c.Assert(err, gocheck.IsNil)
+	opts := docker.CreateContainerOptions{Name: cont1.Name}
+	node, err := scheduler.Schedule(clusterInstance, opts, a1.Name)
+	c.Assert(err, gocheck.IsNil)
+	c.Check(node.Address, gocheck.Equals, "http://url0:1234")
+	opts = docker.CreateContainerOptions{Name: cont2.Name}
+	node, err = scheduler.Schedule(clusterInstance, opts, a2.Name)
+	c.Assert(err, gocheck.IsNil)
+	c.Check(node.Address, gocheck.Equals, "http://url1:1234")
+	opts = docker.CreateContainerOptions{Name: cont3.Name}
+	node, err = scheduler.Schedule(clusterInstance, opts, a3.Name)
+	c.Assert(err, gocheck.IsNil)
+	c.Check(node.Address, gocheck.Equals, "http://url2:1234")
 }
 
-func (s *SchedulerSuite) TestSchedulerScheduleFallback(c *gocheck.C) {
-	server0, err := testing.NewServer(nil)
-	c.Assert(err, gocheck.IsNil)
-	defer server0.Stop()
-	var buf bytes.Buffer
-	client, _ := docker.NewClient(server0.URL())
-	client.PullImage(docker.PullImageOptions{Repository: "tsuru/python", OutputStream: &buf})
+func (s *S) TestSchedulerScheduleFallback(c *gocheck.C) {
 	a1 := app.App{Name: "impius", Teams: []string{"tsuruteam", "nodockerforme"}}
 	cont1 := container{ID: "1", Name: "impius1", AppName: a1.Name}
-	err = s.storage.Apps().Insert(a1)
+	err := s.storage.Apps().Insert(a1)
 	c.Assert(err, gocheck.IsNil)
 	defer s.storage.Apps().RemoveAll(bson.M{"name": a1.Name})
 	coll := s.storage.Collection(schedulerCollection)
-	err = coll.Insert(
-		bson.M{"_id": "server0", "address": server0.URL()},
-	)
+	p := Pool{Name: "pool1"}
+	err = coll.Insert(p)
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": "server0"})
+	defer coll.RemoveAll(bson.M{"_id": p.Name})
 	contColl := collection()
 	err = contColl.Insert(cont1)
 	c.Assert(err, gocheck.IsNil)
 	defer contColl.RemoveAll(bson.M{"name": cont1.Name})
 	var scheduler segregatedScheduler
-	config := docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/python"}
-	opts := docker.CreateContainerOptions{Name: cont1.Name, Config: &config}
-	node, _, err := scheduler.Schedule(opts)
+	clusterInstance, err := cluster.New(&scheduler, &cluster.MapStorage{})
 	c.Assert(err, gocheck.IsNil)
-	c.Check(node, gocheck.Equals, "server0")
+	err = clusterInstance.Register("http://url0:1234", map[string]string{"pool": "pool1"})
+	c.Assert(err, gocheck.IsNil)
+	opts := docker.CreateContainerOptions{Name: cont1.Name}
+	node, err := scheduler.Schedule(clusterInstance, opts, a1.Name)
+	c.Assert(err, gocheck.IsNil)
+	c.Check(node.Address, gocheck.Equals, "http://url0:1234")
 }
 
-func (s *SchedulerSuite) TestSchedulerNoFallback(c *gocheck.C) {
+func (s *S) TestSchedulerScheduleTeamOwner(c *gocheck.C) {
+	a1 := app.App{
+		Name:      "impius",
+		Teams:     []string{"nodockerforme"},
+		TeamOwner: "tsuruteam",
+	}
+	cont1 := container{ID: "1", Name: "impius1", AppName: a1.Name}
+	err := s.storage.Apps().Insert(a1)
+	c.Assert(err, gocheck.IsNil)
+	defer s.storage.Apps().RemoveAll(bson.M{"name": a1.Name})
+	coll := s.storage.Collection(schedulerCollection)
+	p := Pool{Name: "pool1", Teams: []string{"tsuruteam"}}
+	err = coll.Insert(p)
+	c.Assert(err, gocheck.IsNil)
+	defer coll.RemoveAll(bson.M{"_id": p.Name})
+	contColl := collection()
+	err = contColl.Insert(cont1)
+	c.Assert(err, gocheck.IsNil)
+	defer contColl.RemoveAll(bson.M{"name": cont1.Name})
+	var scheduler segregatedScheduler
+	clusterInstance, err := cluster.New(&scheduler, &cluster.MapStorage{})
+	c.Assert(err, gocheck.IsNil)
+	err = clusterInstance.Register("http://url0:1234", map[string]string{"pool": "pool1"})
+	c.Assert(err, gocheck.IsNil)
+	opts := docker.CreateContainerOptions{Name: cont1.Name}
+	node, err := scheduler.Schedule(clusterInstance, opts, a1.Name)
+	c.Assert(err, gocheck.IsNil)
+	c.Check(node.Address, gocheck.Equals, "http://url0:1234")
+}
+
+func (s *S) TestSchedulerNoFallback(c *gocheck.C) {
 	app := app.App{Name: "bill", Teams: []string{"jean"}}
 	err := s.storage.Apps().Insert(app)
 	c.Assert(err, gocheck.IsNil)
@@ -136,287 +132,338 @@ func (s *SchedulerSuite) TestSchedulerNoFallback(c *gocheck.C) {
 	err = contColl.Insert(cont1)
 	c.Assert(err, gocheck.IsNil)
 	defer contColl.Remove(bson.M{"name": cont1.Name})
-	config := docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/python"}
 	var scheduler segregatedScheduler
-	opts := docker.CreateContainerOptions{Name: cont1.Name, Config: &config}
-	node, container, err := scheduler.Schedule(opts)
-	c.Assert(node, gocheck.Equals, "")
-	c.Assert(container, gocheck.IsNil)
+	clusterInstance, err := cluster.New(&scheduler, &cluster.MapStorage{})
+	c.Assert(err, gocheck.IsNil)
+	opts := docker.CreateContainerOptions{Name: cont1.Name}
+	node, err := scheduler.Schedule(clusterInstance, opts, app.Name)
+	c.Assert(node.Address, gocheck.Equals, "")
 	c.Assert(err, gocheck.Equals, errNoFallback)
 }
 
-func (s *SchedulerSuite) TestSchedulerNoNamespace(c *gocheck.C) {
-	old, _ := config.Get("docker:repository-namespace")
-	defer config.Set("docker:repository-namespace", old)
-	config.Unset("docker:repository-namespace")
-	config := docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/python"}
+func (s *S) TestSchedulerNoNodesNoPool(c *gocheck.C) {
 	var scheduler segregatedScheduler
-	opts := docker.CreateContainerOptions{Config: &config}
-	node, container, err := scheduler.Schedule(opts)
-	c.Assert(node, gocheck.Equals, "")
-	c.Assert(container, gocheck.IsNil)
-	c.Assert(err, gocheck.NotNil)
+	clusterInstance, err := cluster.New(&scheduler, &cluster.MapStorage{})
+	c.Assert(err, gocheck.IsNil)
+	opts := docker.CreateContainerOptions{}
+	node, err := scheduler.Schedule(clusterInstance, opts, "")
+	c.Assert(node.Address, gocheck.Equals, "")
+	c.Assert(err, gocheck.Equals, errNoFallback)
 }
 
-func (s *SchedulerSuite) TestSchedulerInvalidEndpoint(c *gocheck.C) {
-	app := app.App{Name: "bill", Teams: []string{"jean"}}
-	err := s.storage.Apps().Insert(app)
+func (s *S) TestSchedulerNoNodesWithFallbackPool(c *gocheck.C) {
+	var scheduler segregatedScheduler
+	clusterInstance, err := cluster.New(&scheduler, &cluster.MapStorage{})
 	c.Assert(err, gocheck.IsNil)
-	defer s.storage.Apps().Remove(bson.M{"name": app.Name})
-	cont1 := container{ID: "1", Name: "bill", AppName: app.Name}
+	err = scheduler.addPool("mypool")
+	c.Assert(err, gocheck.IsNil)
+	opts := docker.CreateContainerOptions{}
+	node, err := scheduler.Schedule(clusterInstance, opts, "")
+	c.Assert(node.Address, gocheck.Equals, "")
+	c.Assert(err, gocheck.NotNil)
+	c.Assert(err.Error(), gocheck.Matches, "No nodes found in pools.*")
+}
+
+func (s *S) TestChooseNodeDistributesNodesEqually(c *gocheck.C) {
+	nodes := []cluster.Node{
+		{Address: "http://server1:1234"},
+		{Address: "http://server2:1234"},
+		{Address: "http://server3:1234"},
+		{Address: "http://server4:1234"},
+	}
 	contColl := collection()
-	err = contColl.Insert(cont1)
-	c.Assert(err, gocheck.IsNil)
-	defer contColl.Remove(bson.M{"name": cont1.Name})
+	defer contColl.RemoveAll(bson.M{"appname": "coolapp9"})
+	cont1 := container{ID: "pre1", Name: "existingUnit1", AppName: "coolapp9", HostAddr: "server1"}
+	err := contColl.Insert(cont1)
+	c.Assert(err, gocheck.Equals, nil)
+	cont2 := container{ID: "pre2", Name: "existingUnit2", AppName: "coolapp9", HostAddr: "server2"}
+	err = contColl.Insert(cont2)
+	c.Assert(err, gocheck.Equals, nil)
+	numberOfUnits := 38
+	unitsPerNode := (numberOfUnits + 2) / 4
+	wg := sync.WaitGroup{}
+	wg.Add(numberOfUnits)
+	for i := 0; i < numberOfUnits; i++ {
+		go func(i int) {
+			defer wg.Done()
+			cont := container{ID: string(i), Name: fmt.Sprintf("unit%d", i), AppName: "coolapp9"}
+			err := contColl.Insert(cont)
+			c.Assert(err, gocheck.IsNil)
+			var s segregatedScheduler
+			node, err := s.chooseNode(nodes, cont.Name, "coolapp9")
+			c.Assert(err, gocheck.IsNil)
+			c.Assert(node, gocheck.NotNil)
+		}(i)
+	}
+	wg.Wait()
+	n, err := contColl.Find(bson.M{"hostaddr": "server1"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, unitsPerNode)
+	n, err = contColl.Find(bson.M{"hostaddr": "server2"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, unitsPerNode)
+	n, err = contColl.Find(bson.M{"hostaddr": "server3"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, unitsPerNode)
+	n, err = contColl.Find(bson.M{"hostaddr": "server4"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, unitsPerNode)
+}
+
+func (s *S) TestChooseNodeDistributesNodesEquallyDifferentApps(c *gocheck.C) {
+	nodes := []cluster.Node{
+		{Address: "http://server1:1234"},
+		{Address: "http://server2:1234"},
+	}
+	contColl := collection()
+	defer contColl.RemoveAll(bson.M{"appname": "skyrim"})
+	defer contColl.RemoveAll(bson.M{"appname": "oblivion"})
+	cont1 := container{ID: "pre1", Name: "existingUnit1", AppName: "skyrim", HostAddr: "server1"}
+	err := contColl.Insert(cont1)
+	c.Assert(err, gocheck.Equals, nil)
+	cont2 := container{ID: "pre2", Name: "existingUnit2", AppName: "skyrim", HostAddr: "server1"}
+	err = contColl.Insert(cont2)
+	c.Assert(err, gocheck.Equals, nil)
+	numberOfUnits := 2
+	wg := sync.WaitGroup{}
+	wg.Add(numberOfUnits)
+	for i := 0; i < numberOfUnits; i++ {
+		go func(i int) {
+			defer wg.Done()
+			cont := container{ID: string(i), Name: fmt.Sprintf("unit%d", i), AppName: "oblivion"}
+			err := contColl.Insert(cont)
+			c.Assert(err, gocheck.IsNil)
+			var s segregatedScheduler
+			node, err := s.chooseNode(nodes, cont.Name, "oblivion")
+			c.Assert(err, gocheck.IsNil)
+			c.Assert(node, gocheck.NotNil)
+		}(i)
+	}
+	wg.Wait()
+	n, err := contColl.Find(bson.M{"hostaddr": "server1"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, 3)
+	n, err = contColl.Find(bson.M{"hostaddr": "server2"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, 1)
+	n, err = contColl.Find(bson.M{"hostaddr": "server1", "appname": "oblivion"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, 1)
+	n, err = contColl.Find(bson.M{"hostaddr": "server2", "appname": "oblivion"}).Count()
+	c.Assert(err, gocheck.Equals, nil)
+	c.Check(n, gocheck.Equals, 1)
+}
+
+func (s *S) TestAddPool(c *gocheck.C) {
+	var seg segregatedScheduler
 	coll := s.storage.Collection(schedulerCollection)
-	err = coll.Insert(node{ID: "server0", Address: "", Teams: []string{"jean"}})
+	defer coll.RemoveId("pool1")
+	err := seg.addPool("pool1")
 	c.Assert(err, gocheck.IsNil)
-	defer coll.Remove(bson.M{"_id": "server0"})
-	config := docker.Config{Cmd: []string{"/usr/sbin/sshd", "-D"}, Image: "tsuru/bill"}
-	var scheduler segregatedScheduler
-	opts := docker.CreateContainerOptions{Name: cont1.Name, Config: &config}
-	node, container, err := scheduler.Schedule(opts)
-	c.Assert(node, gocheck.Equals, "server0")
-	c.Assert(container, gocheck.IsNil)
+}
+
+func (s *S) TestAddPoolWithoutNameShouldBreak(c *gocheck.C) {
+	var seg segregatedScheduler
+	err := seg.addPool("")
 	c.Assert(err, gocheck.NotNil)
+	c.Assert(err.Error(), gocheck.Equals, "Pool name is required.")
 }
 
-func (s *SchedulerSuite) TestSchedulerNodes(c *gocheck.C) {
+func (s *S) TestRemovePool(c *gocheck.C) {
+	var seg segregatedScheduler
 	coll := s.storage.Collection(schedulerCollection)
-	err := coll.Insert(
-		node{ID: "server0", Address: "http://localhost:8080", Teams: []string{"tsuru"}},
-		node{ID: "server1", Address: "http://localhost:8081", Teams: []string{"tsuru"}},
-		node{ID: "server2", Address: "http://localhost:8082", Teams: []string{"tsuru"}},
-	)
+	pool := Pool{Name: "pool1"}
+	err := coll.Insert(pool)
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
-	expected := []cluster.Node{
-		{ID: "server0", Address: "http://localhost:8080"},
-		{ID: "server1", Address: "http://localhost:8081"},
-		{ID: "server2", Address: "http://localhost:8082"},
-	}
-	var scheduler segregatedScheduler
-	nodes, err := scheduler.Nodes()
+	err = seg.removePool("pool1")
 	c.Assert(err, gocheck.IsNil)
-	c.Assert(nodes, gocheck.DeepEquals, expected)
+	p, err := coll.FindId("pool1").Count()
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(p, gocheck.Equals, 0)
 }
 
-func (s *SchedulerSuite) TestSchedulerGetNode(c *gocheck.C) {
+func (s *S) TestAddTeamToPool(c *gocheck.C) {
+	var seg segregatedScheduler
 	coll := s.storage.Collection(schedulerCollection)
-	err := coll.Insert(
-		node{ID: "server0", Address: "http://localhost:8080", Teams: []string{"tsuru"}},
-		node{ID: "server1", Address: "http://localhost:8081", Teams: []string{"tsuru"}},
-		node{ID: "server2", Address: "http://localhost:8082", Teams: []string{"tsuru"}},
-	)
+	pool := Pool{Name: "pool1"}
+	err := coll.Insert(pool)
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
-	var tests = []struct {
-		input    string
-		expected node
-		err      error
-	}{
-		{"server0", node{ID: "server0", Address: "http://localhost:8080", Teams: []string{"tsuru"}}, nil},
-		{"server1", node{ID: "server1", Address: "http://localhost:8081", Teams: []string{"tsuru"}}, nil},
-		{"server2", node{ID: "server2", Address: "http://localhost:8082", Teams: []string{"tsuru"}}, nil},
-		{"server102", node{}, errNodeNotFound},
-	}
-	var scheduler segregatedScheduler
-	for _, t := range tests {
-		nd, err := scheduler.GetNode(t.input)
-		c.Check(err, gocheck.Equals, t.err)
-		c.Check(nd, gocheck.DeepEquals, t.expected)
-	}
+	defer coll.RemoveId(pool.Name)
+	err = seg.addTeamsToPool("pool1", []string{"ateam", "test"})
+	c.Assert(err, gocheck.IsNil)
+	var p Pool
+	err = coll.FindId(pool.Name).One(&p)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(p.Teams, gocheck.DeepEquals, []string{"ateam", "test"})
 }
 
-func (s *SchedulerSuite) TestAddNodeToScheduler(c *gocheck.C) {
+func (s *S) TestAddTeamToPollWithTeams(c *gocheck.C) {
+	var seg segregatedScheduler
 	coll := s.storage.Collection(schedulerCollection)
-	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	var scheduler segregatedScheduler
-	err := scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team1"})
+	pool := Pool{Name: "pool1", Teams: []string{"test", "ateam"}}
+	err := coll.Insert(pool)
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": nd.ID})
-	var n node
-	err = coll.Find(bson.M{"_id": nd.ID}).One(&n)
+	defer coll.RemoveId(pool.Name)
+	err = seg.addTeamsToPool(pool.Name, []string{"pteam"})
 	c.Assert(err, gocheck.IsNil)
-	c.Check(n.ID, gocheck.Equals, nd.ID)
-	c.Check(n.Teams, gocheck.DeepEquals, []string{"team1"})
-	c.Check(n.Address, gocheck.Equals, "http://localhost:8080")
+	var p Pool
+	err = coll.FindId(pool.Name).One(&p)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(p.Teams, gocheck.DeepEquals, []string{"test", "ateam", "pteam"})
 }
 
-func (s *SchedulerSuite) TestAddNodeDuplicated(c *gocheck.C) {
+func (s *S) TestRemoveTeamsFromPool(c *gocheck.C) {
+	var seg segregatedScheduler
 	coll := s.storage.Collection(schedulerCollection)
-	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	var scheduler segregatedScheduler
-	err := scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team1"})
+	pool := Pool{Name: "pool1", Teams: []string{"test", "ateam"}}
+	err := coll.Insert(pool)
 	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": nd.ID})
-	err = scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team2"})
-	c.Assert(err, gocheck.Equals, errNodeAlreadyRegister)
+	defer coll.RemoveId(pool.Name)
+	err = seg.removeTeamsFromPool(pool.Name, []string{"test"})
+	c.Assert(err, gocheck.IsNil)
+	var p Pool
+	err = coll.FindId(pool.Name).One(&p)
+	c.Assert(err, gocheck.IsNil)
+	c.Assert(p.Teams, gocheck.DeepEquals, []string{"ateam"})
 }
 
-func (s *SchedulerSuite) TestRemoveNodeFromScheduler(c *gocheck.C) {
-	coll := s.storage.Collection(schedulerCollection)
-	nd := cluster.Node{ID: "server0", Address: "http://localhost:8080"}
-	var scheduler segregatedScheduler
-	err := scheduler.Register(map[string]string{"ID": nd.ID, "address": nd.Address, "team": "team1"})
-	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": "server0"})
-	err = scheduler.Unregister(map[string]string{"ID": nd.ID})
-	c.Assert(err, gocheck.IsNil)
-	n, err := coll.Find(bson.M{"_id": "server0"}).Count()
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(n, gocheck.Equals, 0)
-}
-
-func (s *SchedulerSuite) TesteRemoveUnknownNodeFromScheduler(c *gocheck.C) {
-	var scheduler segregatedScheduler
-	err := scheduler.Unregister(map[string]string{"ID": "server0"})
-	c.Assert(err, gocheck.Equals, errNodeNotFound)
-}
-
-func (s *SchedulerSuite) TestListNodesInTheScheduler(c *gocheck.C) {
-	coll := s.storage.Collection(schedulerCollection)
-	var scheduler segregatedScheduler
-	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:8080", "team": "team1"})
-	c.Assert(err, gocheck.IsNil)
-	err = scheduler.Register(map[string]string{"ID": "server1", "address": "http://localhost:9090", "team": "team1"})
-	c.Assert(err, gocheck.IsNil)
-	err = scheduler.Register(map[string]string{"ID": "server2", "address": "http://localhost:9090", "team": "team1"})
-	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
-	nodes, err := listNodesInTheScheduler()
-	c.Assert(err, gocheck.IsNil)
-	expected := []node{
-		{ID: "server0", Address: "http://localhost:8080", Teams: []string{"team1"}},
-		{ID: "server1", Address: "http://localhost:9090", Teams: []string{"team1"}},
-		{ID: "server2", Address: "http://localhost:9090", Teams: []string{"team1"}},
-	}
-	c.Assert(nodes, gocheck.DeepEquals, expected)
-}
-
-func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdInfo(c *gocheck.C) {
+func (s *S) TestAddPoolToSchedulerCmdInfo(c *gocheck.C) {
 	expected := cmd.Info{
-		Name:    "docker-add-node",
-		Usage:   "docker-add-node <id> <address> [team]",
-		Desc:    "Registers a new node in the cluster, optionally assigning it to a team",
-		MinArgs: 2,
-	}
-	cmd := addNodeToSchedulerCmd{}
-	c.Assert(cmd.Info(), gocheck.DeepEquals, &expected)
-}
-
-func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdRun(c *gocheck.C) {
-	var buf bytes.Buffer
-	coll := s.storage.Collection(schedulerCollection)
-	context := cmd.Context{Args: []string{"server0", "http://localhost:8080"}, Stdout: &buf}
-	cmd := addNodeToSchedulerCmd{}
-	err := cmd.Run(&context, nil)
-	c.Assert(err, gocheck.IsNil)
-	defer coll.Remove(bson.M{"_id": "server0"})
-	var n node
-	err = coll.Find(bson.M{"_id": "server0"}).One(&n)
-	c.Assert(err, gocheck.IsNil)
-	c.Check(n.ID, gocheck.Equals, "server0")
-	c.Check(n.Teams, gocheck.DeepEquals, []string{""})
-	c.Check(n.Address, gocheck.Equals, "http://localhost:8080")
-	c.Assert(buf.String(), gocheck.Equals, "Node successfully registered.\n")
-}
-
-func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdRunWithTeam(c *gocheck.C) {
-	var buf bytes.Buffer
-	coll := s.storage.Collection(schedulerCollection)
-	context := cmd.Context{Args: []string{"server0", "http://localhost:8080", "team1"}, Stdout: &buf}
-	cmd := addNodeToSchedulerCmd{}
-	err := cmd.Run(&context, nil)
-	c.Assert(err, gocheck.IsNil)
-	defer coll.Remove(bson.M{"_id": "server0"})
-	var n node
-	err = coll.Find(bson.M{"_id": "server0"}).One(&n)
-	c.Assert(err, gocheck.IsNil)
-	c.Check(n.ID, gocheck.Equals, "server0")
-	c.Check(n.Teams, gocheck.DeepEquals, []string{"team1"})
-	c.Check(n.Address, gocheck.Equals, "http://localhost:8080")
-	c.Assert(buf.String(), gocheck.Equals, "Node successfully registered.\n")
-}
-
-func (s *SchedulerSuite) TestAddNodeToTheSchedulerCmdFailure(c *gocheck.C) {
-	var buf bytes.Buffer
-	coll := s.storage.Collection(schedulerCollection)
-	var scheduler segregatedScheduler
-	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:4243", "team": ""})
-	c.Assert(err, gocheck.IsNil)
-	defer coll.Remove(bson.M{"_id": "server0"})
-	context := cmd.Context{Args: []string{"server0", "http://localhost:8080", "team1"}, Stdout: &buf}
-	cmd := addNodeToSchedulerCmd{}
-	err = cmd.Run(&context, nil)
-	c.Assert(err, gocheck.NotNil)
-}
-
-func (s *SchedulerSuite) TestRemoveNodeFromTheSchedulerCmdInfo(c *gocheck.C) {
-	expected := cmd.Info{
-		Name:    "docker-rm-node",
-		Usage:   "docker-rm-node <id>",
-		Desc:    "Removes a node from the cluster",
+		Name:    "docker-pool-add",
+		Usage:   "docker-pool-add <pool>",
+		Desc:    "Add a pool to cluster",
 		MinArgs: 1,
 	}
-	cmd := removeNodeFromSchedulerCmd{}
+	cmd := addPoolToSchedulerCmd{}
 	c.Assert(cmd.Info(), gocheck.DeepEquals, &expected)
 }
 
-func (s *SchedulerSuite) TestRemoveNodeFromTheSchedulerCmdRun(c *gocheck.C) {
+func (s *S) TestAddPoolToTheSchedulerCmd(c *gocheck.C) {
 	var buf bytes.Buffer
-	coll := s.storage.Collection(schedulerCollection)
-	var scheduler segregatedScheduler
-	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:8080", "team": "team1"})
-	c.Assert(err, gocheck.IsNil)
-	defer coll.Remove(bson.M{"_id": "server0"})
-	context := cmd.Context{Args: []string{"server0"}, Stdout: &buf}
-	err = removeNodeFromSchedulerCmd{}.Run(&context, nil)
-	c.Assert(err, gocheck.IsNil)
-	n, err := coll.Find(bson.M{"_id": "server0"}).Count()
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(n, gocheck.Equals, 0)
-	c.Assert(buf.String(), gocheck.Equals, "Node successfully removed.\n")
-}
-
-func (s *SchedulerSuite) TestRemoveNodeFromTheSchedulerCmdRunFailure(c *gocheck.C) {
-	var buf bytes.Buffer
-	context := cmd.Context{Args: []string{"server0"}, Stdout: &buf}
-	err := removeNodeFromSchedulerCmd{}.Run(&context, nil)
-	c.Assert(err, gocheck.NotNil)
-}
-
-func (s *SchedulerSuite) TestListNodesInTheSchedulerCmdInfo(c *gocheck.C) {
-	expected := cmd.Info{
-		Name:  "docker-list-nodes",
-		Usage: "docker-list-nodes",
-		Desc:  "List available nodes in the cluster",
+	context := cmd.Context{Args: []string{"poolTest"}, Stdout: &buf}
+	trans := &testing.ConditionalTransport{
+		Transport: testing.Transport{Message: "", Status: http.StatusOK},
+		CondFunc: func(req *http.Request) bool {
+			return req.URL.Path == "/docker/pool"
+		},
 	}
-	cmd := listNodesInTheSchedulerCmd{}
+	manager := cmd.Manager{}
+	client := cmd.NewClient(&http.Client{Transport: trans}, nil, &manager)
+	cmd := addPoolToSchedulerCmd{}
+	err := cmd.Run(&context, client)
+	c.Assert(err, gocheck.IsNil)
+}
+
+func (s *S) TestRemovePoolFromSchedulerCmdInfo(c *gocheck.C) {
+	expected := cmd.Info{
+		Name:    "docker-pool-remove",
+		Usage:   "docker-pool-remove <pool>",
+		Desc:    "Remove a pool to cluster",
+		MinArgs: 1,
+	}
+	cmd := removePoolFromSchedulerCmd{}
 	c.Assert(cmd.Info(), gocheck.DeepEquals, &expected)
 }
 
-func (s *SchedulerSuite) TestListNodesInTheSchedulerCmdRun(c *gocheck.C) {
-	coll := s.storage.Collection(schedulerCollection)
-	var scheduler segregatedScheduler
-	err := scheduler.Register(map[string]string{"ID": "server0", "address": "http://localhost:8080", "team": "team1"})
-	c.Assert(err, gocheck.IsNil)
-	err = scheduler.Register(map[string]string{"ID": "server1", "address": "http://localhost:9090", "team": "team1"})
-	c.Assert(err, gocheck.IsNil)
-	err = scheduler.Register(map[string]string{"ID": "server2", "address": "http://localhost:9090", "team": ""})
-	c.Assert(err, gocheck.IsNil)
-	defer coll.RemoveAll(bson.M{"_id": bson.M{"$in": []string{"server0", "server1", "server2"}}})
+func (s *S) TestRemovePoolFromTheSchedulerCmd(c *gocheck.C) {
 	var buf bytes.Buffer
-	ctx := cmd.Context{Stdout: &buf}
-	err = listNodesInTheSchedulerCmd{}.Run(&ctx, nil)
+	context := cmd.Context{Args: []string{"poolTest"}, Stdout: &buf}
+	trans := &testing.ConditionalTransport{
+		Transport: testing.Transport{Message: "", Status: http.StatusOK},
+		CondFunc: func(req *http.Request) bool {
+			return req.URL.Path == "/docker/pool"
+		},
+	}
+	manager := cmd.Manager{}
+	client := cmd.NewClient(&http.Client{Transport: trans}, nil, &manager)
+	cmd := removePoolFromSchedulerCmd{}
+	err := cmd.Run(&context, client)
 	c.Assert(err, gocheck.IsNil)
-	expected := `+---------+-----------------------+-------+
-| ID      | Address               | Team  |
-+---------+-----------------------+-------+
-| server0 | http://localhost:8080 | team1 |
-| server1 | http://localhost:9090 | team1 |
-| server2 | http://localhost:9090 |       |
-+---------+-----------------------+-------+
+}
+
+func (s *S) TestListPoolsInTheSchedulerCmdInfo(c *gocheck.C) {
+	expected := cmd.Info{
+		Name:  "docker-pool-list",
+		Usage: "docker-pool-list",
+		Desc:  "List available pools in the cluster",
+	}
+	cmd := listPoolsInTheSchedulerCmd{}
+	c.Assert(cmd.Info(), gocheck.DeepEquals, &expected)
+}
+
+func (s *S) TestListPoolsInTheSchedulerCmdRun(c *gocheck.C) {
+	var buf bytes.Buffer
+	pool := Pool{Name: "pool1", Teams: []string{"tsuruteam", "ateam"}}
+	pools := []Pool{pool}
+	poolsJson, _ := json.Marshal(pools)
+	ctx := cmd.Context{Stdout: &buf}
+	trans := &testing.ConditionalTransport{
+		Transport: testing.Transport{Message: string(poolsJson), Status: http.StatusOK},
+		CondFunc: func(req *http.Request) bool {
+			return req.URL.Path == "/docker/pool"
+		},
+	}
+	manager := cmd.Manager{}
+	client := cmd.NewClient(&http.Client{Transport: trans}, nil, &manager)
+	err := listPoolsInTheSchedulerCmd{}.Run(&ctx, client)
+	c.Assert(err, gocheck.IsNil)
+	expected := `+-------+------------------+
+| Pools | Teams            |
++-------+------------------+
+| pool1 | tsuruteam, ateam |
++-------+------------------+
 `
 	c.Assert(buf.String(), gocheck.Equals, expected)
+}
+
+func (s *S) TestAddTeamsToPoolCmdInfo(c *gocheck.C) {
+	expected := cmd.Info{
+		Name:    "docker-pool-teams-add",
+		Usage:   "docker-pool-teams-add <pool> <teams>",
+		Desc:    "Add team to a pool",
+		MinArgs: 2,
+	}
+	cmd := addTeamsToPoolCmd{}
+	c.Assert(cmd.Info(), gocheck.DeepEquals, &expected)
+}
+
+func (s *S) TestAddTeamsToPoolCmdRun(c *gocheck.C) {
+	var buf bytes.Buffer
+	ctx := cmd.Context{Stdout: &buf, Args: []string{"pool1", "team1", "team2"}}
+	trans := &testing.ConditionalTransport{
+		Transport: testing.Transport{Message: "", Status: http.StatusOK},
+		CondFunc: func(req *http.Request) bool {
+			return req.URL.Path == "/docker/pool/team"
+		},
+	}
+	manager := cmd.Manager{}
+	client := cmd.NewClient(&http.Client{Transport: trans}, nil, &manager)
+	err := addTeamsToPoolCmd{}.Run(&ctx, client)
+	c.Assert(err, gocheck.IsNil)
+}
+
+func (s *S) TestRemoveTeamsFromPoolCmdInfo(c *gocheck.C) {
+	expected := cmd.Info{
+		Name:    "docker-pool-teams-remove",
+		Usage:   "docker-pool-teams-remove <pool> <teams>",
+		Desc:    "Remove team from pool",
+		MinArgs: 2,
+	}
+	cmd := removeTeamsFromPoolCmd{}
+	c.Assert(cmd.Info(), gocheck.DeepEquals, &expected)
+}
+
+func (s *S) TestRemoveTeamsFromPoolCmdRun(c *gocheck.C) {
+	var buf bytes.Buffer
+	ctx := cmd.Context{Stdout: &buf, Args: []string{"pool1", "team1"}}
+	trans := &testing.ConditionalTransport{
+		Transport: testing.Transport{Message: "", Status: http.StatusOK},
+		CondFunc: func(req *http.Request) bool {
+			return req.URL.Path == "/docker/pool/team"
+		},
+	}
+	manager := cmd.Manager{}
+	client := cmd.NewClient(&http.Client{Transport: trans}, nil, &manager)
+	err := removeTeamsFromPoolCmd{}.Run(&ctx, client)
+	c.Assert(err, gocheck.IsNil)
 }

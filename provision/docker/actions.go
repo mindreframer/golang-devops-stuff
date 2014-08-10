@@ -6,38 +6,100 @@ package docker
 
 import (
 	"errors"
+	"fmt"
 	"github.com/fsouza/go-dockerclient"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/provision"
-	"github.com/globocom/tsuru/queue"
-	"labix.org/v2/mgo/bson"
-	"net"
-	"strings"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/provision"
+	"github.com/tsuru/tsuru/router"
+	"gopkg.in/mgo.v2/bson"
+	"io"
+	"io/ioutil"
+	"sync"
 )
 
-var createContainer = action.Action{
-	Name: "create-container",
+type runContainerActionsArgs struct {
+	app              provision.App
+	imageID          string
+	commands         []string
+	destinationHosts []string
+	privateKey       []byte
+	writer           io.Writer
+}
+
+type changeUnitsPipelineArgs struct {
+	app        provision.App
+	writer     io.Writer
+	toRemove   []container
+	unitsToAdd int
+	toHost     string
+}
+
+var insertEmptyContainerInDB = action.Action{
+	Name: "insert-empty-container",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		app := ctx.Params[0].(provision.App)
-		imageId := ctx.Params[1].(string)
-		cmds := ctx.Params[2].([]string)
-		log.Debugf("create container for app %s, based on image %s, with cmds %s", app.GetName(), imageId, cmds)
-		cont, err := newContainer(app, imageId, cmds)
-		if err != nil {
-			log.Errorf("error on create container for app %s - %s", app.GetName(), err)
+		args := ctx.Params[0].(runContainerActionsArgs)
+		contName := containerName()
+		cont := container{
+			AppName:    args.app.GetName(),
+			Type:       args.app.GetPlatform(),
+			Name:       contName,
+			Status:     "created",
+			Image:      args.imageID,
+			PrivateKey: string(args.privateKey),
+		}
+		coll := collection()
+		defer coll.Close()
+		if err := coll.Insert(cont); err != nil {
+			log.Errorf("error on inserting container into database %s - %s", cont.Name, err)
 			return nil, err
 		}
 		return cont, nil
 	},
 	Backward: func(ctx action.BWContext) {
 		c := ctx.FWResult.(container)
-		dockerCluster().RemoveContainer(docker.RemoveContainerOptions{ID: c.ID})
 		coll := collection()
 		defer coll.Close()
-		coll.Remove(bson.M{"id": c.ID})
+		coll.Remove(bson.M{"name": c.Name})
+	},
+}
+
+var updateContainerInDB = action.Action{
+	Name: "update-database-container",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		coll := collection()
+		defer coll.Close()
+		cont := ctx.Previous.(container)
+		err := coll.Update(bson.M{"name": cont.Name}, cont)
+		if err != nil {
+			log.Errorf("error on updating container into database %s - %s", cont.ID, err)
+			return nil, err
+		}
+		return cont, nil
+	},
+	Backward: func(ctx action.BWContext) {
+	},
+}
+
+var createContainer = action.Action{
+	Name: "create-container",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		cont := ctx.Previous.(container)
+		args := ctx.Params[0].(runContainerActionsArgs)
+		log.Debugf("create container for app %s, based on image %s, with cmds %s", args.app.GetName(), args.imageID, args.commands)
+		err := cont.create(args.app, args.imageID, args.commands, args.destinationHosts...)
+		if err != nil {
+			log.Errorf("error on create container for app %s - %s", args.app.GetName(), err)
+			return nil, err
+		}
+		return cont, nil
+	},
+	Backward: func(ctx action.BWContext) {
+		c := ctx.FWResult.(container)
+		err := dockerCluster().RemoveContainer(docker.RemoveContainerOptions{ID: c.ID})
+		if err != nil {
+			log.Errorf("Failed to remove the container %q: %s", c.ID, err)
+		}
 	},
 }
 
@@ -45,28 +107,14 @@ var setNetworkInfo = action.Action{
 	Name: "set-network-info",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
 		c := ctx.Previous.(container)
-		ip, hostPort, err := c.networkInfo()
+		info, err := c.networkInfo()
 		if err != nil {
 			return nil, err
 		}
-		c.IP = ip
-		c.HostPort = hostPort
+		c.IP = info.IP
+		c.HostPort = info.HTTPHostPort
+		c.SSHHostPort = info.SSHHostPort
 		return c, nil
-	},
-}
-
-var addRoute = action.Action{
-	Name: "add-route",
-	Forward: func(ctx action.FWContext) (action.Result, error) {
-		c := ctx.Previous.(container)
-		r, err := getRouter()
-		if err != nil {
-			return nil, err
-		}
-		err = r.AddRoute(c.AppName, c.getAddress())
-		return c, err
-	},
-	Backward: func(ctx action.BWContext) {
 	},
 }
 
@@ -91,81 +139,178 @@ var startContainer = action.Action{
 	},
 }
 
-var injectEnvirons = action.Action{
-	Name: "inject-environs",
+var provisionAddUnitsToHost = action.Action{
+	Name: "provision-add-units-to-host",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		app, ok := ctx.Params[0].(provision.App)
-		if !ok {
-			return nil, errors.New("First parameter must be a provision.App.")
+		args := ctx.Params[0].(changeUnitsPipelineArgs)
+		var destinationHosts []string
+		if args.toHost != "" {
+			destinationHosts = []string{args.toHost}
 		}
-		go injectEnvsAndRestart(app)
-		return nil, nil
+		containers, err := addContainersWithHost(args.writer, args.app, args.unitsToAdd, destinationHosts...)
+		if err != nil {
+			return nil, err
+		}
+		return containers, nil
 	},
 	Backward: func(ctx action.BWContext) {
-	},
-}
-
-var saveUnits = action.Action{
-	Name: "save-units",
-	Forward: func(ctx action.FWContext) (action.Result, error) {
-		a, ok := ctx.Params[0].(*app.App)
-		if !ok {
-			return nil, errors.New("First parameter must be a *app.App.")
-		}
-		a, err := app.GetByName(a.Name)
-		if err != nil {
-			return nil, err
-		}
-		containers, err := listAppContainers(a.GetName())
-		if err != nil {
-			return nil, err
-		}
-		for _, c := range containers {
-			var status string
-			addr := strings.Replace(c.getAddress(), "http://", "", 1)
-			conn, err := net.Dial("tcp", addr)
+		containers := ctx.FWResult.([]container)
+		for _, cont := range containers {
+			err := removeContainer(&cont)
 			if err != nil {
-				status = provision.StatusUnreachable.String()
-			} else {
-				conn.Close()
-				status = provision.StatusStarted.String()
+				log.Errorf("Error removing added container %s: %s", cont.ID, err.Error())
 			}
-			u := app.Unit{
-				Name:  c.ID,
-				Type:  c.Type,
-				Ip:    c.HostAddr,
-				State: status,
-			}
-			a.AddUnit(&u)
 		}
-		conn, err := db.Conn()
+	},
+	MinParams: 1,
+}
+
+var addNewRoutes = action.Action{
+	Name: "add-new-routes",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		newContainers := ctx.Previous.([]container)
+		r, err := getRouter()
 		if err != nil {
 			return nil, err
 		}
-		defer conn.Close()
-		conn.Apps().Update(bson.M{"name": a.Name}, a)
-		return nil, nil
+		addedContainers := make([]container, 0, len(newContainers))
+		for _, cont := range newContainers {
+			err = r.AddRoute(cont.AppName, cont.getAddress())
+			if err != nil {
+				for _, toRemoveCont := range addedContainers {
+					r.RemoveRoute(toRemoveCont.AppName, toRemoveCont.getAddress())
+				}
+				return nil, err
+			}
+			addedContainers = append(addedContainers, cont)
+		}
+		return newContainers, nil
 	},
 	Backward: func(ctx action.BWContext) {
+		newContainers := ctx.FWResult.([]container)
+		r, err := getRouter()
+		if err != nil {
+			log.Errorf("[add-new-routes:Backward] Error geting router: %s", err.Error())
+		}
+		for _, cont := range newContainers {
+			err = r.RemoveRoute(cont.AppName, cont.getAddress())
+			if err != nil {
+				log.Errorf("[add-new-routes:Backward] Error removing route for %s: %s", cont.ID, err.Error())
+			}
+		}
 	},
 }
 
-var bindService = action.Action{
-	Name: "bind-service",
+var removeOldRoutes = action.Action{
+	Name: "remove-old-routes",
 	Forward: func(ctx action.FWContext) (action.Result, error) {
-		a, ok := ctx.Params[0].(provision.App)
-		if !ok {
-			return nil, errors.New("First parameter must be a provision.App.")
+		args := ctx.Params[0].(changeUnitsPipelineArgs)
+		r, err := getRouter()
+		if err != nil {
+			return nil, err
 		}
-		for _, u := range a.ProvisionedUnits() {
-			msg := queue.Message{
-				Action: app.BindService,
-				Args:   []string{a.GetName(), u.GetName()},
+		removedConts := make([]container, 0, len(args.toRemove))
+		for _, cont := range args.toRemove {
+			err = r.RemoveRoute(cont.AppName, cont.getAddress())
+			if err != router.ErrRouteNotFound && err != nil {
+				for _, toAddCont := range removedConts {
+					r.AddRoute(toAddCont.AppName, toAddCont.getAddress())
+				}
+				return nil, err
 			}
-			go app.Enqueue(msg)
+			removedConts = append(removedConts, cont)
 		}
-		return nil, nil
+		return ctx.Previous, nil
+	},
+	Backward: func(ctx action.BWContext) {
+		args := ctx.Params[0].(changeUnitsPipelineArgs)
+		r, err := getRouter()
+		if err != nil {
+			log.Errorf("[add-new-routes:Backward] Error geting router: %s", err.Error())
+		}
+		for _, cont := range args.toRemove {
+			err = r.AddRoute(cont.AppName, cont.getAddress())
+			if err != nil {
+				log.Errorf("[remove-old-routes:Backward] Error adding back route for %s: %s", cont.ID, err.Error())
+			}
+		}
+	},
+	MinParams: 1,
+}
+
+var provisionRemoveOldUnits = action.Action{
+	Name: "provision-remove-old-units",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		var wg sync.WaitGroup
+		args := ctx.Params[0].(changeUnitsPipelineArgs)
+		removedContainers := make(chan *container, len(args.toRemove))
+		writer := args.writer
+		if writer == nil {
+			writer = ioutil.Discard
+		}
+		total := len(args.toRemove)
+		var plural string
+		if total > 1 {
+			plural = "s"
+		}
+		fmt.Fprintf(writer, "\n---- Removing %d old unit%s ----\n", total, plural)
+		for _, cont := range args.toRemove {
+			wg.Add(1)
+			go func(cont container) {
+				defer wg.Done()
+				err := removeContainer(&cont)
+				if err != nil {
+					log.Errorf("Ignored error trying to remove old container %q: %s", cont.ID, err.Error())
+				}
+				removedContainers <- &cont
+			}(cont)
+		}
+		go func() {
+			wg.Wait()
+			close(removedContainers)
+		}()
+		counter := 0
+		for _ = range removedContainers {
+			counter++
+			fmt.Fprintf(writer, " ---> Removed old unit %d/%d\n", counter, total)
+		}
+		return ctx.Previous, nil
 	},
 	Backward: func(ctx action.BWContext) {
 	},
+	MinParams: 1,
+}
+
+var followLogsAndCommit = action.Action{
+	Name: "follow-logs-and-commit",
+	Forward: func(ctx action.FWContext) (action.Result, error) {
+		c, ok := ctx.Previous.(container)
+		if !ok {
+			return nil, errors.New("Previous result must be a container.")
+		}
+		args := ctx.Params[0].(runContainerActionsArgs)
+		err := c.logs(args.writer)
+		if err != nil {
+			log.Errorf("error on get logs for container %s - %s", c.ID, err)
+			return nil, err
+		}
+		status, err := dockerCluster().WaitContainer(c.ID)
+		if err != nil {
+			log.Errorf("Process failed for container %q: %s", c.ID, err)
+			return nil, err
+		}
+		if status != 0 {
+			return nil, fmt.Errorf("Exit status %d", status)
+		}
+		imageId, err := c.commit()
+		if err != nil {
+			log.Errorf("error on commit container %s - %s", c.ID, err)
+			return nil, err
+		}
+		c.remove()
+		return imageId, nil
+	},
+	Backward: func(ctx action.BWContext) {
+	},
+	MinParams: 1,
 }

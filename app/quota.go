@@ -6,10 +6,10 @@ package app
 
 import (
 	"errors"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/quota"
-	"labix.org/v2/mgo"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/quota"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 )
 
 func reserveUnits(app *App, quantity int) error {

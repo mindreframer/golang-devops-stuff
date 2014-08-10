@@ -1,11 +1,11 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package rec_test
 
 import (
-	"github.com/globocom/tsuru/rec"
+	"github.com/tsuru/tsuru/rec"
 )
 
 func ExampleLog() {

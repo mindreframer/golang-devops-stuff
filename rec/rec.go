@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -8,7 +8,7 @@ package rec
 
 import (
 	"errors"
-	"github.com/globocom/tsuru/db"
+	"github.com/tsuru/tsuru/db"
 	"time"
 )
 

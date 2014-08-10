@@ -1,96 +1,91 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package app
 
 import (
-	"errors"
-	"github.com/globocom/tsuru/db"
-	"labix.org/v2/mgo/bson"
-	"sync"
-	"sync/atomic"
+	"encoding/json"
+	"fmt"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/queue"
 )
-
-const (
-	closed int32 = iota
-	open
-)
-
-var listeners = struct {
-	m map[string][]*LogListener
-	sync.RWMutex
-}{
-	m: make(map[string][]*LogListener),
-}
 
 type LogListener struct {
-	C       <-chan Applog
-	c       chan Applog
-	quit    chan byte
-	state   int32
-	appname string
+	C <-chan Applog
+	q queue.PubSubQ
 }
 
-func NewLogListener(a *App) *LogListener {
+func logQueueName(appName string) string {
+	return "pubsub:" + appName
+}
+
+func NewLogListener(a *App, filterLog Applog) (*LogListener, error) {
+	factory, err := queue.Factory()
+	if err != nil {
+		return nil, err
+	}
+	pubSubQ, err := factory.Get(logQueueName(a.Name))
+	if err != nil {
+		return nil, err
+	}
+	subChan, err := pubSubQ.Sub()
+	if err != nil {
+		return nil, err
+	}
 	c := make(chan Applog, 10)
-	l := LogListener{C: c, c: c, state: open, appname: a.Name}
-	l.quit = make(chan byte)
-	listeners.Lock()
-	list := listeners.m[l.appname]
-	list = append(list, &l)
-	listeners.m[a.Name] = list
-	listeners.Unlock()
-	return &l
+	go func() {
+		defer close(c)
+		for msg := range subChan {
+			applog := Applog{}
+			err := json.Unmarshal(msg, &applog)
+			if err != nil {
+				log.Errorf("Unparsable log message, ignoring: %s", string(msg))
+				continue
+			}
+			if (filterLog.Source == "" || filterLog.Source == applog.Source) &&
+				(filterLog.Unit == "" || filterLog.Unit == applog.Unit) {
+				c <- applog
+			}
+		}
+	}()
+	l := LogListener{C: c, q: pubSubQ}
+	return &l, nil
 }
 
-func (l *LogListener) Close() error {
-	if !atomic.CompareAndSwapInt32(&l.state, open, closed) {
-		return errors.New("Already closed.")
-	}
-	listeners.Lock()
-	defer listeners.Unlock()
-	close(l.quit)
-	close(l.c)
-	list := listeners.m[l.appname]
-	index := -1
-	for i, listener := range list {
-		if listener == l {
-			index = i
-			break
+func (l *LogListener) Close() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("Recovered panic closing listener (possible double close): %#v", r)
 		}
-	}
-	if index > -1 {
-		list[index], list[len(list)-1] = list[len(list)-1], list[index]
-		listeners.m[l.appname] = list[:len(list)-1]
-	}
-	return nil
+	}()
+	err = l.q.UnSub()
+	return
 }
 
 func notify(appName string, messages []interface{}) {
-	var wg sync.WaitGroup
-	listeners.RLock()
-	ls := make([]*LogListener, len(listeners.m[appName]))
-	copy(ls, listeners.m[appName])
-	listeners.RUnlock()
-	for _, l := range ls {
-		wg.Add(1)
-		go func(l *LogListener) {
-			defer wg.Done()
-			for _, msg := range messages {
-				select {
-				case <-l.quit:
-					return
-				default:
-					defer func() {
-						recover()
-					}()
-					l.c <- msg.(Applog)
-				}
-			}
-		}(l)
+	factory, err := queue.Factory()
+	if err != nil {
+		log.Errorf("Error on logs notify: %s", err.Error())
+		return
 	}
-	wg.Wait()
+	pubSubQ, err := factory.Get(logQueueName(appName))
+	if err != nil {
+		log.Errorf("Error on logs notify: %s", err.Error())
+		return
+	}
+	for _, msg := range messages {
+		bytes, err := json.Marshal(msg)
+		if err != nil {
+			log.Errorf("Error on logs notify: %s", err.Error())
+			continue
+		}
+		err = pubSubQ.Pub(bytes)
+		if err != nil {
+			log.Errorf("Error on logs notify: %s", err.Error())
+		}
+	}
 }
 
 // LogRemove removes the app log.
@@ -99,10 +94,19 @@ func LogRemove(a *App) error {
 	if err != nil {
 		return err
 	}
+	defer conn.Close()
 	if a != nil {
-		_, err = conn.Logs().RemoveAll(bson.M{"appname": a.Name})
-	} else {
-		_, err = conn.Logs().RemoveAll(nil)
+		return conn.Logs(a.Name).DropCollection()
 	}
-	return err
+	colls, err := conn.LogsCollections()
+	if err != nil {
+		return err
+	}
+	for _, coll := range colls {
+		err = coll.DropCollection()
+		if err != nil {
+			log.Errorf("Error trying to drop collection %s", coll.Name)
+		}
+	}
+	return nil
 }

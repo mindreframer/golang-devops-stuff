@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,17 +6,19 @@ package app
 
 import (
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/queue"
-	"github.com/globocom/tsuru/quota"
-	ttesting "github.com/globocom/tsuru/testing"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/auth/native"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/quota"
+	"github.com/tsuru/tsuru/service"
+	ttesting "github.com/tsuru/tsuru/testing"
+	"gopkg.in/mgo.v2/bson"
 	"io"
 	"io/ioutil"
-	"labix.org/v2/mgo/bson"
 	"launchpad.net/gocheck"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"testing"
@@ -65,7 +67,7 @@ var Greater gocheck.Checker = &greaterChecker{}
 
 func (s *S) createUserAndTeam(c *gocheck.C) {
 	s.user = &auth.User{
-		Email: "whydidifall@thewho.com", Password: "123",
+		Email: "whydidifall@thewho.com",
 		Quota: quota.Unlimited,
 	}
 	err := s.user.Create()
@@ -75,6 +77,8 @@ func (s *S) createUserAndTeam(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 }
 
+var nativeScheme = auth.Scheme(native.NativeScheme{})
+
 func (s *S) SetUpSuite(c *gocheck.C) {
 	err := config.ReadConfigFile("testdata/config.yaml")
 	c.Assert(err, gocheck.IsNil)
@@ -82,25 +86,22 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	s.t = &ttesting.T{}
 	s.createUserAndTeam(c)
-	s.t.StartAmzS3AndIAM(c)
 	s.t.SetGitConfs(c)
 	s.provisioner = ttesting.NewFakeProvisioner()
 	Provisioner = s.provisioner
+	AuthScheme = nativeScheme
 	platform := Platform{Name: "python"}
 	s.conn.Platforms().Insert(platform)
 }
 
 func (s *S) TearDownSuite(c *gocheck.C) {
-	defer s.t.S3Server.Quit()
-	defer s.t.IamServer.Quit()
 	s.conn.Apps().Database.DropDatabase()
-	queue.Preempt()
 }
 
 func (s *S) TearDownTest(c *gocheck.C) {
 	s.t.RollbackGitConfs(c)
 	s.provisioner.Reset()
-	s.conn.Logs().RemoveAll(nil)
+	LogRemove(nil)
 	s.conn.Users().Update(
 		bson.M{"email": s.user.Email},
 		bson.M{"$set": bson.M{"quota": quota.Unlimited}},
@@ -115,8 +116,8 @@ func (s *S) getTestData(p ...string) io.ReadCloser {
 }
 
 func (s *S) createAdminUserAndTeam(c *gocheck.C) {
-	s.admin = &auth.User{Email: "superuser@gmail.com", Password: "123"}
-	err := s.conn.Users().Insert(&s.admin)
+	s.admin = &auth.User{Email: "superuser@gmail.com"}
+	err := s.admin.Create()
 	c.Assert(err, gocheck.IsNil)
 	adminTeamName, err := config.GetString("admin-team")
 	c.Assert(err, gocheck.IsNil)
@@ -132,39 +133,24 @@ func (s *S) removeAdminUserAndTeam(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 }
 
-type MessageList []queue.Message
-
-func (l MessageList) Len() int {
-	return len(l)
-}
-
-func (l MessageList) Less(i, j int) bool {
-	if l[i].Action < l[j].Action {
-		return true
-	} else if l[i].Action > l[j].Action {
-		return false
+func (s *S) addServiceInstance(c *gocheck.C, appName string, fn http.HandlerFunc) func() {
+	ts := httptest.NewServer(fn)
+	ret := func() {
+		ts.Close()
+		s.conn.Services().Remove(bson.M{"_id": "mysql"})
+		s.conn.ServiceInstances().Remove(bson.M{"_id": "my-mysql"})
 	}
-	if len(l[i].Args) == 0 {
-		return true
-	} else if len(l[j].Args) == 0 {
-		return false
-	}
-	smaller := len(l[i].Args)
-	if len(l[j].Args) < smaller {
-		smaller = len(l[j].Args)
-	}
-	for k := 0; k < smaller; k++ {
-		if l[i].Args[k] < l[j].Args[k] {
-			return true
-		} else if l[i].Args[k] > l[j].Args[k] {
-			return false
-		}
-	}
-	return false
-}
-
-func (l MessageList) Swap(i, j int) {
-	l[i], l[j] = l[j], l[i]
+	srvc := service.Service{Name: "mysql", Endpoint: map[string]string{"production": ts.URL}}
+	err := srvc.Create()
+	c.Assert(err, gocheck.IsNil)
+	instance := service.ServiceInstance{Name: "my-mysql", ServiceName: "mysql", Teams: []string{s.team.Name}}
+	err = instance.Create()
+	c.Assert(err, gocheck.IsNil)
+	err = instance.AddApp(appName)
+	c.Assert(err, gocheck.IsNil)
+	err = s.conn.ServiceInstances().Update(bson.M{"name": instance.Name}, instance)
+	c.Assert(err, gocheck.IsNil)
+	return ret
 }
 
 type testHandler struct {

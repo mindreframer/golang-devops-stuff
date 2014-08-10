@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 package log
@@ -74,4 +74,10 @@ func (s *FileLoggerSuite) TestErrorShouldWriteWhenDebugIsFalse(c *gocheck.C) {
 	fl.logger = log.New(b, "", log.LstdFlags)
 	l.Error("should write this")
 	c.Assert(b.String(), gocheck.Matches, `.* ERROR: should write this\n$`)
+}
+
+func (s *FileLoggerSuite) TestGetStdLoggerShouldReturnValidLogger(c *gocheck.C) {
+	logger := s.l.GetStdLogger()
+	logger.Printf(`message is "%s"`, "some debug message")
+	c.Assert(s.b.String(), gocheck.Matches, `.*message is "some debug message"\n$`)
 }

@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,10 +7,14 @@
 package router
 
 import (
+	"errors"
 	"fmt"
-	"github.com/globocom/tsuru/db"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/db/storage"
+	"gopkg.in/mgo.v2/bson"
 )
+
+var ErrRouteNotFound = errors.New("Route not found")
 
 var routers = make(map[string]Router)
 
@@ -46,7 +50,7 @@ type Router interface {
 	Routes(name string) ([]string, error)
 }
 
-func collection() (*db.Collection, error) {
+func collection() (*storage.Collection, error) {
 	conn, err := db.Conn()
 	if err != nil {
 		return nil, err

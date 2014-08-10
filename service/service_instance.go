@@ -7,23 +7,25 @@ package service
 import (
 	"encoding/json"
 	stderrors "errors"
-	"github.com/globocom/tsuru/action"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/log"
-	"github.com/globocom/tsuru/rec"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/action"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/log"
+	"github.com/tsuru/tsuru/rec"
+	"gopkg.in/mgo.v2/bson"
+	"io"
 	"net/http"
 	"regexp"
 )
 
 var (
-	ErrServiceInstanceNotFound   = stderrors.New("Service instance not found")
-	ErrInvalidInstanceName       = stderrors.New("Invalid service instance name")
-	ErrInstanceNameAlreadyExists = stderrors.New("Instance name already exists.")
-	ErrAccessNotAllowed          = stderrors.New("User does not have access to this service instance")
+	ErrServiceInstanceNotFound   = stderrors.New("service instance not found")
+	ErrInvalidInstanceName       = stderrors.New("invalid service instance name")
+	ErrInstanceNameAlreadyExists = stderrors.New("instance name already exists.")
+	ErrAccessNotAllowed          = stderrors.New("user does not have access to this service instance")
+	ErrMultipleTeams             = stderrors.New("user is member of multiple teams, please specify the team that owns the service instance")
 
 	instanceNameRegexp = regexp.MustCompile(`^[A-Za-z][-a-zA-Z0-9_]+$`)
 )
@@ -34,6 +36,7 @@ type ServiceInstance struct {
 	PlanName    string `bson:"plan_name"`
 	Apps        []string
 	Teams       []string
+	TeamOwner   string
 }
 
 // DeleteInstance deletes the service instance from the database.
@@ -237,16 +240,12 @@ func validateServiceInstanceName(name string) error {
 	return nil
 }
 
-func CreateServiceInstance(name string, service *Service, planName string, user *auth.User) error {
-	err := validateServiceInstanceName(name)
+func CreateServiceInstance(instance ServiceInstance, service *Service, user *auth.User) error {
+	err := validateServiceInstanceName(instance.Name)
 	if err != nil {
 		return err
 	}
-	instance := ServiceInstance{
-		Name:        name,
-		ServiceName: service.Name,
-	}
-	instance.PlanName = planName
+	instance.ServiceName = service.Name
 	teams, err := user.Teams()
 	if err != nil {
 		return err
@@ -257,9 +256,26 @@ func CreateServiceInstance(name string, service *Service, planName string, user 
 			instance.Teams = append(instance.Teams, team.Name)
 		}
 	}
+	if instance.TeamOwner == "" {
+		if len(instance.Teams) > 1 {
+			return ErrMultipleTeams
+		}
+		instance.TeamOwner = instance.Teams[0]
+	} else {
+		var found bool
+		for _, team := range instance.Teams {
+			if instance.TeamOwner == team {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return auth.ErrTeamNotFound
+		}
+	}
 	actions := []*action.Action{&createServiceInstance, &insertServiceInstance}
 	pipeline := action.NewPipeline(actions...)
-	return pipeline.Execute(*service, instance)
+	return pipeline.Execute(*service, instance, user.Email)
 }
 
 func GetServiceInstancesByServices(services []Service) ([]ServiceInstance, error) {
@@ -310,4 +326,14 @@ func GetServiceInstance(name string, u *auth.User) (*ServiceInstance, error) {
 		return nil, ErrAccessNotAllowed
 	}
 	return &instance, nil
+}
+
+// Proxy is a proxy between tsuru and the service.
+// This method allow customized service methods.
+func Proxy(si *ServiceInstance, method, path string, body io.ReadCloser) (*http.Response, error) {
+	endpoint, err := si.Service().getClient("production")
+	if err != nil {
+		return nil, err
+	}
+	return endpoint.Proxy(method, path, body)
 }

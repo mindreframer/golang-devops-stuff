@@ -1,13 +1,13 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package main
 
 import (
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/heal"
-	"github.com/globocom/tsuru/log"
+	"github.com/tsuru/tsuru/cmd"
+	"github.com/tsuru/tsuru/heal"
+	"github.com/tsuru/tsuru/log"
 	"launchpad.net/gnuflag"
 	"time"
 )

@@ -5,8 +5,8 @@
 package app
 
 import (
-	"github.com/globocom/tsuru/quota"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/tsuru/quota"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 	"runtime"
 	"sync"

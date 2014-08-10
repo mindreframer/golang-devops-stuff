@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -85,8 +85,8 @@ func (t *targetSlice) String() string {
 	return strings.Join(values, "\n")
 }
 
-func readTarget() (string, error) {
-	targetPath := joinWithUserDir(".tsuru_target")
+func ReadTarget() (string, error) {
+	targetPath := JoinWithUserDir(".tsuru_target")
 	if f, err := filesystem().Open(targetPath); err == nil {
 		defer f.Close()
 		if b, err := ioutil.ReadAll(f); err == nil {
@@ -97,12 +97,12 @@ func readTarget() (string, error) {
 }
 
 func deleteTargetFile() {
-	filesystem().Remove(joinWithUserDir(".tsuru_target"))
+	filesystem().Remove(JoinWithUserDir(".tsuru_target"))
 }
 
 func GetURL(path string) (string, error) {
 	var prefix string
-	target, err := readTarget()
+	target, err := ReadTarget()
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +113,7 @@ func GetURL(path string) (string, error) {
 }
 
 func writeTarget(t string) error {
-	targetPath := joinWithUserDir(".tsuru_target")
+	targetPath := JoinWithUserDir(".tsuru_target")
 	targetFile, err := filesystem().OpenFile(targetPath, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0600)
 	if err != nil {
 		return err
@@ -171,7 +171,7 @@ func (t *targetAdd) Flags() *gnuflag.FlagSet {
 }
 
 func resetTargetList() error {
-	targetsPath := joinWithUserDir(".tsuru_targets")
+	targetsPath := JoinWithUserDir(".tsuru_targets")
 	targetsFile, err := filesystem().OpenFile(targetsPath, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_TRUNC, 0600)
 	if err != nil {
 		return err
@@ -190,7 +190,7 @@ func writeOnTargetList(label string, target string) error {
 	if targetExist {
 		return errors.New("Target label provided already exist")
 	}
-	targetsPath := joinWithUserDir(".tsuru_targets")
+	targetsPath := JoinWithUserDir(".tsuru_targets")
 	targetsFile, err := filesystem().OpenFile(targetsPath, syscall.O_RDWR|syscall.O_CREAT|syscall.O_APPEND, 0600)
 	if err != nil {
 		return err
@@ -218,7 +218,7 @@ func checkIfTargetLabelExists(label string) (bool, error) {
 
 func getTargets() (map[string]string, error) {
 	var targets = map[string]string{}
-	targetsPath := joinWithUserDir(".tsuru_targets")
+	targetsPath := JoinWithUserDir(".tsuru_targets")
 	if f, err := filesystem().Open(targetsPath); err == nil {
 		defer f.Close()
 		if b, err := ioutil.ReadAll(f); err == nil {
@@ -263,7 +263,7 @@ func (t *targetList) Run(ctx *Context, client *Client) error {
 	for label, target := range targets {
 		slice.add(label, target)
 	}
-	if current, err := readTarget(); err == nil {
+	if current, err := ReadTarget(); err == nil {
 		slice.setCurrent(current)
 	}
 	fmt.Fprintf(ctx.Stdout, "%s\n", slice)
@@ -300,7 +300,7 @@ func (t *targetRemove) Run(ctx *Context, client *Client) error {
 		}
 	}
 	if turl != "" {
-		if current, err := readTarget(); err == nil && current == turl {
+		if current, err := ReadTarget(); err == nil && current == turl {
 			deleteTargetFile()
 		}
 	}

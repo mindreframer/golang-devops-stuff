@@ -7,9 +7,9 @@ package service
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/tsuru/app/bind"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/log"
+	"github.com/tsuru/tsuru/app/bind"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/log"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -20,6 +20,8 @@ import (
 
 type Client struct {
 	endpoint string
+	username string
+	password string
 }
 
 func (c *Client) buildErrorMessage(err error, resp *http.Response) string {
@@ -51,6 +53,7 @@ func (c *Client) issueRequest(path, method string, params map[string][]string) (
 	}
 	req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Add("Accept", "application/json")
+	req.SetBasicAuth(c.username, c.password)
 	return http.DefaultClient.Do(req)
 }
 
@@ -65,12 +68,17 @@ func (c *Client) jsonFromResponse(resp *http.Response, v interface{}) error {
 	return json.Unmarshal(body, &v)
 }
 
-func (c *Client) Create(instance *ServiceInstance) error {
+func (c *Client) Create(instance *ServiceInstance, user string) error {
 	var err error
 	log.Debug("Attempting to call creation of service instance " + instance.Name + " at " + instance.ServiceName + " api")
 	var resp *http.Response
 	params := map[string][]string{
 		"name": {instance.Name},
+		"user": {user},
+		"team": {instance.TeamOwner},
+	}
+	if instance.PlanName != "" {
+		params["plan"] = []string{instance.PlanName}
 	}
 	if resp, err = c.issueRequest("/resources", "POST", params); err == nil && resp.StatusCode < 300 {
 		return nil
@@ -199,4 +207,17 @@ func (c *Client) Plans() ([]Plan, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// Proxy is a proxy between tsuru and the service.
+// This method allow customized service methods.
+func (c *Client) Proxy(method, path string, body io.ReadCloser) (*http.Response, error) {
+	url := strings.TrimRight(c.endpoint, "/") + "/" + strings.Trim(path, "/")
+	req, err := http.NewRequest(method, url, body)
+	if err != nil {
+		log.Errorf("Got error while creating request: %s", err)
+		return nil, err
+	}
+	req.SetBasicAuth(c.username, c.password)
+	return http.DefaultClient.Do(req)
 }

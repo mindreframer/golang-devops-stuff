@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,7 +6,7 @@ package main
 
 import (
 	"bytes"
-	"github.com/globocom/tsuru/cmd"
+	"github.com/tsuru/tsuru/cmd"
 	"launchpad.net/gocheck"
 	"net/http"
 	"os"
@@ -33,7 +33,7 @@ func (s *S) TestTokenRun(c *gocheck.C) {
 		Stdout: &stdout,
 		Stderr: &stderr,
 	}
-	manager := cmd.NewManager("glb", "", "", &stdout, &stderr, os.Stdin)
+	manager := cmd.NewManager("glb", "", "", &stdout, &stderr, os.Stdin, nil)
 	client := cmd.NewClient(&http.Client{}, nil, manager)
 	command := tokenCmd{}
 	err := command.Run(&context, client)

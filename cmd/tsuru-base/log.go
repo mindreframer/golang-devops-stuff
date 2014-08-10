@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,7 +7,8 @@ package tsuru
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/tsuru/cmd"
+	"github.com/tsuru/tsuru/cmd"
+	tsuruIo "github.com/tsuru/tsuru/io"
 	"io"
 	"launchpad.net/gnuflag"
 	"net/http"
@@ -18,6 +19,7 @@ type AppLog struct {
 	GuessingCommand
 	fs     *gnuflag.FlagSet
 	source string
+	unit   string
 	lines  int
 	follow bool
 }
@@ -25,7 +27,7 @@ type AppLog struct {
 func (c *AppLog) Info() *cmd.Info {
 	return &cmd.Info{
 		Name:  "log",
-		Usage: "log [--app appname] [--lines/-l numberOfLines] [--source/-s source] [--follow/-f]",
+		Usage: "log [--app appname] [--lines/-l numberOfLines] [--source/-s source] [--unit/-u unit] [--follow/-f]",
 		Desc: `show logs for an app.
 
 If you don't provide the app name, tsuru will try to guess it. The default number of lines is 10.`,
@@ -33,31 +35,32 @@ If you don't provide the app name, tsuru will try to guess it. The default numbe
 	}
 }
 
-type jsonWriter struct {
-	w io.Writer
-	b []byte
-}
+type logFormatter struct{}
 
-func (w *jsonWriter) Write(b []byte) (int, error) {
+func (logFormatter) Format(out io.Writer, data []byte) error {
 	var logs []log
-	w.b = append(w.b, b...)
-	err := json.Unmarshal(w.b, &logs)
+	err := json.Unmarshal(data, &logs)
 	if err != nil {
-		return len(b), nil
+		return err
 	}
 	for _, l := range logs {
 		date := l.Date.In(time.Local).Format("2006-01-02 15:04:05 -0700")
-		prefix := fmt.Sprintf("%s [%s]:", date, l.Source)
-		fmt.Fprintf(w.w, "%s %s\n", cmd.Colorfy(prefix, "blue", "", ""), l.Message)
+		var prefix string
+		if l.Unit != "" {
+			prefix = fmt.Sprintf("%s [%s][%s]:", date, l.Source, l.Unit)
+		} else {
+			prefix = fmt.Sprintf("%s [%s]:", date, l.Source)
+		}
+		fmt.Fprintf(out, "%s %s\n", cmd.Colorfy(prefix, "blue", "", ""), l.Message)
 	}
-	w.b = nil
-	return len(b), nil
+	return nil
 }
 
 type log struct {
 	Date    time.Time
 	Message string
 	Source  string
+	Unit    string
 }
 
 func (c *AppLog) Run(context *cmd.Context, client *cmd.Client) error {
@@ -71,6 +74,9 @@ func (c *AppLog) Run(context *cmd.Context, client *cmd.Client) error {
 	}
 	if c.source != "" {
 		url = fmt.Sprintf("%s&source=%s", url, c.source)
+	}
+	if c.unit != "" {
+		url = fmt.Sprintf("%s&unit=%s", url, c.unit)
 	}
 	if c.follow {
 		url += "&follow=1"
@@ -87,8 +93,12 @@ func (c *AppLog) Run(context *cmd.Context, client *cmd.Client) error {
 		return nil
 	}
 	defer response.Body.Close()
-	w := jsonWriter{w: context.Stdout}
-	for n, err := io.Copy(&w, response.Body); n > 0 && err == nil; n, err = io.Copy(&w, response.Body) {
+	w := tsuruIo.NewStreamWriter(context.Stdout, logFormatter{})
+	for n := int64(1); n > 0 && err == nil; n, err = io.Copy(w, response.Body) {
+	}
+	unparsed := w.Remaining()
+	if len(unparsed) > 0 {
+		fmt.Fprintf(context.Stdout, "Error: %s", string(unparsed))
 	}
 	return nil
 }
@@ -100,6 +110,8 @@ func (c *AppLog) Flags() *gnuflag.FlagSet {
 		c.fs.IntVar(&c.lines, "l", 10, "The number of log lines to display")
 		c.fs.StringVar(&c.source, "source", "", "The log from the given source")
 		c.fs.StringVar(&c.source, "s", "", "The log from the given source")
+		c.fs.StringVar(&c.unit, "unit", "", "The log from the given unit")
+		c.fs.StringVar(&c.unit, "u", "", "The log from the given unit")
 		c.fs.BoolVar(&c.follow, "follow", false, "Follow logs")
 		c.fs.BoolVar(&c.follow, "f", false, "Follow logs")
 	}

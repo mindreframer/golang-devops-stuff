@@ -1,4 +1,18 @@
 <!DOCTYPE html>
+{%- macro script() %}
+<script type="text/javascript">
+var DOCUMENTATION_OPTIONS = {
+URL_ROOT:    '{{ url_root }}',
+VERSION:     '{{ release|e }}',
+COLLAPSE_INDEX: false,
+FILE_SUFFIX: '{{ '' if no_search_suffix else file_suffix }}',
+HAS_SOURCE:  {{ has_source|lower }}
+};
+</script>
+{%- for scriptfile in script_files %}
+<script type="text/javascript" src="{{ pathto(scriptfile, 1) }}"></script>
+{%- endfor %}
+{%- endmacro %}
 <html>
 <head>
 <meta charset="utf-8">
@@ -6,8 +20,7 @@
 <meta name="description" content="">
 <link rel="shortcut icon" href="">
 <!-- Scripts -->
-
-<script src=""></script>
+{{ script() }}
 
 <link rel="stylesheet" href="http://netdna.bootstrapcdn.com/font-awesome/4.0.3/css/font-awesome.css">
 
@@ -19,7 +32,9 @@
 <link rel="stylesheet" media="only screen and (min-width: 720px)" href="{{ pathto('_static/resources/styles/medium.css', 1) }}">
 <link rel="stylesheet" media="only screen and (min-width: 1024px)" href="{{ pathto('_static/resources/styles/large.css', 1) }}">
 
-<title>{% block title %}Tsuru{% endblock %}</title>
+<title>{% block title %}tsuru{% endblock %}</title>
+
+{% block extrahead %}{% endblock %}
 
 </head>
 
@@ -30,7 +45,7 @@
 	<div class="container">
 
 		<h1 class="brand">
-			<img class="brand-image" src="{{ pathto('_static/resources/images/brand.svg', 1) }}" alt="Tsuru">
+			<a href="http://tsuru.io"><img class="brand-image" src="{{ pathto('_static/resources/images/brand.svg', 1) }}" alt="tsuru"></a>
 		</h1>
 
 		<nav class="navigation">
@@ -38,8 +53,8 @@
 			<ul class="navigation-items">
 				<li class="navigation-item"><a class="navigation-link" href="http://tsuru.io/#features" title="Features">Features</a></li>
 				<li class="navigation-item"><a class="navigation-link" href="http://tsuru.io#community" title="Community">Community</a></li>
-				<li class="navigation-item"><a class="navigation-link" href="http://docs.tsuru.io/en/latest/" title="Documentation">Documentation</a></li>
-				<li class="navigation-item"><a class="navigation-link" href="http://docs.tsuru.io/en/latest/download.html" title="Download">Download</a></li>
+				<li class="navigation-item"><a class="navigation-link" href="http://docs.tsuru.io/" title="Documentation">Documentation</a></li>
+				<li class="navigation-item"><a class="navigation-link" href="http://blog.tsuru.io" title="Blog">Blog</a></li>
 			</ul>
 
 		</nav>
@@ -53,23 +68,14 @@
 <article class="content-section section">
 
 	<div class="content-container container">
-
-		{% block body %}{% endblock %}
-		{% if pagename != 'index' %}
-		<div class="sidebar">
-			<ul>
-				<li><a href="http://docs.tsuru.io/en/latest/why.html"><em>Why Tsuru?</em></a>.</li>
-				<li><a href="http://docs.tsuru.io/en/latest/overview.html"><em>Overview</em></a></li>
-				<li><a href="http://docs.tsuru.io/en/latest/faq.html"><em>FAQ</em></a>.</li>
-				<li><a href="http://docs.tsuru.io/en/latest/apps/quickstart.html"><em>building your application</em></a></li>
-				<li><a href="http://docs.tsuru.io/en/latest/install/client.html"><em>clients installation guide</em></a></li>
-				<li><a href="http://docs.tsuru.io/en/latest/contribute.html"><em>how to contribute</em></a></li>
-			</ul>
-		</div>
+		{% block body %}
+		{% endblock %}
+		{%- if pagename != 'index' %}
+			{%- include "navigation.html" %}
 		{% endif %}
-
 	</div>
 
+	{%- include "sidebar.html" %}
 </article>
 </main>
 

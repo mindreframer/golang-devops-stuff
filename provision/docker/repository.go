@@ -5,26 +5,84 @@
 package docker
 
 import (
-	"labix.org/v2/mgo/bson"
+	"errors"
+	"fmt"
+	"github.com/tsuru/tsuru/provision"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
+	"sort"
 )
 
-func getContainer(id string) (*container, error) {
-	var c container
-	coll := collection()
-	defer coll.Close()
-	err := coll.Find(bson.M{"id": id}).One(&c)
-	if err != nil {
-		return nil, err
-	}
-	return &c, nil
-}
+var errAmbiguousContainer error = errors.New("ambiguous container name")
 
-func listAppContainers(appName string) ([]container, error) {
+func getContainer(id string) (*container, error) {
 	var containers []container
 	coll := collection()
 	defer coll.Close()
-	err := coll.Find(bson.M{"appname": appName}).All(&containers)
-	return containers, err
+	id = fmt.Sprintf("^%s.*", id)
+	err := coll.Find(bson.M{"id": bson.RegEx{Pattern: id}}).All(&containers)
+	if err != nil {
+		return nil, err
+	}
+	lenContainers := len(containers)
+	if lenContainers == 0 {
+		return nil, mgo.ErrNotFound
+	}
+	if lenContainers > 1 {
+		return nil, errAmbiguousContainer
+	}
+	return &containers[0], nil
+}
+
+func listContainersByHost(address string) ([]container, error) {
+	return listContainersBy(bson.M{"hostaddr": address})
+}
+
+func listContainersByApp(appName string) ([]container, error) {
+	return listContainersBy(bson.M{"appname": appName})
+}
+
+// ContainerSlice attaches the methods of sort.Interface to []container, sorting in increasing order.
+type containerSlice []container
+
+func (c containerSlice) Len() int {
+	return len(c)
+}
+
+func (c containerSlice) Less(i, j int) bool {
+	weight := map[string]int{
+		provision.StatusDown.String():        0,
+		provision.StatusBuilding.String():    1,
+		provision.StatusStopped.String():     2,
+		provision.StatusUnreachable.String(): 3,
+		provision.StatusStarted.String():     4,
+	}
+	return weight[c[i].Status] < weight[c[j].Status]
+}
+
+func (c containerSlice) Swap(i, j int) {
+	c[i], c[j] = c[j], c[i]
+}
+
+func listContainersByAppOrderedByStatus(appName string) ([]container, error) {
+	containers, err := listContainersBy(bson.M{"appname": appName})
+	if err != nil {
+		return nil, err
+	}
+	sort.Sort(containerSlice(containers))
+	return containers, nil
+}
+
+func listAllContainers() ([]container, error) {
+	return listContainersBy(nil)
+}
+
+func listContainersBy(query bson.M) ([]container, error) {
+	var list []container
+	coll := collection()
+	defer coll.Close()
+	err := coll.Find(query).All(&list)
+	return list, err
 }
 
 func getOneContainerByAppName(appName string) (*container, error) {

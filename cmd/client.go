@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,8 +6,8 @@ package cmd
 
 import (
 	"crypto/x509"
-	"errors"
 	"fmt"
+	"github.com/tsuru/tsuru/errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -38,15 +38,15 @@ func (c *Client) detectClientError(err error) error {
 	}
 	switch urlErr.Err.(type) {
 	case x509.UnknownAuthorityError:
-		target, _ := readTarget()
+		target, _ := ReadTarget()
 		return fmt.Errorf("Failed to connect to tsuru server (%s): %s", target, urlErr.Err)
 	}
-	target, _ := readTarget()
+	target, _ := ReadTarget()
 	return fmt.Errorf("Failed to connect to tsuru server (%s), it's probably down.", target)
 }
 
 func (c *Client) Do(request *http.Request) (*http.Response, error) {
-	if token, err := readToken(); err == nil {
+	if token, err := ReadToken(); err == nil {
 		request.Header.Set("Authorization", "bearer "+token)
 	}
 	request.Close = true
@@ -75,7 +75,11 @@ and download the last version.
 	if response.StatusCode > 399 {
 		defer response.Body.Close()
 		result, _ := ioutil.ReadAll(response.Body)
-		return response, errors.New(string(result))
+		err := &errors.HTTP{
+			Code:    response.StatusCode,
+			Message: string(result),
+		}
+		return response, err
 	}
 	return response, nil
 }

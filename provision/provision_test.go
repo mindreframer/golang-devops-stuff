@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -27,7 +27,7 @@ func (ProvisionSuite) TestRegisterAndGetProvisioner(c *gocheck.C) {
 	c.Check(got, gocheck.DeepEquals, p)
 	_, err = Get("unknown-provisioner")
 	c.Check(err, gocheck.NotNil)
-	expectedMessage := `Unknown provisioner: "unknown-provisioner".`
+	expectedMessage := `unknown provisioner: "unknown-provisioner"`
 	c.Assert(err.Error(), gocheck.Equals, expectedMessage)
 }
 
@@ -63,10 +63,55 @@ func (ProvisionSuite) TestStatusString(c *gocheck.C) {
 	c.Assert(s.String(), gocheck.Equals, "pending")
 }
 
-func (ProvisionSuite) TestStatusUnreachable(c *gocheck.C) {
-	c.Assert(StatusUnreachable.String(), gocheck.Equals, "unreachable")
+func (ProvisionSuite) TestStatuses(c *gocheck.C) {
+	c.Check(StatusBuilding.String(), gocheck.Equals, "building")
+	c.Check(StatusError.String(), gocheck.Equals, "error")
+	c.Check(StatusDown.String(), gocheck.Equals, "down")
+	c.Check(StatusUnreachable.String(), gocheck.Equals, "unreachable")
+	c.Check(StatusStarted.String(), gocheck.Equals, "started")
+	c.Check(StatusStopped.String(), gocheck.Equals, "stopped")
 }
 
-func (ProvisionSuite) TestStatusBuilding(c *gocheck.C) {
-	c.Assert(StatusBuilding.String(), gocheck.Equals, "building")
+func (ProvisionSuite) TestParseStatus(c *gocheck.C) {
+	var tests = []struct {
+		input  string
+		output Status
+		err    error
+	}{
+		{"building", StatusBuilding, nil},
+		{"error", StatusError, nil},
+		{"down", StatusDown, nil},
+		{"unreachable", StatusUnreachable, nil},
+		{"started", StatusStarted, nil},
+		{"stopped", StatusStopped, nil},
+		{"something", Status(""), ErrInvalidStatus},
+		{"otherthing", Status(""), ErrInvalidStatus},
+	}
+	for _, t := range tests {
+		got, err := ParseStatus(t.input)
+		c.Check(got, gocheck.Equals, t.output)
+		c.Check(err, gocheck.Equals, t.err)
+	}
+}
+
+func (ProvisionSuite) TestUnitAvailable(c *gocheck.C) {
+	var tests = []struct {
+		input    Status
+		expected bool
+	}{
+		{StatusStarted, true},
+		{StatusUnreachable, true},
+		{StatusBuilding, false},
+		{StatusDown, false},
+		{StatusError, false},
+	}
+	for _, test := range tests {
+		u := Unit{Status: test.input}
+		c.Check(u.Available(), gocheck.Equals, test.expected)
+	}
+}
+
+func (ProvisionSuite) TestUnitGetIp(c *gocheck.C) {
+	u := Unit{Ip: "10.3.3.1"}
+	c.Assert(u.Ip, gocheck.Equals, u.GetIp())
 }

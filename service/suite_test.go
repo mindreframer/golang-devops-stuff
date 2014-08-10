@@ -1,13 +1,13 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package service
 
 import (
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
 	"launchpad.net/gocheck"
 	"testing"
 )
@@ -54,7 +54,7 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 	config.Set("auth:salt", "tsuru-salt")
 	s.conn, err = db.Conn()
 	c.Assert(err, gocheck.IsNil)
-	s.user = &auth.User{Email: "cidade@raul.com", Password: "123"}
+	s.user = &auth.User{Email: "cidade@raul.com"}
 	err = s.user.Create()
 	c.Assert(err, gocheck.IsNil)
 	s.team = &auth.Team{Name: "Raul", Users: []string{s.user.Email}}

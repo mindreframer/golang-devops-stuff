@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,8 +6,8 @@ package docker
 
 import (
 	"encoding/json"
-	"github.com/globocom/tsuru/cmd"
-	"github.com/globocom/tsuru/exec/testing"
+	"github.com/tsuru/tsuru/cmd"
+	"github.com/tsuru/tsuru/exec/testing"
 	"launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"

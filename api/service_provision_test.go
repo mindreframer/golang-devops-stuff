@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -9,25 +9,44 @@ import (
 	"code.google.com/p/go.crypto/bcrypt"
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/auth"
-	"github.com/globocom/tsuru/db"
-	"github.com/globocom/tsuru/errors"
-	"github.com/globocom/tsuru/service"
-	"github.com/globocom/tsuru/testing"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/auth"
+	"github.com/tsuru/tsuru/db"
+	"github.com/tsuru/tsuru/errors"
+	"github.com/tsuru/tsuru/service"
+	"github.com/tsuru/tsuru/testing"
+	"gopkg.in/mgo.v2/bson"
 	"io/ioutil"
-	"labix.org/v2/mgo/bson"
 	"launchpad.net/gocheck"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 )
 
+const (
+	baseManifest = `id: some_service
+password: xxxx
+endpoint:
+    production: someservice.com
+    test: test.someservice.com
+`
+	manifestWithoutPassword = `id: some_service
+endpoint:
+    production: someservice.com
+    test: test.someservice.com
+`
+	manifestWithoutId = `password: 000000
+endpoint:
+    production: someservice.com
+    test: test.someservice.com
+`
+)
+
 type ProvisionSuite struct {
 	conn  *db.Storage
 	team  *auth.Team
 	user  *auth.User
-	token *auth.Token
+	token auth.Token
 }
 
 var _ = gocheck.Suite(&ProvisionSuite{})
@@ -61,12 +80,12 @@ func (s *ProvisionSuite) makeRequestToServicesHandler(c *gocheck.C) (*httptest.R
 
 func (s *ProvisionSuite) createUserAndTeam(c *gocheck.C) {
 	s.user = &auth.User{Email: "whydidifall@thewho.com", Password: "1234567"}
-	err := s.user.Create()
+	_, err := nativeScheme.Create(s.user)
 	c.Assert(err, gocheck.IsNil)
 	s.team = &auth.Team{Name: "tsuruteam", Users: []string{s.user.Email}}
 	err = s.conn.Teams().Insert(s.team)
 	c.Assert(err, gocheck.IsNil)
-	s.token, err = s.user.CreateToken("1234567")
+	s.token, err = nativeScheme.Login(map[string]string{"email": s.user.Email, "password": "1234567"})
 	c.Assert(err, gocheck.IsNil)
 }
 
@@ -93,11 +112,10 @@ func (s *ProvisionSuite) TestServicesHandlerShoudGetAllServicesFromUsersTeam(c *
 }
 
 func makeRequestToCreateHandler(c *gocheck.C) (*httptest.ResponseRecorder, *http.Request) {
-	manifest := `id: some_service
-endpoint:
-    production: someservice.com
-    test: test.someservice.com
-`
+	return makeRequestWithManifest(baseManifest, c)
+}
+
+func makeRequestWithManifest(manifest string, c *gocheck.C) (*httptest.ResponseRecorder, *http.Request) {
 	b := bytes.NewBufferString(manifest)
 	request, err := http.NewRequest("POST", "/services", b)
 	c.Assert(err, gocheck.IsNil)
@@ -136,17 +154,13 @@ func (s *ProvisionSuite) TestCreateHandlerSavesEndpointServiceProperty(c *gochec
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(rService.Endpoint["production"], gocheck.Equals, "someservice.com")
 	c.Assert(rService.Endpoint["test"], gocheck.Equals, "test.someservice.com")
+	c.Assert(rService.Password, gocheck.Equals, "xxxx")
 }
 
 func (s *ProvisionSuite) TestCreateHandlerWithContentOfRealYaml(c *gocheck.C) {
 	p, err := filepath.Abs("testdata/manifest.yml")
 	manifest, err := ioutil.ReadFile(p)
-	c.Assert(err, gocheck.IsNil)
-	b := bytes.NewBuffer(manifest)
-	request, err := http.NewRequest("POST", "/services", b)
-	c.Assert(err, gocheck.IsNil)
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
+	recorder, request := makeRequestWithManifest(string(manifest), c)
 	err = serviceCreate(recorder, request, s.token)
 	c.Assert(err, gocheck.IsNil)
 	query := bson.M{"_id": "mysqlapi"}
@@ -183,12 +197,12 @@ func (s *ProvisionSuite) TestCreateHandlerSavesOwnerTeamsFromUserWhoCreated(c *g
 
 func (s *ProvisionSuite) TestCreateHandlerReturnsForbiddenIfTheUserIsNotMemberOfAnyTeam(c *gocheck.C) {
 	u := &auth.User{Email: "enforce@queensryche.com", Password: "123456"}
-	err := u.Create()
+	_, err := nativeScheme.Create(u)
 	c.Assert(err, gocheck.IsNil)
 	defer s.conn.Users().RemoveAll(bson.M{"email": u.Email})
-	token, err := u.CreateToken("123456")
+	token, err := nativeScheme.Login(map[string]string{"email": u.Email, "password": "123456"})
 	c.Assert(err, gocheck.IsNil)
-	defer s.conn.Tokens().Remove(bson.M{"token": token.Token})
+	defer s.conn.Tokens().Remove(bson.M{"token": token.GetValue()})
 	recorder, request := makeRequestToCreateHandler(c)
 	err = serviceCreate(recorder, request, token)
 	c.Assert(err, gocheck.NotNil)
@@ -201,12 +215,7 @@ func (s *ProvisionSuite) TestCreateHandlerReturnsForbiddenIfTheUserIsNotMemberOf
 func (s *ProvisionSuite) TestCreateHandlerReturnsBadRequestIfTheServiceDoesNotHaveAProductionEndpoint(c *gocheck.C) {
 	p, err := filepath.Abs("testdata/manifest-without-endpoint.yml")
 	manifest, err := ioutil.ReadFile(p)
-	c.Assert(err, gocheck.IsNil)
-	b := bytes.NewBuffer(manifest)
-	request, err := http.NewRequest("POST", "/services", b)
-	c.Assert(err, gocheck.IsNil)
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
+	recorder, request := makeRequestWithManifest(string(manifest), c)
 	err = serviceCreate(recorder, request, s.token)
 	c.Assert(err, gocheck.NotNil)
 	e, ok := err.(*errors.HTTP)
@@ -215,11 +224,32 @@ func (s *ProvisionSuite) TestCreateHandlerReturnsBadRequestIfTheServiceDoesNotHa
 	c.Assert(e.Message, gocheck.Equals, "You must provide a production endpoint in the manifest file.")
 }
 
+func (s *ProvisionSuite) TestCreateHandlerReturnsBadRequestWithoutPassword(c *gocheck.C) {
+	recorder, request := makeRequestWithManifest(manifestWithoutPassword, c)
+	err := serviceCreate(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
+	c.Assert(e.Message, gocheck.Equals, "You must provide a password in the manifest file.")
+}
+
+func (s *ProvisionSuite) TestCreateHandlerReturnsBadRequestWithoutId(c *gocheck.C) {
+	recorder, request := makeRequestWithManifest(manifestWithoutId, c)
+	err := serviceCreate(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
+	c.Assert(e.Message, gocheck.Equals, "You must provide an id in the manifest file.")
+}
+
 func (s *ProvisionSuite) TestUpdateHandlerShouldUpdateTheServiceWithDataFromManifest(c *gocheck.C) {
 	service := service.Service{
 		Name:       "mysqlapi",
 		Endpoint:   map[string]string{"production": "sqlapi.com"},
 		OwnerTeams: []string{s.team.Name},
+		Password:   "oldold",
 	}
 	err := service.Create()
 	c.Assert(err, gocheck.IsNil)
@@ -236,6 +266,7 @@ func (s *ProvisionSuite) TestUpdateHandlerShouldUpdateTheServiceWithDataFromMani
 	err = s.conn.Services().Find(bson.M{"_id": service.Name}).One(&service)
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(service.Endpoint["production"], gocheck.Equals, "mysqlapi.com")
+	c.Assert(service.Password, gocheck.Equals, "yyyy")
 	endpoints := map[string]string{"production": "mysqlapi.com", "test": "localhost:8000"}
 	action := testing.Action{
 		Action: "update-service",
@@ -243,6 +274,28 @@ func (s *ProvisionSuite) TestUpdateHandlerShouldUpdateTheServiceWithDataFromMani
 		Extra:  []interface{}{service.Name, endpoints},
 	}
 	c.Assert(action, testing.IsRecorded)
+}
+
+func (s *ProvisionSuite) TestUpdateHandlerReturnsBadRequestWithoutPassword(c *gocheck.C) {
+	recorder, request := makeRequestWithManifest(manifestWithoutPassword, c)
+	err := serviceUpdate(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
+	c.Assert(e.Message, gocheck.Equals, "You must provide a password in the manifest file.")
+}
+
+func (s *ProvisionSuite) TestUpdateHandlerReturnsBadRequestWithoutProductionEndpoint(c *gocheck.C) {
+	p, err := filepath.Abs("testdata/manifest-without-endpoint.yml")
+	manifest, err := ioutil.ReadFile(p)
+	recorder, request := makeRequestWithManifest(string(manifest), c)
+	err = serviceUpdate(recorder, request, s.token)
+	c.Assert(err, gocheck.NotNil)
+	e, ok := err.(*errors.HTTP)
+	c.Assert(ok, gocheck.Equals, true)
+	c.Assert(e.Code, gocheck.Equals, http.StatusBadRequest)
+	c.Assert(e.Message, gocheck.Equals, "You must provide a production endpoint in the manifest file.")
 }
 
 func (s *ProvisionSuite) TestUpdateHandlerReturns404WhenTheServiceDoesNotExist(c *gocheck.C) {

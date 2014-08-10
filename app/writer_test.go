@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,9 +6,9 @@ package app
 
 import (
 	"bytes"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/db"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/db"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 )
 
@@ -43,7 +43,7 @@ func (s *WriterSuite) TestLogWriter(c *gocheck.C) {
 	c.Assert(b.Bytes(), gocheck.DeepEquals, data)
 	instance := App{}
 	err = s.conn.Apps().Find(bson.M{"name": a.Name}).One(&instance)
-	logs, err := instance.LastLogs(1, "")
+	logs, err := instance.LastLogs(1, Applog{})
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(logs[0].Message, gocheck.Equals, string(data))
 }

@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,9 +6,9 @@ package auth
 
 import (
 	"code.google.com/p/go.crypto/bcrypt"
-	"github.com/globocom/config"
-	"github.com/globocom/tsuru/db"
-	ttesting "github.com/globocom/tsuru/testing"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/db"
+	ttesting "github.com/tsuru/tsuru/testing"
 	"io"
 	"io/ioutil"
 	"launchpad.net/gocheck"
@@ -49,7 +49,6 @@ type S struct {
 	hashed  string
 	user    *User
 	team    *Team
-	token   *Token
 	server  *ttesting.SMTPServer
 	gitRoot string
 	gitHost string
@@ -69,7 +68,6 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 	s.user = &User{Email: "timeredbull@globo.com", Password: "123456"}
 	s.user.Create()
 	s.hashed = s.user.Password
-	s.token, _ = s.user.CreateToken("123456")
 	team := &Team{Name: "cobrateam", Users: []string{s.user.Email}}
 	err := s.conn.Teams().Insert(team)
 	c.Assert(err, gocheck.IsNil)
@@ -102,8 +100,6 @@ func (s *S) TearDownTest(c *gocheck.C) {
 	config.Set("git:host", s.gitHost)
 	config.Set("git:port", s.gitPort)
 	config.Set("git:protocol", s.gitProt)
-	cost = 0
-	tokenExpire = 0
 }
 
 func (s *S) getTestData(path ...string) io.ReadCloser {

@@ -1,17 +1,19 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package tsuru
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/globocom/tsuru/cmd"
+	"github.com/tsuru/tsuru/cmd"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"strings"
+	"text/template"
 )
 
 type AppInfo struct {
@@ -58,9 +60,13 @@ func (c *AppInfo) Run(context *cmd.Context, client *cmd.Client) error {
 }
 
 type unit struct {
-	Name  string
-	Ip    string
-	State string
+	Name   string
+	Ip     string
+	Status string
+}
+
+func (u *unit) Available() bool {
+	return u.Status == "started" || u.Status == "unreachable"
 }
 
 type app struct {
@@ -72,11 +78,14 @@ type app struct {
 	Teams      []string
 	Units      []unit
 	Ready      bool
+	Owner      string
+	TeamOwner  string
+	Deploys    uint
 }
 
 func (a *app) Addr() string {
 	if a.CName != "" {
-		return a.CName
+		return fmt.Sprintf("%s, %s", a.CName, a.Ip)
 	}
 	return a.Ip
 }
@@ -88,27 +97,35 @@ func (a *app) IsReady() string {
 	return "No"
 }
 
+func (a *app) GetTeams() string {
+	return strings.Join(a.Teams, ", ")
+}
+
 func (a *app) String() string {
-	format := `Application: %s
-Repository: %s
-Platform: %s
-Teams: %s
-Address: %s
+	format := `Application: {{.Name}}
+Repository: {{.Repository}}
+Platform: {{.Platform}}
+Teams: {{.GetTeams}}
+Address: {{.Addr}}
+Owner: {{.Owner}}
+Team owner: {{.TeamOwner}}
+Deploys: {{.Deploys}}
 `
-	teams := strings.Join(a.Teams, ", ")
+	tmpl := template.Must(template.New("app").Parse(format))
 	units := cmd.NewTable()
 	units.Headers = cmd.Row([]string{"Unit", "State"})
 	for _, unit := range a.Units {
 		if unit.Name != "" {
-			units.AddRow(cmd.Row([]string{unit.Name, unit.State}))
+			units.AddRow(cmd.Row([]string{unit.Name, unit.Status}))
 		}
 	}
-	args := []interface{}{a.Name, a.Repository, a.Platform, teams, a.Addr()}
+	var buf bytes.Buffer
+	tmpl.Execute(&buf, a)
+	var suffix string
 	if units.Rows() > 0 {
-		format += "Units:\n%s"
-		args = append(args, units)
+		suffix = fmt.Sprintf("Units:\n%s", units)
 	}
-	return fmt.Sprintf(format, args...)
+	return buf.String() + suffix
 }
 
 func (c *AppInfo) Show(result []byte, context *cmd.Context) error {
@@ -230,17 +247,17 @@ func (c AppList) Show(result []byte, context *cmd.Context) error {
 	table := cmd.NewTable()
 	table.Headers = cmd.Row([]string{"Application", "Units State Summary", "Address", "Ready?"})
 	for _, app := range apps {
-		var startedUnits int
+		var available int
 		var total int
 		for _, unit := range app.Units {
 			if unit.Name != "" {
 				total++
-				if unit.State == "started" {
-					startedUnits += 1
+				if unit.Available() {
+					available += 1
 				}
 			}
 		}
-		summary := fmt.Sprintf("%d of %d units in-service", startedUnits, total)
+		summary := fmt.Sprintf("%d of %d units in-service", available, total)
 		table.AddRow(cmd.Row([]string{app.Name, summary, app.Addr(), app.IsReady()}))
 	}
 	table.Sort()
@@ -254,6 +271,46 @@ func (c AppList) Info() *cmd.Info {
 		Usage: "app-list",
 		Desc:  "list all your apps.",
 	}
+}
+
+type AppStop struct {
+	GuessingCommand
+}
+
+func (c *AppStop) Info() *cmd.Info {
+	return &cmd.Info{
+		Name:  "stop",
+		Usage: "stop [--app appname]",
+		Desc: `stops an app.
+
+If you don't provide the app name, tsuru will try to guess it.`,
+		MinArgs: 0,
+	}
+}
+
+func (c *AppStop) Run(context *cmd.Context, client *cmd.Client) error {
+	appName, err := c.Guess()
+	if err != nil {
+		return err
+	}
+	url, err := cmd.GetURL(fmt.Sprintf("/apps/%s/stop", appName))
+	if err != nil {
+		return err
+	}
+	request, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return err
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	_, err = io.Copy(context.Stdout, response.Body)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 type AppStart struct {
@@ -280,7 +337,7 @@ func (c *AppStart) Run(context *cmd.Context, client *cmd.Client) error {
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("GET", url, nil)
+	request, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		return err
 	}
@@ -309,7 +366,7 @@ func (c *AppRestart) Run(context *cmd.Context, client *cmd.Client) error {
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("GET", url, nil)
+	request, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		return err
 	}

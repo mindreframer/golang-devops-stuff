@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -10,8 +10,8 @@
 // instance of Docker provisioner:
 //
 //     import (
-//         "github.com/globocom/tsuru/provision"
-//         _ "github.com/globocom/tsuru/provision/docker"
+//         "github.com/tsuru/tsuru/provision"
+//         _ "github.com/tsuru/tsuru/provision/docker"
 //     )
 //     // ...
 //     func main() {

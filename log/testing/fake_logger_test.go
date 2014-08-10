@@ -1,10 +1,10 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 package testing
 
 import (
-	"github.com/globocom/tsuru/log"
+	"github.com/tsuru/tsuru/log"
 	"launchpad.net/gocheck"
 	"testing"
 )
@@ -60,4 +60,10 @@ func (s *FakeLoggerSuite) TestFatalWritesOnBuffer(c *gocheck.C) {
 func (s *FakeLoggerSuite) TestFatalfWritesOnBuffer(c *gocheck.C) {
 	s.l.Fatalf("some fatal error %d", 1)
 	c.Assert(s.fl.Buf.String(), gocheck.Equals, "some fatal error 1\n")
+}
+
+func (s *FakeLoggerSuite) TestGetStdLogger(c *gocheck.C) {
+	l := s.l.GetStdLogger()
+	l.Printf("some error %d", 1)
+	c.Assert(s.fl.Buf.String(), gocheck.Equals, "some error 1\n")
 }

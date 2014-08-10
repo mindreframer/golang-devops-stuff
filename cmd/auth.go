@@ -1,4 +1,4 @@
-// Copyright 2013 tsuru authors. All rights reserved.
+// Copyright 2014 tsuru authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,10 +6,10 @@ package cmd
 
 import (
 	"bytes"
+	"code.google.com/p/go.crypto/ssh/terminal"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/globocom/tsuru/cmd/term"
 	"io"
 	"io/ioutil"
 	"launchpad.net/gnuflag"
@@ -90,7 +90,7 @@ func (c *userRemove) Run(context *Context, client *Client) error {
 	if err != nil {
 		return err
 	}
-	filesystem().Remove(joinWithUserDir(".tsuru_token"))
+	filesystem().Remove(JoinWithUserDir(".tsuru_token"))
 	fmt.Fprint(context.Stdout, "User successfully removed.\n")
 	return nil
 }
@@ -104,20 +104,27 @@ func (c *userRemove) Info() *Info {
 	}
 }
 
-type login struct{}
+type loginScheme struct {
+	Name string
+	Data map[string]string
+}
 
-func (c *login) Run(context *Context, client *Client) error {
+type login struct {
+	scheme *loginScheme
+}
+
+func nativeLogin(context *Context, client *Client) error {
 	email := context.Args[0]
-	url, err := GetURL("/users/" + email + "/tokens")
-	if err != nil {
-		return err
-	}
 	fmt.Fprint(context.Stdout, "Password: ")
 	password, err := passwordFromReader(context.Stdin)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(context.Stdout)
+	url, err := GetURL("/users/" + email + "/tokens")
+	if err != nil {
+		return err
+	}
 	b := bytes.NewBufferString(`{"password":"` + password + `"}`)
 	request, err := http.NewRequest("POST", url, b)
 	if err != nil {
@@ -132,21 +139,51 @@ func (c *login) Run(context *Context, client *Client) error {
 	if err != nil {
 		return err
 	}
-	out := make(map[string]string)
+	out := make(map[string]interface{})
 	err = json.Unmarshal(result, &out)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintln(context.Stdout, "Successfully logged in!")
-	return writeToken(out["token"])
+	return writeToken(out["token"].(string))
+}
+
+func (c *login) getScheme() *loginScheme {
+	if c.scheme == nil {
+		info, err := schemeInfo()
+		if err != nil {
+			fmt.Printf("Error trying to figure auth scheme, using native as fallback: %s\n", err.Error())
+			c.scheme = &loginScheme{Name: "native", Data: make(map[string]string)}
+		} else {
+			c.scheme = info
+		}
+	}
+	return c.scheme
+}
+
+func (c *login) Run(context *Context, client *Client) error {
+	if c.getScheme().Name == "oauth" {
+		return c.oauthLogin(context, client)
+	}
+	return nativeLogin(context, client)
+}
+
+func (c *login) Name() string {
+	return "login"
 }
 
 func (c *login) Info() *Info {
+	args := 1
+	usage := "login <email>"
+	if c.getScheme().Name == "oauth" {
+		usage = "login"
+		args = 0
+	}
 	return &Info{
-		Name:    "login",
-		Usage:   "login <email>",
+		Name:    c.Name(),
+		Usage:   usage,
 		Desc:    "log in with your credentials.",
-		MinArgs: 1,
+		MinArgs: args,
 	}
 }
 
@@ -165,7 +202,7 @@ func (c *logout) Run(context *Context, client *Client) error {
 		request, _ := http.NewRequest("DELETE", url, nil)
 		client.Do(request)
 	}
-	err := filesystem().Remove(joinWithUserDir(".tsuru_token"))
+	err := filesystem().Remove(JoinWithUserDir(".tsuru_token"))
 	if err != nil && os.IsNotExist(err) {
 		return errors.New("You're not logged in!")
 	}
@@ -329,7 +366,7 @@ func (teamUserList) Run(context *Context, client *Client) error {
 func (teamUserList) Info() *Info {
 	return &Info{
 		Name:    "team-user-list",
-		Usage:   "team-user-list",
+		Usage:   "team-user-list <teamname>",
 		Desc:    "List members of a team.",
 		MinArgs: 1,
 	}
@@ -495,20 +532,38 @@ func (c *resetPassword) Flags() *gnuflag.FlagSet {
 
 func passwordFromReader(reader io.Reader) (string, error) {
 	var (
-		password string
+		password []byte
 		err      error
 	)
-	if file, ok := reader.(*os.File); ok {
-		password, err = term.ReadPassword(file.Fd())
+	if file, ok := reader.(*os.File); ok && terminal.IsTerminal(int(file.Fd())) {
+		password, err = terminal.ReadPassword(int(file.Fd()))
 		if err != nil {
 			return "", err
 		}
 	} else {
 		fmt.Fscanf(reader, "%s\n", &password)
 	}
-	if password == "" {
+	if len(password) == 0 {
 		msg := "You must provide the password!"
 		return "", errors.New(msg)
 	}
-	return password, err
+	return string(password), err
+}
+
+func schemeInfo() (*loginScheme, error) {
+	url, err := GetURL("/auth/scheme")
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	info := loginScheme{}
+	err = json.NewDecoder(resp.Body).Decode(&info)
+	if err != nil {
+		return nil, err
+	}
+	return &info, nil
 }
