@@ -8,7 +8,7 @@ import (
 // Output each metric in the given registry periodically using the given
 // logger.
 func Log(r Registry, d time.Duration, l *log.Logger) {
-	for {
+	for _ = range time.Tick(d) {
 		r.Each(func(name string, i interface{}) {
 			switch metric := i.(type) {
 			case Counter:
@@ -17,6 +17,9 @@ func Log(r Registry, d time.Duration, l *log.Logger) {
 			case Gauge:
 				l.Printf("gauge %s\n", name)
 				l.Printf("  value:       %9d\n", metric.Value())
+			case GaugeFloat64:
+				l.Printf("gauge %s\n", name)
+				l.Printf("  value:       %f\n", metric.Value())
 			case Healthcheck:
 				metric.Check()
 				l.Printf("healthcheck %s\n", name)
@@ -63,6 +66,5 @@ func Log(r Registry, d time.Duration, l *log.Logger) {
 				l.Printf("  mean rate:   %12.2f\n", t.RateMean())
 			}
 		})
-		time.Sleep(d)
 	}
 }
