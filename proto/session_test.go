@@ -262,3 +262,79 @@ func TestNetListenerAccept(t *testing.T) {
 		t.Fatalf("Failed to accept stream: %v", err)
 	}
 }
+
+// set up a fake extension which tries to accept a stream.
+// we're testing to make sure that when the remote side closes the connection
+// that the extension actually gets an error back from its accept() method
+type fakeExt struct {
+	closeOk chan int
+}
+
+func (e *fakeExt) Start(sess ISession, accept ExtAccept) frame.StreamType {
+	go func() {
+		_, err := accept()
+		if err != nil {
+			// we should get an error when the session close
+			e.closeOk <- 1
+		}
+	}()
+
+	return MinExtensionType
+}
+
+func TestExtensionCleanupAccept(t *testing.T) {
+	t.Parallel()
+	local, remote := newFakeConnPair()
+
+	closeOk := make(chan int)
+	_ = NewSession(local, NewStream, false, []Extension{&fakeExt{closeOk}})
+	sRemote := NewSession(remote, NewStream, true, []Extension{})
+
+	sRemote.Close()
+
+	select {
+	case <-time.After(time.Second):
+		t.Fatalf("Timed out!")
+	case <-closeOk:
+	}
+}
+
+func TestWriteAfterClose(t *testing.T) {
+	t.Parallel()
+	local, remote := newFakeConnPair()
+	sLocal := NewSession(local, NewStream, false, []Extension{})
+	sRemote := NewSession(remote, NewStream, true, []Extension{})
+
+	closed := make(chan int)
+	go func() {
+		stream, err := sRemote.Open()
+		if err != nil {
+			t.Errorf("Failed to open stream: %v", err)
+			return
+		}
+
+		<-closed
+		if _, err = stream.Write([]byte("test!")); err != nil {
+			t.Errorf("Failed to write test data: %v", err)
+			return
+		}
+
+		if _, err := sRemote.Open(); err != nil {
+			t.Errorf("Failed to open second stream: %v", err)
+			return
+		}
+	}()
+
+	stream, err := sLocal.Accept()
+	if err != nil {
+		t.Fatalf("Failed to accept stream!")
+	}
+
+	// tell the other side that we closed so they can write late
+	stream.Close()
+	closed <- 1
+
+	if _, err = sLocal.Accept(); err != nil {
+		t.Fatalf("Failed to accept second connection: %v", err)
+	}
+}
