@@ -62,5 +62,6 @@ Please go through `hamster_test.go`. I will try to get to documentation soon.
 7. Dashboard
 8. Analytics.
 
+[![Gitter chat](https://badges.gitter.im/adnaan/hamster.png)](https://gitter.im/adnaan/hamster)
 
 [![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/adnaan/hamster/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
