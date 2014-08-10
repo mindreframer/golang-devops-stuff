@@ -1,3 +1,16 @@
+Changes for Version--1.1.0:
+- SQL
+-- stream
+-- push
+-- pop
+-- peek
+-- returning
+- API
+-- Java
+---- refactor
+-- .Net
+---- refactor
+
 Changes for Version--1.0.0:
 FIRST RELEASE
 - OS

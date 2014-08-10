@@ -9,7 +9,7 @@
  *
  */
 
-package pubsubsql
+package server
 
 import (
 	"encoding/binary"

@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 type requestType uint8
 
@@ -28,6 +28,8 @@ const (
 type request interface {
 	getRequestType() requestType
 	getTableName() string
+	setStreaming()
+	isStreaming() bool
 }
 
 // errorRequest is an error request.
@@ -37,14 +39,31 @@ type errorRequest struct {
 }
 
 // Returns type of a request.
-func (act errorRequest) getRequestType() requestType {
+func (this *errorRequest) getRequestType() requestType {
 	return requestTypeError
+}
+
+func (this *errorRequest) setStreaming() {
+	// no-op
+}
+
+func (this *errorRequest) isStreaming() bool {
+	return false
 }
 
 // sqlRequest is a generic sql request.
 type sqlRequest struct {
 	request
-	table string
+	table     string
+	streaming bool
+}
+
+func (this *sqlRequest) setStreaming() {
+	this.streaming = true
+}
+
+func (this *sqlRequest) isStreaming() bool {
+	return this.streaming
 }
 
 func (this *sqlRequest) getRequestType() requestType {
@@ -59,13 +78,22 @@ func (this *sqlRequest) getTableName() string {
 type cmdRequest struct {
 	request
 	requestId uint32
+	streaming bool
 }
 
 func (this *cmdRequest) getRequestType() requestType {
 	return requestTypeCmd
 }
 
-// 
+func (this *cmdRequest) setStreaming() {
+	this.streaming = true
+}
+
+func (this *cmdRequest) isStreaming() bool {
+	return this.streaming
+}
+
+//
 type cmdStatusRequest struct {
 	cmdRequest
 }
@@ -98,7 +126,20 @@ func (this *sqlFilter) addFilter(col string, val string) {
 // sqlInsertRequest is a request for sql insert statement.
 type sqlInsertRequest struct {
 	sqlRequest
+	returningColumns
 	colVals []*columnValue
+}
+
+// sqlPushRequest is a request for sql push statement.
+func newSqlPushRequest() *sqlPushRequest {
+	req := &sqlPushRequest{}
+	req.colVals = make([]*columnValue, 0, config.PARSER_SQL_INSERT_REQUEST_COLUMN_CAPACITY)
+	return req
+}
+
+type sqlPushRequest struct {
+	sqlInsertRequest
+	front bool
 }
 
 // Adds column to columnValue slice.
@@ -116,20 +157,64 @@ func (this *sqlInsertRequest) setValueAt(idx int, val string) {
 	this.colVals[idx].val = val
 }
 
+// contains column names and use flag indicator
+type returningColumns struct {
+	cols []string
+	use  bool
+}
+
+func (this *returningColumns) useColumns() bool {
+	return this.use
+}
+
+func (this *returningColumns) addColumn(col string) {
+	this.cols = append(this.cols, col)
+	this.use = true
+}
+
 // sqlSelectRequest is a request for sql select statement.
+func newSqlSelectRequest() *sqlSelectRequest {
+	req := &sqlSelectRequest{}
+	req.cols = make([]string, 0, config.PARSER_SQL_SELECT_REQUEST_COLUMN_CAPACITY)
+	req.use = true
+	return req
+}
+
 type sqlSelectRequest struct {
 	sqlRequest
-	cols   []string
+	returningColumns
 	filter sqlFilter
 }
 
-func (req *sqlSelectRequest) addColumn(col string) {
-	req.cols = append(req.cols, col)
+// sqlPeekRequest is a request for sql peek statement.
+func newSqlPeekRequest() *sqlPeekRequest {
+	req := &sqlPeekRequest{}
+	req.cols = make([]string, 0, config.PARSER_SQL_SELECT_REQUEST_COLUMN_CAPACITY)
+	req.use = true
+	return req
+}
+
+type sqlPeekRequest struct {
+	sqlSelectRequest
+	front bool
+}
+
+// sqlPopRequest is a request for sql pop statement.
+func newSqlPopRequest() *sqlPopRequest {
+	req := &sqlPopRequest{}
+	req.cols = make([]string, 0, config.PARSER_SQL_SELECT_REQUEST_COLUMN_CAPACITY)
+	return req
+}
+
+type sqlPopRequest struct {
+	sqlSelectRequest
+	front bool
 }
 
 // sqlUpdateRequest is a request for sql update statement.
 type sqlUpdateRequest struct {
 	sqlRequest
+	returningColumns
 	colVals []*columnValue
 	filter  sqlFilter
 }
@@ -142,6 +227,7 @@ func (this *sqlUpdateRequest) addColVal(col string, val string) {
 // sqlDeleteRequest is a request for sql delete statement.
 type sqlDeleteRequest struct {
 	sqlRequest
+	returningColumns
 	filter sqlFilter
 }
 
@@ -173,3 +259,12 @@ type sqlUnsubscribeRequest struct {
 	connectionId uint64
 	filter       sqlFilter
 }
+
+
+// sqlSubscribeTopicRequest is a request for sql subscribe topic statement.
+type sqlSubscribeTopicRequest struct {
+	sqlRequest
+	topic string
+	sender *responseSender
+}
+

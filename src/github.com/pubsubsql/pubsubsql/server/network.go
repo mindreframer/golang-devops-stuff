@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import (
 	"net"
@@ -107,7 +107,7 @@ func (this *network) start(address string) bool {
 		return false
 	}
 	//host, port := net.SplitHostPort(address)
-	loginfo("listening for incoming connections on ", address)	
+	loginfo("listening for incoming connections on ", address)
 	this.listener = listener
 	var connectionId uint64 = 0
 	// accept connections
@@ -246,9 +246,9 @@ func (this *networkConnection) write() {
 		case res := <-this.sender.sender:
 			debug("response is ready to be send over tcp")
 			// merge responses if applicable
-			nextRes := this.sender.tryRecv();
+			nextRes := this.sender.tryRecv()
 			for nextRes != nil && res.merge(nextRes) {
-				nextRes = this.sender.tryRecv();
+				nextRes = this.sender.tryRecv()
 			}
 			// write messages in batches if applicable
 			var msg []byte
@@ -264,7 +264,7 @@ func (this *networkConnection) write() {
 				}
 				if !more && nextRes != nil {
 					res = nextRes
-					nextRes = nil			
+					nextRes = nil
 					more = true
 				}
 			}
