@@ -1,0 +1,8 @@
+language: go
+install:
+  - export PATH="$PATH:$HOME/gopath/bin"
+  - export GOPATH="$GOPATH:$PWD"
+  - make bootstrap
+script:
+  - go test -v ./...
+  - make # test the build
