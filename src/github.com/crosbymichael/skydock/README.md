@@ -2,8 +2,14 @@
 [![Build Status](https://travis-ci.org/crosbymichael/skydock.png)](https://travis-ci.org/crosbymichael/skydock)
 
 
+## NOTICE
+
+I plan on making some breaking changes soon to help skydns and skydock scale better.  To stay up-to-date either
+watch this repo or follow me on twitter @crosbymichael.  
+
+
 Skydock monitors docker events when containers start, stop, die, kill, etc and inserts records into a dynamic
-DNS server [skydns](https://github.com/skynetservices/skydns).  This allows standard DNS queries for services
+DNS server [skydns](https://github.com/skynetservices/skydns1).  This allows standard DNS queries for services
 running inside docker containers.  Because lets face it, if you have to modify your application code to work
 with other service discovery solutions you might as well just give up.  DNS just works and it works well.  
 Also you cannot be expected to modify application code that you don't own.  Passing service urls via the
@@ -11,7 +17,7 @@ cli or in static config files (nginx) will not be possible if your service disco
 a client library just to fetch an IP.  
 
 
-[Skydns](https://github.com/skynetservices/skydns) is a very small and simple server that does DNS for 
+[Skydns](https://github.com/skynetservices/skydns1) is a very small and simple server that does DNS for 
 discovery very well.  The authors and contributors to skydns helped a lot to make this project possible.
 Skydns exposes a very simple REST API to add, update, and remove services.
 
@@ -75,7 +81,7 @@ nameserver to that IP.  For this example we will use the ip `172.17.42.1` as the
 
 ```bash
 # start your daemon with the -dns flag, figure it out...
-docker -d -dns 172.17.42.1 # + what other settings you use
+docker -d --bip=172.17.42.1/16 --dns=172.17.42.1 # + what other settings you use
 ```
 
 **Note:**
@@ -86,7 +92,7 @@ Now we need to start skydns before our other containers are run or else they wil
 
 ```bash
 docker pull crosbymichael/skydns
-docker run -d -p 172.17.42.1:53:53/udp -name skydns crosbymichael/skydns -nameserver 8.8.8.8:53 -domain docker
+docker run -d -p 172.17.42.1:53:53/udp --name skydns crosbymichael/skydns -nameserver 8.8.8.8:53 -domain docker
 ```
 
 We add the name skydns to the container and we use `-p` and tell docker to bind skydns port 53/udp to the docker0 bridge's IP.
@@ -99,12 +105,12 @@ docker on my local development machine so I am using the domain name `docker`.  
 resolved by skydns for service discovery, all other requests will be forwarded to `8.8.8.8`.
 
 
-Now that skydns is running we can start skydock what bridges the gap between docker and skydns.
+Now that skydns is running we can start skydock to bridge the gap between docker and skydns.
 
 
 ```bash
 docker pull crosbymichael/skydock
-docker run -d -v /var/run/docker.sock:/docker.sock -name skydock -link skydns:skydns crosbymichael/skydock -ttl 30 -environment dev -s /docker.sock -domain docker
+docker run -d -v /var/run/docker.sock:/docker.sock --name skydock crosbymichael/skydock -ttl 30 -environment dev -s /docker.sock -domain docker -name skydns
 ```
 
 
@@ -130,11 +136,11 @@ the redis-cli to that instance of the service.  Because it's DNS you can specifi
 
 ```bash
 # run an instance of redis
-docker run -d -name redis1 crosbymichael/redis
+docker run -d --name redis1 crosbymichael/redis
 03582c0de0ebb10665678d6ed530ae98bebd7d63dad5e7fb1cd53ffb1f85d91d
 
 # run the cli and connect to our new instance
-docker run -t -i crosbymichael/redis-cli -h redis.dev.docker
+docker run -t -i crosbymichael/redis-cli -h redis1.redis.dev.docker
 
 redis.dev.docker:6379> set name koye
 OK
@@ -142,6 +148,25 @@ redis.dev.docker:6379> get name
 "koye"
 redis.dev.docker:6379>
 
+```
+
+That is, the `redis1` named `crosbymichael/redis` container was available under the hostname `redis1.redis.dev.docker`.
+
+```
+dig @172.17.42.1 +short redis1.redis.dev.docker
+172.17.0.4
+```
+
+If you were to run additional `crosbymichael/redis` containers, they would all be available under the `redis.dev.docker` hostname.
+
+```
+docker run -d --name redis2 crosbymichael/redis
+docker run -d --name redis3 crosbymichael/redis
+
+dig @172.17.42.1 +short redis.dev.docker
+172.17.0.4
+172.17.0.5
+172.17.0.6
 ```
 
 #### Plugin support
@@ -174,7 +199,7 @@ function removeSlash(string) string  // removes all / from the passed parameter 
 And that is it.  Just add a `createservice` function to a .js file then use the `-plugins` flag to enable your new plugin.  Plugins are loaded at start so changes made to the functions during the life of skydock are not reflected, you have to restart ( done for performance ).  
 
 ```bash
-docker run -d -v /var/run/docker.sock:/docker.sock -v /myplugins.js:/myplugins.js -name skydock -link skydns:skydns crosbymichael/skydock -s /docker.sock -domain docker -plugins /myplugins.js
+docker run -d -v /var/run/docker.sock:/docker.sock -v /myplugins.js:/myplugins.js --name skydock --link skydns:skydns crosbymichael/skydock -s /docker.sock -domain docker -plugins /myplugins.js
 ```
 
 Feel free to submit your plugins to this repo under the `plugins/` directory.  
@@ -186,7 +211,7 @@ Feel free to submit your plugins to this repo under the `plugins/` directory.
 
 #### Bugs
 * Please report all skydock bugs on this repository
-* Report all skydns bugs [here](https://github.com/skynetservices/skydns/issues?state=open)
+* Report all skydns bugs [here](https://github.com/skynetservices/skydns1/issues?state=open)
 
 #### License - MIT
 
