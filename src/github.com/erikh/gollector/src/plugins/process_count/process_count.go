@@ -1,10 +1,17 @@
 package process_count
 
 import (
+	gm "github.com/gollector/gollector_metrics"
 	"logger"
-	"util"
 )
 
 func GetMetric(params interface{}, log *logger.Logger) interface{} {
-	return len(util.GetPids(params.(string), log))
+	result, err := gm.ProcessCount(params.(string))
+
+	if err != nil {
+		log.Log("crit", err.Error())
+		return nil
+	}
+
+	return result
 }
