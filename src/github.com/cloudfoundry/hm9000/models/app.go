@@ -29,6 +29,10 @@ func NewApp(appGuid string, appVersion string, desired DesiredAppState, instance
 	}
 }
 
+func (a *App) MarshalJSON() ([]byte, error) {
+	return a.ToJSON(), nil
+}
+
 func (a *App) ToJSON() []byte {
 	crashCounts := make([]CrashCount, len(a.CrashCounts))
 	i := 0

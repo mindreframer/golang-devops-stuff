@@ -1,16 +1,18 @@
 package store_test
 
 import (
+	"time"
+
 	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/models"
 	. "github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/testhelpers/fakelogger"
 	"github.com/cloudfoundry/storeadapter"
 	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
+	"github.com/cloudfoundry/storeadapter/storenodematchers"
 	"github.com/cloudfoundry/storeadapter/workerpool"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"time"
 )
 
 var _ = Describe("Storing PendingStopMessages", func() {
@@ -55,16 +57,16 @@ var _ = Describe("Storing PendingStopMessages", func() {
 			node, err := storeAdapter.ListRecursively("/hm/v1/stop")
 			Ω(err).ShouldNot(HaveOccurred())
 			Ω(node.ChildNodes).Should(HaveLen(2))
-			Ω(node.ChildNodes).Should(ContainElement(storeadapter.StoreNode{
+			Ω(node.ChildNodes).Should(ContainElement(storenodematchers.MatchStoreNode(storeadapter.StoreNode{
 				Key:   "/hm/v1/stop/" + message1.StoreKey(),
 				Value: message1.ToJSON(),
 				TTL:   0,
-			}))
-			Ω(node.ChildNodes).Should(ContainElement(storeadapter.StoreNode{
+			})))
+			Ω(node.ChildNodes).Should(ContainElement(storenodematchers.MatchStoreNode(storeadapter.StoreNode{
 				Key:   "/hm/v1/stop/" + message2.StoreKey(),
 				Value: message2.ToJSON(),
 				TTL:   0,
-			}))
+			})))
 		})
 	})
 

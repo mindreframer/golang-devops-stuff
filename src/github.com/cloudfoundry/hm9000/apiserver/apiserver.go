@@ -3,11 +3,12 @@ package apiserver
 import (
 	"encoding/json"
 	"fmt"
+	"time"
+
 	"github.com/cloudfoundry/gunk/timeprovider"
 	"github.com/cloudfoundry/hm9000/helpers/logger"
 	"github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/yagnats"
-	"time"
 )
 
 type ApiServer struct {
@@ -32,7 +33,12 @@ func New(messageBus yagnats.NATSClient, store store.Store, timeProvider timeprov
 }
 
 func (server *ApiServer) Listen() {
-	server.messageBus.SubscribeWithQueue("app.state", "hm9000", func(message *yagnats.Message) {
+	server.handle("app.state", server.handleAppStateRequest)
+	server.handle("app.state.bulk", server.handleBulkAppStateRequest)
+}
+
+func (server *ApiServer) handle(topic string, handler func(message *yagnats.Message) ([]byte, error)) {
+	server.messageBus.SubscribeWithQueue(topic, "hm9000", func(message *yagnats.Message) {
 		if message.ReplyTo == "" {
 			return
 		}
@@ -40,42 +46,60 @@ func (server *ApiServer) Listen() {
 		t := time.Now()
 
 		var err error
-		var response []byte
-
-		defer func() {
-			if err != nil {
-				server.messageBus.Publish(message.ReplyTo, []byte("{}"))
-				server.logger.Error("Failed to handle app.state request", err, map[string]string{
-					"payload":      string(message.Payload),
-					"elapsed time": fmt.Sprintf("%s", time.Since(t)),
-				})
-				return
-			} else {
-				server.messageBus.Publish(message.ReplyTo, response)
-				server.logger.Info("Responded succesfully to app.state request", map[string]string{
-					"payload":      string(message.Payload),
-					"elapsed time": fmt.Sprintf("%s", time.Since(t)),
-				})
-			}
-		}()
-
-		var request AppStateRequest
-		err = json.Unmarshal([]byte(message.Payload), &request)
-		if err != nil {
-			return
-		}
+		var response []byte = []byte("{}")
 
 		err = server.store.VerifyFreshness(server.timeProvider.Time())
-		if err != nil {
-			return
+		if err == nil {
+			response, err = handler(message)
 		}
 
-		app, err := server.store.GetApp(request.AppGuid, request.AppVersion)
 		if err != nil {
+			server.messageBus.Publish(message.ReplyTo, []byte("{}"))
+			server.logger.Error(fmt.Sprintf("Failed to handle %s request", topic), err, map[string]string{
+				"payload":      string(message.Payload),
+				"elapsed time": fmt.Sprintf("%s", time.Since(t)),
+			})
 			return
+		} else {
+			server.messageBus.Publish(message.ReplyTo, response)
+			server.logger.Info(fmt.Sprintf("Responded succesfully to %s request", topic), map[string]string{
+				"payload":      string(message.Payload),
+				"elapsed time": fmt.Sprintf("%s", time.Since(t)),
+			})
 		}
-
-		response = app.ToJSON()
-		return
 	})
+}
+
+func (server *ApiServer) handleAppStateRequest(message *yagnats.Message) ([]byte, error) {
+	var request AppStateRequest
+	err := json.Unmarshal([]byte(message.Payload), &request)
+	if err != nil {
+		return nil, err
+	}
+
+	app, err := server.store.GetApp(request.AppGuid, request.AppVersion)
+	if err != nil {
+		return nil, err
+	}
+
+	response := app.ToJSON()
+	return response, err
+}
+
+func (server *ApiServer) handleBulkAppStateRequest(message *yagnats.Message) ([]byte, error) {
+	requests := make([]AppStateRequest, 0)
+	err := json.Unmarshal([]byte(message.Payload), &requests)
+	if err != nil {
+		return nil, err
+	}
+
+	var apps = make(map[string]interface{})
+	for _, request := range requests {
+		app, err := server.store.GetApp(request.AppGuid, request.AppVersion)
+		if err == nil {
+			apps[app.AppGuid] = app
+		}
+	}
+
+	return json.Marshal(apps)
 }

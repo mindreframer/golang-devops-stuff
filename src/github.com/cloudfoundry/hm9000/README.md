@@ -4,19 +4,15 @@
 
 HM 9000 is a rewrite of CloudFoundry's Health Manager.  HM 9000 is written in Golang and has a more modular architecture compared to the original ruby implementation.  HM 9000's dependencies are locked down in a separate repo, the [hm-workspace](https://github.com/cloudfoundry/hm-workspace).
 
-There are several Go Packages in this repository, each with a comprehensive set of unit tests.  In addition there is an integration test that excercises the interactions between the various componetns.  What follows is a detailed breakdown.
-
-## Relocation & Status Warning
-
-cloudfoundry/hm9000 will eventually be promoted and move to cloudfoundry/health_manager.  This is the temporary home while it is under development.
-
-hm9000 is not yet a complete replacement for health_manager -- we'll update this README when it's ready for primetime.
+There are several Go Packages in this repository, each with a comprehensive set of unit tests.  In addition there is an integration test that excercises the interactions between the various components.  What follows is a detailed breakdown.
 
 ## HM9000's Architecture and High-Availability
 
-HM9000 solves the high-availability problem by relying on ETCD, a robust high-availability store distributed across multiple nodes.  Individual HM9000 components are built to rely completely on the store for their knowledge of the world.  This removes the need for maintaining in-memory information and allows clarifies the relationship between the various components (all data must flow through the store).
+HM9000 solves the high-availability problem by relying on etcd, a robust high-availability store distributed across multiple nodes.  Individual HM9000 components are built to rely completely on the store for their knowledge of the world.  This removes the need for maintaining in-memory information and allows clarifies the relationship between the various components (all data must flow through the store).
 
 To avoid the singleton problem, we will turn on multiple instances of each HM9000 component across multiple nodes.  These instances will vie for a lock in the high-availability store.  The instance that grabs the lock gets to run and is responsible for maintaining the lock.  Should that instance enter a bad state or die, the lock becomes available allowing another instance to pick up the slack.  Since all state is stored in the store, the backup component should be able to function independently of the failed component.
+
+For more information, see [the HM9000 release announcement](http://blog.cloudfoundry.org/2014/02/22/hm9000-ready-for-launch/).
 
 ## Deployment
 
@@ -24,39 +20,23 @@ To avoid the singleton problem, we will turn on multiple instances of each HM900
 
 If HM9000 enters a bad state, the simplest solution - typically - is to delete the contents of the data store.
 
-#### If you're running HM9000 against a single, local, etcd node:
-
-    local  $ bosh_ssh hm9000_z1/0 #for example
-    hm9000 $ sudo su -
-    hm9000 $ monit stop etcd
-    hm9000 $ mkdir /var/vcap/store/etcdstorage-bad #for example
-    hm9000 $ mv /var/vcap/store/etcdstorage/* /var/vcap/store/etcdstorage-bad
-    hm9000 $ monit start etcd
-
-all the other components should recover gracefully.
-
-The data files in etcdstorage-bad can then be downloaded and analyzed to try to understand what went wrong to put HM9000/etcd in a bad state.  If you don't think this is necessary: just blow away the contents of `/var/vcap/store/etcdstorage`.
-
-#### If you're running HM9000 against an ETCD cluster:
-
-1. `bosh ssh` into each ETCD node (`bosh vms` is your friend here.  We typically have `etcd_leader_z1/0`, `etcd_z1/0`, and `etcd_z2/0`)
+1. `bosh ssh` into each etcd node (`bosh vms` is your friend here.  We typically have `etcd_leader_z1/0`, `etcd_z1/0`, and `etcd_z2/0`)
 2. `monit stop etcd` on all the boxes (better to stop them all simultaenously!)
-3. Blow away (or move) ETCDs storage directory.  It's located under `/var/vcap/store`
+3. Blow away (or move) the etcd storage directory.  It's located under `/var/vcap/store`
 4. `monit start etcd` on all the boxes
 5. HM9000 should recover on its own.
 
-### If Clustered ETCD can't handle the load
+### If Clustered etcd can't handle the load
 
-You can identify this scenario by monitoring the `DesiredStateSyncTimeInMilliseconds` and the `ActualStateListenerStoreUsagePercentage` metrics.  If the `DesiredStateSyncTimeInMilliseconds` exceeds ~5000 (5 seconds)  *and* the `ActualStateListenerStoreUsagePercentage` exceeds 50-70 (this is a percentage - so out of 100) then clustered ETCD *may* be unable to handle the load.
+You can identify this scenario by monitoring the `DesiredStateSyncTimeInMilliseconds` and the `ActualStateListenerStoreUsagePercentage` metrics.  If the `DesiredStateSyncTimeInMilliseconds` exceeds ~5000 (5 seconds)  *and* the `ActualStateListenerStoreUsagePercentage` exceeds 50-70 (this is a percentage - so out of 100) then clustered etcd *may* be unable to handle the load.
 
-To resolve this, you'll need to pick one of the HM9000 nodes (`hm9000_z1/0` or `hm9000_z2/0`) and make it the solitary HM9000 node and point it at its local ETCD database.  Here's how - let's say we want to keep `hm9000_z1/0` around:
+To resolve this, you'll need to pick one of the HM9000 nodes (`hm9000_z1/0` or `hm9000_z2/0`) and make it the solitary HM9000 node and point it at its local etcd database.  Here's how - let's say we want to keep `hm9000_z1/0` around:
 
 1. `bosh ssh` onto `hm9000_z2/0` and issue a `monit stop all`
 2. `bosh ssh` onto `hm9000_z1/0` and issue a `monit stop all`
 3. Edit `/var/vcap/jobs/hm9000/config/hm9000.json` and set `store_urls` to a single entry: `"store_urls": ["http://127.0.0.1:4001"],`
 4. Now `monit start all` and tail `/var/vcap/sys/log/hm9000/hm9000_listener.stdout.log` you should see heartbeats come in and get succesfully saved to the store.
 5. Eventually, `/var/vcap/packages/hm9000/hm9000 dump --config=/var/vcap/jobs/hm9000/config/hm9000.json` should report that the store is fresh (this is near the top of the output).
-
 
 
 ## Installing HM9000 locally
@@ -176,6 +156,12 @@ will dump the entire contents of the store to stdout.  The output is structured 
 
 `etcd` has a very simple [curlable API](http://github.com/coreos/etcd), which you can use in lieu of `dump`.
 
+### How to dump the contents of the store on a bosh deployed health manager
+
+    watch -n 1 /var/vcap/packages/hm9000/hm9000 dump --config=/var/vcap/jobs/hm9000/config/hm9000.json
+
+on a health manager instance should dump the store.
+
 ## HM9000 Config
 
 HM9000 is configured using a JSON file.  Here are the available entries:
@@ -237,9 +223,7 @@ HM9000 is configured using a JSON file.  Here are the available entries:
 
 - `store_schema_version`: The schema of the store.  HM9000 does not migrate the store, instead, if the store data format/layout changes and is no longer backward compatible the schema version must be bumped.
 
-- `store_type`: One of `"etcd"` or `"ZooKeeper"`
-
-- `store_urls`: An array of ETCD/ZooKeeper server URLs to connect to.
+- `store_urls`: An array of etcd server URLs to connect to.
 
 - `actual_freshness_key`: The key for the actual freshness in the store.  Set to `"/actual-fresh"`.
 

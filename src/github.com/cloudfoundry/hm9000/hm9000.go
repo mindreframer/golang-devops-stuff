@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+
 	"github.com/cloudfoundry/gosteno"
 
 	"github.com/cloudfoundry/hm9000/config"

@@ -2,6 +2,7 @@ package store_test
 
 import (
 	. "github.com/cloudfoundry/hm9000/store"
+	"github.com/cloudfoundry/storeadapter/storenodematchers"
 	"github.com/cloudfoundry/storeadapter/workerpool"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -53,7 +54,7 @@ var _ = Describe("Crash Count", func() {
 
 			node, err := storeAdapter.Get("/hm/v1/apps/crashes/" + crashCount1.AppGuid + "," + crashCount1.AppVersion + "/1")
 			Ω(err).ShouldNot(HaveOccurred())
-			Ω(node).Should(Equal(storeadapter.StoreNode{
+			Ω(node).Should(storenodematchers.MatchStoreNode(storeadapter.StoreNode{
 				Key:   "/hm/v1/apps/crashes/" + crashCount1.AppGuid + "," + crashCount1.AppVersion + "/1",
 				Value: crashCount1.ToJSON(),
 				TTL:   expectedTTL,
@@ -61,7 +62,7 @@ var _ = Describe("Crash Count", func() {
 
 			node, err = storeAdapter.Get("/hm/v1/apps/crashes/" + crashCount2.AppGuid + "," + crashCount2.AppVersion + "/4")
 			Ω(err).ShouldNot(HaveOccurred())
-			Ω(node).Should(Equal(storeadapter.StoreNode{
+			Ω(node).Should(storenodematchers.MatchStoreNode(storeadapter.StoreNode{
 				Key:   "/hm/v1/apps/crashes/" + crashCount2.AppGuid + "," + crashCount2.AppVersion + "/4",
 				Value: crashCount2.ToJSON(),
 				TTL:   expectedTTL,
