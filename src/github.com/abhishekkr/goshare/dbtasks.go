@@ -1,111 +1,43 @@
 package goshare
 
-import (
-  "time"
+/*
+[PATTERN]
+action {read, push, delete}
+type {default, ns, tsds, now}
 
-  abkleveldb "github.com/abhishekkr/levigoNS/leveldb"
-  levigoNS "github.com/abhishekkr/levigoNS"
-  levigoTSDS "github.com/abhishekkr/levigoTSDS"
-)
+## message_array here is devoided of axn and key_type
+non-tsds {key&val, :type-data}
+tsds(-*) {tdot&key&val, tdot&:type-data}
+*/
 
-
-type GetValFunc func(key string) string
-type PushKeyValFunc func(key string, val string) bool
-type DelKeyFunc func(key string) bool
-
-
-func GetVal(key string) string{
-  return abkleveldb.GetVal(key, db)
+/* Insulates communication from DBTasks
+Communications handled on byte streams can use it by passing standard-ized packet-array
+it prepares Packet and passes on to TasksOnPacket, 0MQ utilizes it */
+func DBTasks(packet_array []string) ([]byte, bool) {
+	packet := CreatePacket(packet_array)
+	return DBTasksOnPacket(packet)
 }
 
+/* Insulates communication from DBTasks
+Communication can directly create packet and pass it here, HTTP utilizes it directly */
+func DBTasksOnPacket(packet Packet) ([]byte, bool) {
+	response := ""
+	axn_status := false
 
-func PushKeyVal(key string, val string) bool{
-  return abkleveldb.PushKeyVal(key, val, db)
-}
+	switch packet.DBAction {
+	case "read":
+		// returns axn error if key has empty value, if you gotta store then store, don't keep placeholders
+		response = ReadFromPacket(packet)
+		if response != "" {
+			axn_status = true
+		}
 
+	case "push":
+		axn_status = PushFromPacket(packet)
 
-func DelKey(key string) bool{
-  return abkleveldb.DelKey(key, db)
-}
+	case "delete":
+		axn_status = DeleteFromPacket(packet)
+	}
 
-
-func hmap_to_csv(hmap levigoNS.HashMap) string{
-  csv := ""
-  for  key, value := range hmap {
-    csv += key + "," + value + "\n"
-  }
-  return csv
-}
-
-
-func GetValNS(key string) string{
-  return hmap_to_csv(levigoNS.ReadNSRecursive(key, db))
-}
-
-
-func PushKeyValNS(key string, val string) bool{
-  return levigoNS.PushNS(key, val, db)
-}
-
-
-func DelKeyNS(key string) bool{
-  levigoNS.DeleteNSRecursive(key, db)
-  return true
-}
-
-
-func GetValTSDS(key string) string{
-  return hmap_to_csv(levigoTSDS.ReadTSDS(key, db))
-}
-
-
-func PushKeyValTSDS(key string, val string,
-                    year int, month int, day int,
-                    hour int, min int, sec int) bool{
-  key_time := time.Date(year, time.Month(month),
-                        day, hour, min, sec, 0, time.UTC)
-  levigoTSDS.PushTSDS(key, val, key_time, db)
-  return true
-}
-
-
-func PushKeyValNowTSDS(key string, val string) bool{
-  levigoTSDS.PushNowTSDS(key, val, db)
-  return true
-}
-
-
-func DelKeyTSDS(key string) bool{
-  levigoTSDS.DeleteTSDS(key, db)
-  return true
-}
-
-
-func GetValTask(task_type string) GetValFunc {
-  if task_type == "tsds" {
-    return GetValTSDS
-  } else if task_type == "ns" {
-    return GetValNS
-  }
-  return GetVal
-}
-
-
-func PushKeyValTask(task_type string) PushKeyValFunc {
-  if task_type == "tsds-now" {
-    return PushKeyValNowTSDS
-  } else if task_type == "ns" {
-    return PushKeyValNS
-  }
-  return PushKeyVal
-}
-
-
-func DelKeyTask(task_type string) DelKeyFunc {
-  if task_type == "tsds" {
-    return DelKeyTSDS
-  } else if task_type == "ns" {
-    return DelKeyNS
-  }
-  return DelKey
+	return []byte(response), axn_status
 }

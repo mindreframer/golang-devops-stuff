@@ -1,4 +1,9 @@
 -tags zmq_3_x github.com/alecthomas/gozmq
+github.com/abhishekkr/gol/golhashmap
+github.com/abhishekkr/gol/gollist
+github.com/abhishekkr/gol/goltime
+github.com/abhishekkr/gol/golzmq
+github.com/abhishekkr/gol
 github.com/abhishekkr/levigoNS
 github.com/abhishekkr/levigoTSDS
 github.com/abhishekkr/goshare
