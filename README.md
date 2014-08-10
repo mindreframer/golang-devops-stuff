@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/cloudfoundry/yagnats.png)](https://travis-ci.org/cloudfoundry/yagnats)
+
 Yet Another Go NATS Client
 ==========================
 
@@ -10,7 +12,11 @@ Basic usage:
 ```go
 client := yagnats.NewClient()
 
-err := client.Connect(&yagnats.ConnectionInfo{"127.0.0.1:4222", "user", "pass"})
+err := client.Connect(&yagnats.ConnectionInfo{
+		Addr:     "127.0.0.1:4222",
+		Username: "user",
+		Password: "pass",
+})
 if err != nil {
   panic("Wrong auth or something.")
 }
@@ -21,3 +27,4 @@ client.Subscribe("some.subject", func(msg *Message) {
 
 client.Publish("some.subject", []byte("Sup son?"))
 ```
+
