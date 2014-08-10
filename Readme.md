@@ -45,191 +45,195 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     abh/geodns:
       DNS server with per-client targeted responses
-       241 commits, last change: , 305 stars, 26 forks
+       269 commits, last change: 2014-06-15 - 15:08, 360 stars, 35 forks
 
     abhishekkr/goshare:
       Go Share your TimeSeries/NameSpace/KeyVal DataStore (using leveldb) over HTTP /or ZeroMQ
-       61 commits, last change: , 21 stars, 3 forks
+       99 commits, last change: , 46 stars, 5 forks
+
+    ActiveState/tail:
+      Go package for reading from continously updated files (tail -f)
+       137 commits, last change: 2014-07-28 - 15:34, 141 stars, 32 forks
 
     adnaan/hamster:
       A back end as a service based on MongoDB
-       45 commits, last change: , 52 stars, 3 forks
+       45 commits, last change: , 54 stars, 3 forks
 
     apcera/gnatsd:
       High Performance NATS Server
-       301 commits, last change: , 390 stars, 46 forks
+       323 commits, last change: 2014-07-31 - 11:14, 559 stars, 65 forks
 
     apcera/nats:
       NATS client for Go
-       220 commits, last change: , 94 stars, 13 forks
+       239 commits, last change: 2014-08-06 - 16:03, 161 stars, 20 forks
 
     ARolek/lilpinger:
       A small site pinging application with email and SMS notifications written in Golang
-       5 commits, last change: , 17 stars, 3 forks
+       5 commits, last change: 2013-12-04 - 14:54, 18 stars, 3 forks
 
     benbjohnson/go-raft:
       A Go implementation of the Raft distributed consensus protocol.
-       537 commits, last change: , 856 stars, 98 forks
+       541 commits, last change: 2014-05-14 - 10:57, 973 stars, 112 forks
 
     bitly/google_auth_proxy:
       A reverse proxy that provides authentication using Google OAuth2
-       19 commits, last change: , 206 stars, 29 forks
+       32 commits, last change: 2014-08-07 - 17:21, 273 stars, 45 forks
 
     bitly/nsq:
       A realtime distributed messaging platform
-       1,097 commits, last change: , 2,456 stars, 211 forks
+       1,240 commits, last change: 2014-08-09 - 17:25, 3,094 stars, 283 forks
 
     bradfitz/runsit:
       It runs it.
-       69 commits, last change: , 171 stars, 11 forks
+       69 commits, last change: 2013-09-24 - 10:45, 190 stars, 13 forks
 
     buger/cloud-ssh:
       Wrapper for ssh which enchance work with cloud providers
-       11 commits, last change: , 21 stars, 1 forks
+       16 commits, last change: , 22 stars, 2 forks
 
     buger/gor:
       HTTP traffic replay in real-time. Replay traffic from production to staging and dev environments.
-       324 commits, last change: , 1,436 stars, 71 forks
+       342 commits, last change: 2014-07-30 - 14:29, 1,577 stars, 82 forks
 
     BurntSushi/cmail:
       cmail runs a command and sends the output to your email address at certain intervals.
        11 commits, last change: , 3 stars, 0 forks
 
     calmh/syncthing:
-      Open Source Continuous Replication / Cluster Synchronization Thing
-       398 commits, last change: 2014-05-13 14:59:17, 2,123 stars, 68 forks
+      Open Source Continuous File Synchronization
+       837 commits, last change: 2014-08-08 - 14:09, 4,074 stars, 208 forks
 
     ccding/go-stun:
       a go implementation of the STUN client (RFC 3489 and RFC 5389)
-       4 commits, last change: , 15 stars, 2 forks
+       4 commits, last change: 2013-08-18 - 01:10, 19 stars, 2 forks
 
     cloudflare/redoctober:
       Go server for two-man rule style file encryption and decryption.
-       72 commits, last change: , 557 stars, 39 forks
+       74 commits, last change: 2014-07-08 - 19:35, 704 stars, 51 forks
 
     cloudfoundry/gorouter:
 
-       433 commits, last change: , 136 stars, 53 forks
+       461 commits, last change: 2014-08-05 - 14:49, 155 stars, 69 forks
 
     cloudfoundry/gosigar:
 
-       15 commits, last change: , 64 stars, 21 forks
+       28 commits, last change: 2014-06-25 - 16:11, 80 stars, 30 forks
 
     cloudfoundry/hm9000:
 
-       321 commits, last change: , 21 stars, 9 forks
+       327 commits, last change: 2014-07-21 - 12:36, 25 stars, 13 forks
 
     cloudfoundry/yagnats:
       Yet Another Go NATS client
-       64 commits, last change: , 6 stars, 0 forks
+       78 commits, last change: 2014-08-07 - 12:33, 7 stars, 2 forks
 
     coreos/etcd:
       A highly-available key value store for shared configuration and service discovery
-       1,747 commits, last change: , 3,069 stars, 281 forks
+       1,955 commits, last change: 2014-08-08 - 17:56, 3,786 stars, 366 forks
 
     crosbymichael/skydock:
       Service discovery via DNS for docker
-       86 commits, last change: , 384 stars, 27 forks
+       91 commits, last change: 2014-07-28 - 11:00, 545 stars, 41 forks
 
     crowdmob/goamz:
       Fork of the GOAMZ version developed within Canonical with additional functionality with DynamoDB
-       630 commits, last change: , 144 stars, 85 forks
+       722 commits, last change: 2014-07-18 - 09:34, 204 stars, 125 forks
 
     dotcloud/docker:
       Docker - the open-source application container engine
-       7,984 commits, last change: , 11,670 stars, 1,889 forks
+       9,958 commits, last change: 2014-08-08 - 19:39, 14,187 stars, 2,633 forks
 
     efficient/epaxos:
 
-       26 commits, last change: , 164 stars, 9 forks
+       26 commits, last change: 2014-01-20 - 08:21, 178 stars, 9 forks
 
     erikh/gollector:
       json-based metrics collector
-       175 commits, last change: , 100 stars, 6 forks
+       176 commits, last change: 2014-07-24 - 18:41, 109 stars, 6 forks
 
     errplane/errplane-go:
       Go library for metrics for Errplane
-       52 commits, last change: , 14 stars, 2 forks
+       52 commits, last change: 2013-08-21 - 17:51, 15 stars, 3 forks
 
     flynn/go-crypto-ssh:
       Forked from go.crypto as Flynn working copy until changes merged upstream
-       7 commits, last change: , 2 stars, 1 forks
+       9 commits, last change: 2014-06-28 - 20:51, 1 stars, 2 forks
 
     flynn/go-discover:
-      Service discovery system written in Go
-       130 commits, last change: , 187 stars, 18 forks
+      Archived -- see https://github.com/flynn/flynn
+       138 commits, last change: 2014-08-02 - 13:58, 237 stars, 24 forks
 
     flynn/rpcplus:
-      Go RPC plus streaming responses (forked from vitess)
-       23 commits, last change: , 15 stars, 1 forks
+      Archived -- see https://github.com/flynn/flynn
+       38 commits, last change: 2014-08-02 - 13:57, 18 stars, 3 forks
 
     globocom/gandalf:
       Gandalf is an API to manage git repositories.
-       504 commits, last change: , 123 stars, 16 forks
+       625 commits, last change: 2014-08-07 - 17:13, 137 stars, 22 forks
 
     globocom/tsuru:
-      Open source Platform as a Service.
-       6,986 commits, last change: , 962 stars, 95 forks
+      Open source Platform as a Service (PaaS).
+       7,753 commits, last change: 2014-08-08 - 15:43, 1,124 stars, 110 forks
 
     gogits/gogs:
-      Gogs(Go Git Service) is a Self Hosted Git Service in the Go Programming Language.
-       971 commits, last change: , 1,774 stars, 107 forks
+      Gogs(Go Git Service) is a painless self-hosted Git Service written in Go.
+       1,227 commits, last change: 2014-07-28 - 11:23, 2,257 stars, 166 forks
 
     golang/groupcache:
       groupcache is a caching and cache-filling library, intended as a replacement for memcached in many cases.
-       21 commits, last change: , 2,742 stars, 237 forks
+       27 commits, last change: 2014-07-09 - 07:38, 2,951 stars, 255 forks
 
     happypancake/fsd:
-
-        commits, last change: ,  stars,  forks
+      Func based statsd client for golang, which returns more or less directly via using a buffered channel and reconnection establishment in case of failure of udp sending
+       23 commits, last change: , 0 stars, 0 forks
 
     hashicorp/serf:
       Service orchestration and management tool.
-       1,141 commits, last change: , 2,007 stars, 121 forks
+       1,186 commits, last change: 2014-07-22 - 09:24, 2,321 stars, 156 forks
 
     inconshreveable/muxado:
       Stream multiplexing for Go
-       15 commits, last change: , 147 stars, 6 forks
+       15 commits, last change: 2014-03-12 - 01:58, 200 stars, 11 forks
 
     inconshreveable/ngrok:
       Introspected tunnels to localhost
-       277 commits, last change: , 2,143 stars, 141 forks
+       295 commits, last change: 2014-08-06 - 08:57, 2,956 stars, 186 forks
 
     inconshreveable/slt:
       A TLS reverse proxy with SNI multiplexing in Go
-       9 commits, last change: , 93 stars, 1 forks
+       9 commits, last change: 2014-03-01 - 16:44, 99 stars, 3 forks
 
     influxdb/influxdb:
       Scalable datastore for metrics, events, and real-time analytics
-       1,353 commits, last change: , 1,937 stars, 107 forks
+       1,766 commits, last change: 2014-08-07 - 16:06, 2,629 stars, 198 forks
 
     jingweno/gotask:
       Idiomatic build tool in Go
-       123 commits, last change: , 116 stars, 5 forks
+       123 commits, last change: 2014-01-12 - 10:05, 138 stars, 5 forks
 
     joewalnes/websocketd:
-      Like inetd, but for WebSockets. Turn any application that uses STDIN/STDOUT into a WebSocket server.
-       134 commits, last change: , 3,075 stars, 139 forks
+      Turn any program that uses STDIN/STDOUT into a WebSocket server. Like inetd, but for WebSockets.
+       154 commits, last change: 2014-07-26 - 21:38, 3,336 stars, 146 forks
 
     jondot/groundcontrol:
       Manage and monitor your Raspberry Pi with ease
-       50 commits, last change: , 653 stars, 42 forks
+       50 commits, last change: 2013-08-22 - 07:19, 671 stars, 46 forks
 
     jordansissel/lumberjack:
       An experiment to cut logs in preparation for processing elsewhere.
-       541 commits, last change: , 520 stars, 133 forks
+       557 commits, last change: 2014-07-25 - 09:12, 695 stars, 182 forks
 
     jyap808/jaeger:
       Jaeger is a JSON encoded GPG encrypted key value store. It is useful for generating and keeping configuration files secure. Jaeger is written in Go.
-       38 commits, last change: , 8 stars, 2 forks
+       38 commits, last change: 2014-05-01 - 14:55, 10 stars, 3 forks
 
     kelseyhightower/confd:
       Manage local application configuration files using templates and data from etcd or consul
-       224 commits, last change: , 436 stars, 31 forks
+       283 commits, last change: 2014-08-08 - 11:14, 754 stars, 70 forks
 
     mailgun/vulcan:
       Golang HTTP reverse proxy library
-       290 commits, last change: , 193 stars, 7 forks
+       320 commits, last change: 2014-08-02 - 22:19, 248 stars, 16 forks
 
     mindreframer/emtail:
       extract whitebox monitoring data from logs and insert into a timeseries database - mirror for https://code.google.com/p/emtail/
@@ -237,19 +241,19 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     mitchellh/go-ps:
       Find, list, and inspect processes from Go (golang).
-       19 commits, last change: , 161 stars, 7 forks
+       19 commits, last change: 2014-04-07 - 16:34, 174 stars, 8 forks
 
     mitchellh/packer:
       Packer is a tool for creating identical machine images for multiple platforms from a single source configuration.
-       2,925 commits, last change: , 2,408 stars, 392 forks
+       3,131 commits, last change: 2014-08-08 - 11:54, 2,836 stars, 489 forks
 
     mozilla-services/heka:
       Data collection and processing made easy.
-       2,347 commits, last change: , 1,220 stars, 112 forks
+       2,712 commits, last change: 2014-08-08 - 14:34, 1,468 stars, 145 forks
 
     mrwilson/helixdns:
       A simple dns server that reads records from etcd.
-       45 commits, last change: , 27 stars, 4 forks
+       54 commits, last change: 2014-08-09 - 11:00, 42 stars, 8 forks
 
     necrogami/watchdog:
       Watchdog
@@ -257,105 +261,105 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
 
     nf/gohttptun:
       A tool to tunnel TCP over HTTP, written in Go
-       22 commits, last change: , 88 stars, 15 forks
+       22 commits, last change: 2014-01-22 - 13:29, 96 stars, 16 forks
 
     nuxeo/gogeta:
       Reverse proxy based on etcd hierarchy
-       17 commits, last change: , 60 stars, 5 forks
+       74 commits, last change: 2014-08-01 - 23:59, 84 stars, 8 forks
 
     oleiade/trousseau:
       Networked and encrypted key-value database
-       271 commits, last change: , 557 stars, 22 forks
+       271 commits, last change: 2014-04-24 - 10:45, 590 stars, 23 forks
 
     petar/GoTeleport:
       Teleport Transport: End-to-end resilience to network outages
-       6 commits, last change: , 108 stars, 2 forks
+       6 commits, last change: 2013-08-30 - 13:54, 121 stars, 2 forks
 
     pubsubsql/pubsubsql:
       An open-source distributed in-memory database integrated with Publish-Subscribe
-       450 commits, last change: , 35 stars, 5 forks
+       452 commits, last change: 2014-07-17 - 07:05, 38 stars, 6 forks
 
     PuerkitoBio/throttled:
       throttling strategies for HTTP handlers
-       39 commits, last change: , 155 stars, 4 forks
+       39 commits, last change: 2014-02-25 - 09:02, 184 stars, 6 forks
 
     rackspace/gophercloud:
       The Go SDK for Openstack.
-       197 commits, last change: , 194 stars, 25 forks
+       210 commits, last change: 2014-07-30 - 11:42, 215 stars, 32 forks
 
     rcrowley/go-metrics:
       Go port of Coda Hale's Metrics library
-       207 commits, last change: , 381 stars, 50 forks
+       232 commits, last change: 2014-08-03 - 16:34, 505 stars, 74 forks
 
     ReshNesh/pixlserv:
       Go server for processing and serving of images
-       142 commits, last change: , 203 stars, 6 forks
+       148 commits, last change: 2014-07-15 - 14:31, 258 stars, 9 forks
 
     rzab/ostent:
       A drop-in system metrics inspector
-       33 commits, last change: , 14 stars, 2 forks
+       221 commits, last change: , 18 stars, 1 forks
 
     Sendhub/shipbuilder:
       The Open-source self-hosted Platform-as-a-Service written in Go
-       139 commits, last change: , 5 stars, 39 forks
+       139 commits, last change: , 7 stars, 40 forks
 
     shirkey/go-guerrilla:
       Mini SMTP server written in golang
-       28 commits, last change: , 0 stars, 18 forks
+       28 commits, last change: , 2 stars, 25 forks
 
     skydb/sky:
       Sky is an open source, behavioral analytics database.
-       557 commits, last change: , 571 stars, 53 forks
+       559 commits, last change: 2014-08-03 - 22:20, 649 stars, 61 forks
 
     skynetservices/skydns:
-      DNS for skynet or any other service discovery
-       357 commits, last change: , 460 stars, 32 forks
+      DNS service discovery for etcd
+       389 commits, last change: 2014-08-08 - 14:02, 250 stars, 32 forks
 
     smira/aptly:
       aptly - Debian repository management tool
-       592 commits, last change: , 240 stars, 15 forks
+       799 commits, last change: 2014-08-06 - 23:34, 323 stars, 24 forks
 
     spf13/nitro:
       Quick and easy performance analyzer library for golang
-       7 commits, last change: , 92 stars, 5 forks
+       7 commits, last change: 2013-10-03 - 09:43, 117 stars, 6 forks
 
     stripe-ctf/octopus:
       Many-armed network simulator
-       17 commits, last change: , 52 stars, 3 forks
+       17 commits, last change: 2014-03-05 - 19:58, 60 stars, 3 forks
 
     tsenart/tb:
       A generic lock-free implementation of the "Token-Bucket" algorithm
-       51 commits, last change: , 40 stars, 0 forks
+       54 commits, last change: 2014-06-25 - 04:22, 52 stars, 1 forks
 
     tsenart/vegeta:
       HTTP load testing tool and library. It's over 9000!
-       171 commits, last change: , 1,599 stars, 75 forks
+       203 commits, last change: 2014-07-01 - 21:47, 1,693 stars, 78 forks
 
     uniqush/uniqush-push:
       Uniqush is a free and open source software which provides a unified push service for server-side notification to apps on mobile devices.
-       406 commits, last change: , 426 stars, 55 forks
+       415 commits, last change: 2014-06-29 - 18:48, 497 stars, 64 forks
 
     vektra/tachyon:
       An experimental configuration management system inspired by ansible
-       121 commits, last change: , 27 stars, 6 forks
+       132 commits, last change: 2014-06-06 - 15:13, 67 stars, 10 forks
 
     vito/garden:
       Go Warden
-       287 commits, last change: , 0 stars, 5 forks
+       287 commits, last change: , 0 stars, 7 forks
 
     VividCortex/robustly:
-      Run functions resiliently
-       33 commits, last change: , 52 stars, 2 forks
+      Run functions resiliently in Go, catching and restarting panics
+       33 commits, last change: 2014-01-13 - 10:34, 65 stars, 2 forks
 
     xtaci/gonet:
       a game server skeleton in golang
-       974 commits, last change: , 198 stars, 83 forks
+       2 commits, last change: 2014-07-31 - 12:52, 266 stars, 115 forks
 
     YuriyNasretdinov/GoSSHa:
       Ssh client that supports multiple servers
-       17 commits, last change: , 16 stars, 1 forks
+       21 commits, last change: 2014-07-15 - 14:40, 45 stars, 7 forks
 
     zimbatm/socketmaster:
       Zero downtime restarts for your apps
-       51 commits, last change: , 408 stars, 20 forks
+       51 commits, last change: 2014-01-31 - 15:54, 420 stars, 19 forks
 <!-- PROJECTS_LIST_END -->
