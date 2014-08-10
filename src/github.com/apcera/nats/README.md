@@ -1,20 +1,21 @@
-# NATS - Go Client
-
+# NATS - Go Client [![Build Status](https://secure.travis-ci.org/apcera/nats.svg?branch=master)](http://travis-ci.org/apcera/nats) [![GoDoc](http://godoc.org/github.com/apcera/nats?status.png)](http://godoc.org/github.com/apcera/nats) [![Coverage Status](https://img.shields.io/coveralls/apcera/nats.svg)](https://coveralls.io/r/apcera/nats)
 A [Go](http://golang.org) client for the [NATS messaging system](https://github.com/derekcollison/nats).
 
-[![Build Status](https://secure.travis-ci.org/apcera/nats.png)](http://travis-ci.org/apcera/nats)
 
 ## Installation
 
 ```bash
 # Go client
 go get github.com/apcera/nats
-# NATS system
+
+# Servers
+
+# gnatsd
+go get github.com/apcera/gnatsd
+
+# nats-server (Ruby)
 gem install nats
 ```
-
-## Go Style Documentation
-[http://go.pkgdoc.org/github.com/apcera/nats](http://go.pkgdoc.org/github.com/apcera/nats)
 
 ## Basic Encoded Usage
 
@@ -44,13 +45,14 @@ c.Subscribe("hello", func(p *person) {
     fmt.Printf("Received a person: %+v\n", p)
 })
 
-me := &person{Name: "derek", Age: 22, Address: "85 Second St, San Francisco, CA"}
+me := &person{Name: "derek", Age: 22, Address: "585 Howard Street, San Francisco, CA"}
 
 // Go type Publisher
 c.Publish("hello", me)
 
 // Unsubscribing
 sub, err := c.Subscribe("foo", nil)
+...
 sub.Unsubscribe()
 
 // Requests
@@ -70,8 +72,8 @@ c.Close();
 
 ```go
 nc, _ := nats.Connect(nats.DefaultURL)
-c, _ := nats.NewEncodedConn(nc, "json")
-defer c.Close()
+ec, _ := nats.NewEncodedConn(nc, "json")
+defer ec.Close()
 
 type person struct {
      Name     string
@@ -80,12 +82,12 @@ type person struct {
 }
 
 recvCh := make(chan *person)
-c.BindRecvChan("hello", recvCh)
+ec.BindRecvChan("hello", recvCh)
 
 sendCh := make(chan *person)
-c.BindSendChan("hello", sendCh)
+ec.BindSendChan("hello", sendCh)
 
-me := &person{Name: "derek", Age: 22, Address: "85 Second St"}
+me := &person{Name: "derek", Age: 22, Address: "585 Howard Street"}
 
 // Send via Go channels
 sendCh <- me
@@ -135,7 +137,7 @@ nc.Close();
 
 // "*" matches any token, at any level of the subject.
 nc.Subscribe("foo.*.baz", func(m *Msg) {
-    fmt.Printf("Msg received on [%s] : %s\n", n.Subj, string(m.Data));
+    fmt.Printf("Msg received on [%s] : %s\n", m.Subject, string(m.Data));
 })
 
 nc.Subscribe("foo.bar.*", func(m *Msg) {
@@ -153,12 +155,12 @@ nc.Publish("foo.bar.baz", []byte("Hello World"))
 
 ```
 
-## Queues Groups
+## Queue Groups
 
 ```go
 // All subscriptions with the same queue name will form a queue group.
-// Each message will be delivered to only one subscriber per queue group, queuing semantics.
-// You can have as many queue groups as you wish.
+// Each message will be delivered to only one subscriber per queue group,
+// using queuing semantics. You can have as many queue groups as you wish.
 // Normal subscribers will continue to work as expected.
 
 nc.QueueSubscribe("foo", "job_workers", func(_ *Msg) {
@@ -190,7 +192,7 @@ sub.AutoUnsubscribe(MAX_WANTED)
 
 // Multiple connections
 nc1 := nats.Connect("nats://host1:4222")
-nc1 := nats.Connect("nats://host2:4222")
+nc2 := nats.Connect("nats://host2:4222")
 
 nc1.Subscribe("foo", func(m *Msg) {
     fmt.Printf("Received a message: %s\n", string(m.Data))
@@ -241,7 +243,7 @@ nc.Opts.ReconnectedCB = func(nc *Conn) {
 
 (The MIT License)
 
-Copyright (c) 2012-2013 Apcera Inc.
+Copyright (c) 2012-2014 Apcera Inc.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to
