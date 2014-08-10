@@ -1,3 +1,7 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package protocol
 
 import (
@@ -10,11 +14,15 @@ type wireFormatConnection struct {
 	next Connection
 }
 
-func (c wireFormatConnection) ID() string {
+func (c wireFormatConnection) ID() NodeID {
 	return c.next.ID()
 }
 
-func (c wireFormatConnection) Index(node string, fs []FileInfo) {
+func (c wireFormatConnection) Name() string {
+	return c.next.Name()
+}
+
+func (c wireFormatConnection) Index(repo string, fs []FileInfo) error {
 	var myFs = make([]FileInfo, len(fs))
 	copy(myFs, fs)
 
@@ -22,7 +30,18 @@ func (c wireFormatConnection) Index(node string, fs []FileInfo) {
 		myFs[i].Name = norm.NFC.String(filepath.ToSlash(myFs[i].Name))
 	}
 
-	c.next.Index(node, myFs)
+	return c.next.Index(repo, myFs)
+}
+
+func (c wireFormatConnection) IndexUpdate(repo string, fs []FileInfo) error {
+	var myFs = make([]FileInfo, len(fs))
+	copy(myFs, fs)
+
+	for i := range fs {
+		myFs[i].Name = norm.NFC.String(filepath.ToSlash(myFs[i].Name))
+	}
+
+	return c.next.IndexUpdate(repo, myFs)
 }
 
 func (c wireFormatConnection) Request(repo, name string, offset int64, size int) ([]byte, error) {

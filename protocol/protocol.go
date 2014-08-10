@@ -1,18 +1,25 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package protocol
 
 import (
 	"bufio"
-	"compress/flate"
+	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"time"
 
-	"github.com/calmh/syncthing/xdr"
+	lz4 "github.com/bkaradzic/go-lz4"
 )
 
-const BlockSize = 128 * 1024
+const (
+	BlockSize = 128 * 1024
+)
 
 const (
 	messageTypeClusterConfig = 0
@@ -22,12 +29,20 @@ const (
 	messageTypePing          = 4
 	messageTypePong          = 5
 	messageTypeIndexUpdate   = 6
+	messageTypeClose         = 7
 )
 
 const (
-	FlagDeleted   uint32 = 1 << 12
-	FlagInvalid          = 1 << 13
-	FlagDirectory        = 1 << 14
+	stateInitial = iota
+	stateCCRcvd
+	stateIdxRcvd
+)
+
+const (
+	FlagDeleted    uint32 = 1 << 12
+	FlagInvalid           = 1 << 13
+	FlagDirectory         = 1 << 14
+	FlagNoPermBits        = 1 << 15
 )
 
 const (
@@ -43,46 +58,52 @@ var (
 
 type Model interface {
 	// An index was received from the peer node
-	Index(nodeID string, repo string, files []FileInfo)
+	Index(nodeID NodeID, repo string, files []FileInfo)
 	// An index update was received from the peer node
-	IndexUpdate(nodeID string, repo string, files []FileInfo)
+	IndexUpdate(nodeID NodeID, repo string, files []FileInfo)
 	// A request was made by the peer node
-	Request(nodeID string, repo string, name string, offset int64, size int) ([]byte, error)
+	Request(nodeID NodeID, repo string, name string, offset int64, size int) ([]byte, error)
 	// A cluster configuration message was received
-	ClusterConfig(nodeID string, config ClusterConfigMessage)
+	ClusterConfig(nodeID NodeID, config ClusterConfigMessage)
 	// The peer node closed the connection
-	Close(nodeID string, err error)
+	Close(nodeID NodeID, err error)
 }
 
 type Connection interface {
-	ID() string
-	Index(repo string, files []FileInfo)
+	ID() NodeID
+	Name() string
+	Index(repo string, files []FileInfo) error
+	IndexUpdate(repo string, files []FileInfo) error
 	Request(repo string, name string, offset int64, size int) ([]byte, error)
 	ClusterConfig(config ClusterConfigMessage)
 	Statistics() Statistics
 }
 
 type rawConnection struct {
-	id       string
+	id       NodeID
+	name     string
 	receiver Model
+	state    int
 
-	reader io.ReadCloser
-	cr     *countingReader
-	xr     *xdr.Reader
-	writer io.WriteCloser
+	cr *countingReader
 
-	cw   *countingWriter
-	wb   *bufio.Writer
-	xw   *xdr.Writer
-	wmut sync.Mutex
+	cw *countingWriter
+	wb *bufio.Writer
 
-	indexSent map[string]map[string][2]int64
-	awaiting  []chan asyncResult
-	imut      sync.Mutex
+	awaiting    [4096]chan asyncResult
+	awaitingMut sync.Mutex
+
+	idxMut sync.Mutex // ensures serialization of Index calls
 
 	nextID chan int
-	outbox chan []encodable
+	outbox chan hdrMsg
 	closed chan struct{}
+	once   sync.Once
+
+	compressionThreshold int // compress messages larger than this many bytes
+
+	rdbuf0 []byte // used & reused by readMessage
+	rdbuf1 []byte // used & reused by readMessage
 }
 
 type asyncResult struct {
@@ -90,37 +111,39 @@ type asyncResult struct {
 	err error
 }
 
+type hdrMsg struct {
+	hdr header
+	msg encodable
+}
+
+type encodable interface {
+	AppendXDR([]byte) []byte
+}
+
 const (
-	pingTimeout  = 4 * time.Minute
-	pingIdleTime = 5 * time.Minute
+	pingTimeout  = 30 * time.Second
+	pingIdleTime = 60 * time.Second
 )
 
-func NewConnection(nodeID string, reader io.Reader, writer io.Writer, receiver Model) Connection {
+func NewConnection(nodeID NodeID, reader io.Reader, writer io.Writer, receiver Model, name string, compress bool) Connection {
 	cr := &countingReader{Reader: reader}
 	cw := &countingWriter{Writer: writer}
 
-	flrd := flate.NewReader(cr)
-	flwr, err := flate.NewWriter(cw, flate.BestSpeed)
-	if err != nil {
-		panic(err)
+	compThres := 1<<31 - 1 // compression disabled
+	if compress {
+		compThres = 128 // compress messages that are 128 bytes long or larger
 	}
-	wb := bufio.NewWriter(flwr)
-
 	c := rawConnection{
-		id:        nodeID,
-		receiver:  nativeModel{receiver},
-		reader:    flrd,
-		cr:        cr,
-		xr:        xdr.NewReader(flrd),
-		writer:    flwr,
-		cw:        cw,
-		wb:        wb,
-		xw:        xdr.NewWriter(wb),
-		awaiting:  make([]chan asyncResult, 0x1000),
-		indexSent: make(map[string]map[string][2]int64),
-		outbox:    make(chan []encodable),
-		nextID:    make(chan int),
-		closed:    make(chan struct{}),
+		id:                   nodeID,
+		name:                 name,
+		receiver:             nativeModel{receiver},
+		state:                stateInitial,
+		cr:                   cr,
+		cw:                   cw,
+		outbox:               make(chan hdrMsg),
+		nextID:               make(chan int),
+		closed:               make(chan struct{}),
+		compressionThreshold: compThres,
 	}
 
 	go c.readerLoop()
@@ -131,37 +154,38 @@ func NewConnection(nodeID string, reader io.Reader, writer io.Writer, receiver M
 	return wireFormatConnection{&c}
 }
 
-func (c *rawConnection) ID() string {
+func (c *rawConnection) ID() NodeID {
 	return c.id
 }
 
+func (c *rawConnection) Name() string {
+	return c.name
+}
+
 // Index writes the list of file information to the connected peer node
-func (c *rawConnection) Index(repo string, idx []FileInfo) {
-	c.imut.Lock()
-	var msgType int
-	if c.indexSent[repo] == nil {
-		// This is the first time we send an index.
-		msgType = messageTypeIndex
-
-		c.indexSent[repo] = make(map[string][2]int64)
-		for _, f := range idx {
-			c.indexSent[repo][f.Name] = [2]int64{f.Modified, int64(f.Version)}
-		}
-	} else {
-		// We have sent one full index. Only send updates now.
-		msgType = messageTypeIndexUpdate
-		var diff []FileInfo
-		for _, f := range idx {
-			if vs, ok := c.indexSent[repo][f.Name]; !ok || f.Modified != vs[0] || int64(f.Version) != vs[1] {
-				diff = append(diff, f)
-				c.indexSent[repo][f.Name] = [2]int64{f.Modified, int64(f.Version)}
-			}
-		}
-		idx = diff
+func (c *rawConnection) Index(repo string, idx []FileInfo) error {
+	select {
+	case <-c.closed:
+		return ErrClosed
+	default:
 	}
-	c.imut.Unlock()
+	c.idxMut.Lock()
+	c.send(-1, messageTypeIndex, IndexMessage{repo, idx})
+	c.idxMut.Unlock()
+	return nil
+}
 
-	c.send(header{0, -1, msgType}, IndexMessage{repo, idx})
+// IndexUpdate writes the list of file information to the connected peer node as an update
+func (c *rawConnection) IndexUpdate(repo string, idx []FileInfo) error {
+	select {
+	case <-c.closed:
+		return ErrClosed
+	default:
+	}
+	c.idxMut.Lock()
+	c.send(-1, messageTypeIndexUpdate, IndexMessage{repo, idx})
+	c.idxMut.Unlock()
+	return nil
 }
 
 // Request returns the bytes for the specified block after fetching them from the connected peer.
@@ -173,16 +197,15 @@ func (c *rawConnection) Request(repo string, name string, offset int64, size int
 		return nil, ErrClosed
 	}
 
-	c.imut.Lock()
+	c.awaitingMut.Lock()
 	if ch := c.awaiting[id]; ch != nil {
 		panic("id taken")
 	}
-	rc := make(chan asyncResult)
+	rc := make(chan asyncResult, 1)
 	c.awaiting[id] = rc
-	c.imut.Unlock()
+	c.awaitingMut.Unlock()
 
-	ok := c.send(header{0, id, messageTypeRequest},
-		RequestMessage{repo, name, uint64(offset), uint32(size)})
+	ok := c.send(id, messageTypeRequest, RequestMessage{repo, name, uint64(offset), uint32(size)})
 	if !ok {
 		return nil, ErrClosed
 	}
@@ -196,7 +219,7 @@ func (c *rawConnection) Request(repo string, name string, offset int64, size int
 
 // ClusterConfig send the cluster configuration message to the peer and returns any error
 func (c *rawConnection) ClusterConfig(config ClusterConfigMessage) {
-	c.send(header{0, -1, messageTypeClusterConfig}, config)
+	c.send(-1, messageTypeClusterConfig, config)
 }
 
 func (c *rawConnection) ping() bool {
@@ -208,11 +231,11 @@ func (c *rawConnection) ping() bool {
 	}
 
 	rc := make(chan asyncResult, 1)
-	c.imut.Lock()
+	c.awaitingMut.Lock()
 	c.awaiting[id] = rc
-	c.imut.Unlock()
+	c.awaitingMut.Unlock()
 
-	ok := c.send(header{0, id, messageTypePing})
+	ok := c.send(id, messageTypePing, nil)
 	if !ok {
 		return false
 	}
@@ -233,46 +256,53 @@ func (c *rawConnection) readerLoop() (err error) {
 		default:
 		}
 
-		var hdr header
-		hdr.decodeXDR(c.xr)
-		if err := c.xr.Error(); err != nil {
+		hdr, msg, err := c.readMessage()
+		if err != nil {
 			return err
-		}
-		if hdr.version != 0 {
-			return fmt.Errorf("protocol error: %s: unknown message version %#x", c.id, hdr.version)
 		}
 
 		switch hdr.msgType {
 		case messageTypeIndex:
-			if err := c.handleIndex(); err != nil {
-				return err
+			if c.state < stateCCRcvd {
+				return fmt.Errorf("protocol error: index message in state %d", c.state)
 			}
+			c.handleIndex(msg.(IndexMessage))
+			c.state = stateIdxRcvd
 
 		case messageTypeIndexUpdate:
-			if err := c.handleIndexUpdate(); err != nil {
-				return err
+			if c.state < stateIdxRcvd {
+				return fmt.Errorf("protocol error: index update message in state %d", c.state)
 			}
+			c.handleIndexUpdate(msg.(IndexMessage))
 
 		case messageTypeRequest:
-			if err := c.handleRequest(hdr); err != nil {
-				return err
+			if c.state < stateIdxRcvd {
+				return fmt.Errorf("protocol error: request message in state %d", c.state)
 			}
+			// Requests are handled asynchronously
+			go c.handleRequest(hdr.msgID, msg.(RequestMessage))
 
 		case messageTypeResponse:
-			if err := c.handleResponse(hdr); err != nil {
-				return err
+			if c.state < stateIdxRcvd {
+				return fmt.Errorf("protocol error: response message in state %d", c.state)
 			}
+			c.handleResponse(hdr.msgID, msg.(ResponseMessage))
 
 		case messageTypePing:
-			c.send(header{0, hdr.msgID, messageTypePong})
+			c.send(hdr.msgID, messageTypePong, EmptyMessage{})
 
 		case messageTypePong:
-			c.handlePong(hdr)
+			c.handlePong(hdr.msgID)
 
 		case messageTypeClusterConfig:
-			if err := c.handleClusterConfig(); err != nil {
-				return err
+			if c.state != stateInitial {
+				return fmt.Errorf("protocol error: cluster config message in state %d", c.state)
 			}
+			go c.receiver.ClusterConfig(c.id, msg.(ClusterConfigMessage))
+			c.state = stateCCRcvd
+
+		case messageTypeClose:
+			return errors.New(msg.(CloseMessage).Reason)
 
 		default:
 			return fmt.Errorf("protocol error: %s: unknown message type %#x", c.id, hdr.msgType)
@@ -280,114 +310,153 @@ func (c *rawConnection) readerLoop() (err error) {
 	}
 }
 
-func (c *rawConnection) handleIndex() error {
-	var im IndexMessage
-	im.decodeXDR(c.xr)
-	if err := c.xr.Error(); err != nil {
-		return err
+func (c *rawConnection) readMessage() (hdr header, msg encodable, err error) {
+	if cap(c.rdbuf0) < 8 {
+		c.rdbuf0 = make([]byte, 8)
 	} else {
-
-		// We run this (and the corresponding one for update, below)
-		// in a separate goroutine to avoid blocking the read loop.
-		// There is otherwise a potential deadlock where both sides
-		// has the model locked because it's sending a large index
-		// update and can't receive the large index update from the
-		// other side.
-
-		go c.receiver.Index(c.id, im.Repository, im.Files)
+		c.rdbuf0 = c.rdbuf0[:8]
 	}
-	return nil
-}
+	_, err = io.ReadFull(c.cr, c.rdbuf0)
+	if err != nil {
+		return
+	}
 
-func (c *rawConnection) handleIndexUpdate() error {
-	var im IndexMessage
-	im.decodeXDR(c.xr)
-	if err := c.xr.Error(); err != nil {
-		return err
+	hdr = decodeHeader(binary.BigEndian.Uint32(c.rdbuf0[0:4]))
+	msglen := int(binary.BigEndian.Uint32(c.rdbuf0[4:8]))
+
+	if debug {
+		l.Debugf("read header %v (msglen=%d)", hdr, msglen)
+	}
+
+	if cap(c.rdbuf0) < msglen {
+		c.rdbuf0 = make([]byte, msglen)
 	} else {
-		go c.receiver.IndexUpdate(c.id, im.Repository, im.Files)
+		c.rdbuf0 = c.rdbuf0[:msglen]
 	}
-	return nil
-}
-
-func (c *rawConnection) handleRequest(hdr header) error {
-	var req RequestMessage
-	req.decodeXDR(c.xr)
-	if err := c.xr.Error(); err != nil {
-		return err
-	}
-	go c.processRequest(hdr.msgID, req)
-	return nil
-}
-
-func (c *rawConnection) handleResponse(hdr header) error {
-	data := c.xr.ReadBytesMax(256 * 1024) // Sufficiently larger than max expected block size
-
-	if err := c.xr.Error(); err != nil {
-		return err
+	_, err = io.ReadFull(c.cr, c.rdbuf0)
+	if err != nil {
+		return
 	}
 
-	go func(hdr header, err error) {
-		c.imut.Lock()
-		rc := c.awaiting[hdr.msgID]
-		c.awaiting[hdr.msgID] = nil
-		c.imut.Unlock()
+	if debug {
+		l.Debugf("read %d bytes", len(c.rdbuf0))
+	}
 
-		if rc != nil {
-			rc <- asyncResult{data, err}
-			close(rc)
+	msgBuf := c.rdbuf0
+	if hdr.compression {
+		c.rdbuf1 = c.rdbuf1[:cap(c.rdbuf1)]
+		c.rdbuf1, err = lz4.Decode(c.rdbuf1, c.rdbuf0)
+		if err != nil {
+			return
 		}
-	}(hdr, c.xr.Error())
-
-	return nil
-}
-
-func (c *rawConnection) handlePong(hdr header) {
-	c.imut.Lock()
-	if rc := c.awaiting[hdr.msgID]; rc != nil {
-		go func() {
-			rc <- asyncResult{}
-			close(rc)
-		}()
-
-		c.awaiting[hdr.msgID] = nil
+		msgBuf = c.rdbuf1
+		if debug {
+			l.Debugf("decompressed to %d bytes", len(msgBuf))
+		}
 	}
-	c.imut.Unlock()
-}
 
-func (c *rawConnection) handleClusterConfig() error {
-	var cm ClusterConfigMessage
-	cm.decodeXDR(c.xr)
-	if err := c.xr.Error(); err != nil {
-		return err
-	} else {
-		go c.receiver.ClusterConfig(c.id, cm)
+	if debug {
+		if len(msgBuf) > 1024 {
+			l.Debugf("message data:\n%s", hex.Dump(msgBuf[:1024]))
+		} else {
+			l.Debugf("message data:\n%s", hex.Dump(msgBuf))
+		}
 	}
-	return nil
+
+	switch hdr.msgType {
+	case messageTypeIndex, messageTypeIndexUpdate:
+		var idx IndexMessage
+		err = idx.UnmarshalXDR(msgBuf)
+		msg = idx
+
+	case messageTypeRequest:
+		var req RequestMessage
+		err = req.UnmarshalXDR(msgBuf)
+		msg = req
+
+	case messageTypeResponse:
+		var resp ResponseMessage
+		err = resp.UnmarshalXDR(msgBuf)
+		msg = resp
+
+	case messageTypePing, messageTypePong:
+		msg = EmptyMessage{}
+
+	case messageTypeClusterConfig:
+		var cc ClusterConfigMessage
+		err = cc.UnmarshalXDR(msgBuf)
+		msg = cc
+
+	case messageTypeClose:
+		var cm CloseMessage
+		err = cm.UnmarshalXDR(msgBuf)
+		msg = cm
+
+	default:
+		err = fmt.Errorf("protocol error: %s: unknown message type %#x", c.id, hdr.msgType)
+	}
+
+	return
 }
 
-type encodable interface {
-	encodeXDR(*xdr.Writer) (int, error)
-}
-type encodableBytes []byte
-
-func (e encodableBytes) encodeXDR(xw *xdr.Writer) (int, error) {
-	return xw.WriteBytes(e)
+func (c *rawConnection) handleIndex(im IndexMessage) {
+	if debug {
+		l.Debugf("Index(%v, %v, %d files)", c.id, im.Repository, len(im.Files))
+	}
+	c.receiver.Index(c.id, im.Repository, im.Files)
 }
 
-func (c *rawConnection) send(h header, es ...encodable) bool {
-	if h.msgID < 0 {
+func (c *rawConnection) handleIndexUpdate(im IndexMessage) {
+	if debug {
+		l.Debugf("queueing IndexUpdate(%v, %v, %d files)", c.id, im.Repository, len(im.Files))
+	}
+	c.receiver.IndexUpdate(c.id, im.Repository, im.Files)
+}
+
+func (c *rawConnection) handleRequest(msgID int, req RequestMessage) {
+	data, _ := c.receiver.Request(c.id, req.Repository, req.Name, int64(req.Offset), int(req.Size))
+
+	c.send(msgID, messageTypeResponse, ResponseMessage{data})
+}
+
+func (c *rawConnection) handleResponse(msgID int, resp ResponseMessage) {
+	c.awaitingMut.Lock()
+	if rc := c.awaiting[msgID]; rc != nil {
+		c.awaiting[msgID] = nil
+		rc <- asyncResult{resp.Data, nil}
+		close(rc)
+	}
+	c.awaitingMut.Unlock()
+}
+
+func (c *rawConnection) handlePong(msgID int) {
+	c.awaitingMut.Lock()
+	if rc := c.awaiting[msgID]; rc != nil {
+		c.awaiting[msgID] = nil
+		rc <- asyncResult{}
+		close(rc)
+	}
+	c.awaitingMut.Unlock()
+}
+
+func (c *rawConnection) send(msgID int, msgType int, msg encodable) bool {
+	if msgID < 0 {
 		select {
 		case id := <-c.nextID:
-			h.msgID = id
+			msgID = id
 		case <-c.closed:
 			return false
 		}
 	}
-	msg := append([]encodable{h}, es...)
+
+	hdr := header{
+		version: 0,
+		msgID:   msgID,
+		msgType: msgType,
+	}
 
 	select {
-	case c.outbox <- msg:
+	case c.outbox <- hdrMsg{hdr, msg}:
 		return true
 	case <-c.closed:
 		return false
@@ -395,66 +464,95 @@ func (c *rawConnection) send(h header, es ...encodable) bool {
 }
 
 func (c *rawConnection) writerLoop() {
-	var err error
-	for es := range c.outbox {
-		c.wmut.Lock()
-		for _, e := range es {
-			e.encodeXDR(c.xw)
-		}
+	var msgBuf = make([]byte, 8) // buffer for wire format message, kept and reused
+	var uncBuf []byte            // buffer for uncompressed message, kept and reused
+	for {
+		var tempBuf []byte
+		var err error
 
-		if err = c.flush(); err != nil {
-			c.wmut.Unlock()
-			c.close(err)
+		select {
+		case hm := <-c.outbox:
+			if hm.msg != nil {
+				// Uncompressed message in uncBuf
+				uncBuf = hm.msg.AppendXDR(uncBuf[:0])
+
+				if len(uncBuf) >= c.compressionThreshold {
+					// Use compression for large messages
+					hm.hdr.compression = true
+
+					// Make sure we have enough space for the compressed message plus header in msgBug
+					msgBuf = msgBuf[:cap(msgBuf)]
+					if maxLen := lz4.CompressBound(len(uncBuf)) + 8; maxLen > len(msgBuf) {
+						msgBuf = make([]byte, maxLen)
+					}
+
+					// Compressed is written to msgBuf, we keep tb for the length only
+					tempBuf, err = lz4.Encode(msgBuf[8:], uncBuf)
+					binary.BigEndian.PutUint32(msgBuf[4:8], uint32(len(tempBuf)))
+					msgBuf = msgBuf[0 : len(tempBuf)+8]
+
+					if debug {
+						l.Debugf("write compressed message; %v (len=%d)", hm.hdr, len(tempBuf))
+					}
+				} else {
+					// No point in compressing very short messages
+					hm.hdr.compression = false
+
+					msgBuf = msgBuf[:cap(msgBuf)]
+					if l := len(uncBuf) + 8; l > len(msgBuf) {
+						msgBuf = make([]byte, l)
+					}
+
+					binary.BigEndian.PutUint32(msgBuf[4:8], uint32(len(uncBuf)))
+					msgBuf = msgBuf[0 : len(uncBuf)+8]
+					copy(msgBuf[8:], uncBuf)
+
+					if debug {
+						l.Debugf("write uncompressed message; %v (len=%d)", hm.hdr, len(uncBuf))
+					}
+				}
+			} else {
+				if debug {
+					l.Debugf("write empty message; %v", hm.hdr)
+				}
+				binary.BigEndian.PutUint32(msgBuf[4:8], 0)
+				msgBuf = msgBuf[:8]
+			}
+
+			binary.BigEndian.PutUint32(msgBuf[0:4], encodeHeader(hm.hdr))
+
+			if err == nil {
+				var n int
+				n, err = c.cw.Write(msgBuf)
+				if debug {
+					l.Debugf("wrote %d bytes on the wire", n)
+				}
+			}
+			if err != nil {
+				c.close(err)
+				return
+			}
+		case <-c.closed:
 			return
 		}
-		c.wmut.Unlock()
 	}
-}
-
-type flusher interface {
-	Flush() error
-}
-
-func (c *rawConnection) flush() error {
-	if err := c.xw.Error(); err != nil {
-		return err
-	}
-
-	if err := c.wb.Flush(); err != nil {
-		return err
-	}
-
-	if f, ok := c.writer.(flusher); ok {
-		return f.Flush()
-	}
-
-	return nil
 }
 
 func (c *rawConnection) close(err error) {
-	c.imut.Lock()
-	c.wmut.Lock()
-	defer c.imut.Unlock()
-	defer c.wmut.Unlock()
-
-	select {
-	case <-c.closed:
-		return
-	default:
+	c.once.Do(func() {
 		close(c.closed)
 
+		c.awaitingMut.Lock()
 		for i, ch := range c.awaiting {
 			if ch != nil {
 				close(ch)
 				c.awaiting[i] = nil
 			}
 		}
-
-		c.writer.Close()
-		c.reader.Close()
+		c.awaitingMut.Unlock()
 
 		go c.receiver.Close(c.id, err)
-	}
+	})
 }
 
 func (c *rawConnection) idGenerator() {
@@ -475,11 +573,29 @@ func (c *rawConnection) pingerLoop() {
 	for {
 		select {
 		case <-ticker:
+			if d := time.Since(c.cr.Last()); d < pingIdleTime {
+				if debug {
+					l.Debugln(c.id, "ping skipped after rd", d)
+				}
+				continue
+			}
+			if d := time.Since(c.cw.Last()); d < pingIdleTime {
+				if debug {
+					l.Debugln(c.id, "ping skipped after wr", d)
+				}
+				continue
+			}
 			go func() {
+				if debug {
+					l.Debugln(c.id, "ping ->")
+				}
 				rc <- c.ping()
 			}()
 			select {
 			case ok := <-rc:
+				if debug {
+					l.Debugln(c.id, "<- pong")
+				}
 				if !ok {
 					c.close(fmt.Errorf("ping failure"))
 				}
@@ -495,23 +611,32 @@ func (c *rawConnection) pingerLoop() {
 	}
 }
 
-func (c *rawConnection) processRequest(msgID int, req RequestMessage) {
-	data, _ := c.receiver.Request(c.id, req.Repository, req.Name, int64(req.Offset), int(req.Size))
-
-	c.send(header{0, msgID, messageTypeResponse},
-		encodableBytes(data))
-}
-
 type Statistics struct {
 	At            time.Time
-	InBytesTotal  int
-	OutBytesTotal int
+	InBytesTotal  uint64
+	OutBytesTotal uint64
 }
 
 func (c *rawConnection) Statistics() Statistics {
 	return Statistics{
 		At:            time.Now(),
-		InBytesTotal:  int(c.cr.Tot()),
-		OutBytesTotal: int(c.cw.Tot()),
+		InBytesTotal:  c.cr.Tot(),
+		OutBytesTotal: c.cw.Tot(),
 	}
+}
+
+func IsDeleted(bits uint32) bool {
+	return bits&FlagDeleted != 0
+}
+
+func IsInvalid(bits uint32) bool {
+	return bits&FlagInvalid != 0
+}
+
+func IsDirectory(bits uint32) bool {
+	return bits&FlagDirectory != 0
+}
+
+func HasPermissionBits(bits uint32) bool {
+	return bits&FlagNoPermBits == 0
 }

@@ -5,6 +5,9 @@
         <node id="373HSRPQLPNLIJYKZVQFP4PKZ6R2ZE6K3YD442UJHBGBQGWWXAHA" name="s3"></node>
         <node id="EJHMPAQOGCVORISB4IS3SYYVJXTKJGLTU66DIQPGJ5D2GXGQ3OWQ" name="s4"></node>
     </repository>
+    <repository id="default" directory="s4d" ro="false">
+        <node id="I6KAH7666SLLL5PFXSOAUFJCDZYAOMLEKCP2GB3BV5RQST3PSROA" name="s1"></node>
+    </repository>
     <node id="I6KAH7666SLLL5PFXSOAUFJCDZYAOMLEKCP2GB3BV5RQST3PSROA" name="s1">
         <address>127.0.0.1:22001</address>
     </node>
@@ -19,6 +22,7 @@
     </node>
     <gui enabled="true">
         <address>127.0.0.1:8084</address>
+	<apikey>abc123</apikey>
     </gui>
     <options>
         <listenAddress>:22004</listenAddress>
@@ -29,7 +33,7 @@
         <maxSendKbps>0</maxSendKbps>
         <rescanIntervalS>60</rescanIntervalS>
         <reconnectionIntervalS>10</reconnectionIntervalS>
-        <maxChangeKbps>1000</maxChangeKbps>
+        <maxChangeKbps>10000</maxChangeKbps>
         <startBrowser>false</startBrowser>
         <upnpEnabled>false</upnpEnabled>
     </options>

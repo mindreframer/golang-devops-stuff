@@ -25,23 +25,16 @@ Transport and Authentication
 ----------------------------
 
 BEP is deployed as the highest level in a protocol stack, with the lower
-level protocols providing compression, encryption and authentication.
+level protocols providing encryption and authentication.
 
     +-----------------------------|
     |   Block Exchange Protocol   |
-    |-----------------------------|
-    |   Compression (RFC 1951)    |
     |-----------------------------|
     | Encryption & Auth (TLS 1.2) |
     |-----------------------------|
     |             TCP             |
     |-----------------------------|
     v             ...             v
-
-Compression is started directly after a successful TLS handshake,
-before the first message is sent. The compression is flushed at each
-message boundary. Compression SHALL use the DEFLATE format as specified
-in RFC 1951.
 
 The encryption and authentication layer SHALL use TLS 1.2 or a higher
 revision. A strong cipher suite SHALL be used, with "strong cipher
@@ -59,10 +52,11 @@ or certificate pinning combined with some out of band first
 verification. The reference implementation uses preshared certificate
 fingerprints (SHA-256) referred to as "Node IDs".
 
-There is no required order or synchronization among BEP messages - any
-message type may be sent at any time and the sender need not await a
-response to one message before sending another. Responses MUST however
-be sent in the same order as the requests are received.
+There is no required order or synchronization among BEP messages except
+as noted per message type - any message type may be sent at any time and
+the sender need not await a response to one message before sending
+another. Responses MUST however be sent in the same order as the
+requests are received.
 
 The underlying transport protocol MUST be TCP.
 
@@ -70,12 +64,15 @@ Messages
 --------
 
 Every message starts with one 32 bit word indicating the message
-version, type and ID.
+version, type and ID, followed by the length of the message. The header
+is in network byte order, i.e. big endian.
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |  Ver  |  Type |       Message ID      |        Reply To       |
+    |  Ver  |       Message ID      |      Type     |   Reserved  |C|
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                            Length                             |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 For BEP v1 the Version field is set to zero. Future versions with
@@ -84,23 +81,41 @@ with an unknown version is a protocol error and MUST result in the
 connection being terminated. A client supporting multiple versions MAY
 retry with a different protocol version upon disconnection.
 
+The Message ID is set to a unique value for each transmitted request
+message. In response messages it is set to the Message ID of the
+corresponding request message. The uniqueness requirement implies that
+no more than 4096 messages may be outstanding at any given moment. The
+ordering requirement implies that a response to a given message ID also
+means that all preceding messages have been received, specifically those
+which do not otherwise demand a response. Hence their message ID:s may
+be reused.
+
 The Type field indicates the type of data following the message header
 and is one of the integers defined below. A message of an unknown type
 is a protocol error and MUST result in the connection being terminated.
 
-The Message ID is set to a unique value for each transmitted message. In
-request messages the Reply To is set to zero. In response messages it is
-set to the message ID of the corresponding request. The uniqueness
-requirement implies that no more than 4096 messages may be outstanding
-at any given moment. The ordering requirement implies that a response to
-a given message ID also means that all preceding messages have been
-received, specifically those which do not otherwise demand a response.
-Hence their message ID:s may be reused.
+The Compression bit "C" indicates the compression used for the message.
 
-All data following the message header MUST be in XDR (RFC 1014)
-encoding. All fields shorter than 32 bits and all variable length data
-MUST be padded to a multiple of 32 bits. The actual data types in use by
-BEP, in XDR naming convention, are the following:
+For C=1:
+
+  * The Length field contains the length, in bytes, of the
+    compressed message data.
+
+  * The message data is compressed using the LZ4 format and algorithm
+    described in https://code.google.com/p/lz4/.
+
+For C=0:
+
+  * The Length field contains the length, in bytes, of the
+    uncompressed message data.
+
+  * The message is not compressed.
+
+All data within the the message (post decompression, if compression is
+in use) MUST be in XDR (RFC 1014) encoding. All fields shorter than 32
+bits and all variable length data MUST be padded to a multiple of 32
+bits. The actual data types in use by BEP, in XDR naming convention, are
+the following:
 
  - (unsigned) int   -- (unsigned) 32 bit integer
  - (unsigned) hyper -- (unsigned) 64 bit integer
@@ -117,8 +132,9 @@ normalization form C.
 ### Cluster Config (Type = 0)
 
 This informational message provides information about the cluster
-configuration, as it pertains to the current connection. It is sent by
-both sides after connection establishment.
+configuration as it pertains to the current connection. A Cluster Config
+message MUST be the first message sent on a BEP connection. Additional
+Cluster Config messages MUST NOT be sent after the initial exchange.
 
 #### Graphical Representation
 
@@ -184,6 +200,10 @@ both sides after connection establishment.
     /                                                               /
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |                             Flags                             |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                                                               |
+    +                  Max Local Version (64 bits)                  +
+    |                                                               |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 
@@ -255,6 +275,14 @@ The Node Flags field contains the following single bit flags:
 
 Exactly one of the T, R or S bits MUST be set.
 
+The Node Max Local Version field contains the highest local file version
+number of the files already known to be in the index sent by this node.
+If nothing is known about the index of a given node, this field MUST be
+set to zero. When receiving a Cluster Config message with a non-zero Max
+Version for the local node ID, a node MAY elect to send an Index Update
+message containing only files with higher local version numbers in place
+of the initial Index message.
+
 The Options field contain option values to be used in an implementation
 specific manner. The options list is conceptually a map of Key => Value
 items, although it is transmitted in the form of a list of (Key, Value)
@@ -284,6 +312,7 @@ peers acting in a specific manner as a result of sent options.
     struct Node {
         string ID<>;
         unsigned int Flags;
+        unsigned hyper MaxLocalVersion;
     }
 
     struct Option {
@@ -291,14 +320,22 @@ peers acting in a specific manner as a result of sent options.
         string Value<>;
     }
 
-### Index (Type = 1)
+### Index (Type = 1) and Index Update (Type = 6)
 
-The Index message defines the contents of the senders repository. An
-Index message MUST be sent by each node immediately upon connection. A
-node with no data to advertise MUST send an empty Index message (a file
-list of zero length). If the repository contents change from non-empty
-to empty, an empty Index message MUST be sent. There is no response to
-the Index message.
+The Index and Index Update messages define the contents of the senders
+repository. An Index message represents the full contents of the
+repository and thus supersedes any previous index. An Index Update
+amends an existing index with new information, not affecting any entries
+not included in the message. An Index Update MAY NOT be sent unless
+preceded by an Index, unless a non-zero Max Version has been announced
+for the given repository by the peer node.
+
+An Index or Index Update message MUST be sent for each repository
+included in the Cluster Config message, and MUST be sent before any
+other message referring to that repository. A node with no data to
+advertise MUST send an empty Index message (a file list of zero length).
+If the repository contents change from non-empty to empty, an empty
+Index message MUST be sent. There is no response to the Index message.
 
 #### Graphical Representation
 
@@ -342,6 +379,10 @@ the Index message.
     +                       Version (64 bits)                       +
     |                                                               |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                                                               |
+    +                    Local Version (64 bits)                    +
+    |                                                               |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     |                       Number of Blocks                        |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
     /                                                               /
@@ -383,12 +424,16 @@ detected and received change. The combination of Repository, Name and
 Version uniquely identifies the contents of a file at a given point in
 time.
 
+The Local Version field is the value of a node local monotonic clock at
+the time of last local database update to a file. The clock ticks on
+every local database update.
+
 The Flags field is made up of the following single bit flags:
 
      0                   1                   2                   3
      0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    |              Reserved             |I|D|   Unix Perm. & Mode   |
+    |              Reserved           |P|I|D|   Unix Perm. & Mode   |
     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
  - The lower 12 bits hold the common Unix permission and mode bits. An
@@ -404,7 +449,13 @@ The Flags field is made up of the following single bit flags:
    synchronization. A peer MAY set this bit to indicate that it can
    temporarily not serve data for the file.
 
- - Bit 0 through 17 are reserved for future use and SHALL be set to
+ - Bit 17 ("P") is set when there is no permission information for the
+   file. This is the case when it originates on a non-permission-
+   supporting file system. Changes to only permission bits SHOULD be
+   disregarded on files with this bit set. The permissions bits MUST be
+   set to the octal value 0666.
+
+ - Bit 0 through 16 are reserved for future use and SHALL be set to
    zero.
 
 The hash algorithm is implied by the Hash length. Currently, the hash
@@ -435,6 +486,7 @@ block which may represent a smaller amount of data.
         unsigned int Flags;
         hyper Modified;
         unsigned hyper Version;
+        unsigned hyper LocalVer;
         BlockInfo Blocks<>;
     }
 
@@ -529,13 +581,32 @@ firewalls and NAT gateways. The Ping message has no contents.
 The Pong message is sent in response to a Ping. The Pong message has no
 contents, but copies the Message ID from the Ping.
 
-### Index Update (Type = 6)
+### Close (Type = 7)
 
-This message has exactly the same structure as the Index message.
-However instead of replacing the contents of the repository in the
-model, the Index Update merely amends it with new or updated file
-information. Any files not mentioned in an Index Update are left
-unchanged.
+The Close message MAY be sent to indicate that the connection will be
+torn down due to an error condition. A Close message MUST NOT be
+followed by further messages.
+
+#### Graphical Representation
+
+     0                   1                   2                   3
+     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    |                       Length of Reason                        |
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    /                                                               /
+    \                   Reason (variable length)                    \
+    /                                                               /
+    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+
+#### Fields
+
+The Reason field contains a human description of the error condition,
+suitable for consumption by a human.
+
+    struct CloseMessage {
+        string Reason<1024>;
+    }
 
 Sharing Modes
 -------------
@@ -569,15 +640,15 @@ Message Limits
 
 An implementation MAY impose reasonable limits on the length of message
 fields to aid robustness in the face of corruption or broken
-implementations. These limits, if imposed, SHOULD not be more
+implementations. These limits, if imposed, SHOULD NOT be more
 restrictive than the following:
 
 ### Index and Index Update Messages
 
  - Repository: 64 bytes
- - Number of Files: 1.000.000
+ - Number of Files: 10.000.000
  - Name: 1024 bytes
- - Number of Blocks: 100.000
+ - Number of Blocks: 1.000.000
  - Hash: 64 bytes
 
 ### Request Messages

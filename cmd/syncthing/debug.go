@@ -1,15 +1,14 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
-	"log"
 	"os"
 	"strings"
 )
 
 var (
-	dlog      = log.New(os.Stderr, "main: ", log.Lmicroseconds|log.Lshortfile)
-	debugNet  = strings.Contains(os.Getenv("STTRACE"), "net")
-	debugIdx  = strings.Contains(os.Getenv("STTRACE"), "idx")
-	debugNeed = strings.Contains(os.Getenv("STTRACE"), "need")
-	debugPull = strings.Contains(os.Getenv("STTRACE"), "pull")
+	debugNet = strings.Contains(os.Getenv("STTRACE"), "net") || os.Getenv("STTRACE") == "all"
 )

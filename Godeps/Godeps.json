@@ -1,54 +1,67 @@
 {
-	"ImportPath": "github.com/calmh/syncthing",
-	"GoVersion": "go1.2.1",
+	"ImportPath": "github.com/syncthing/syncthing",
+	"GoVersion": "go1.3",
 	"Packages": [
-		"./cmd/syncthing",
-		"./cmd/assets",
-		"./cmd/stcli",
-		"./discover/cmd/discosrv"
+		"./cmd/..."
 	],
 	"Deps": [
 		{
 			"ImportPath": "bitbucket.org/kardianos/osext",
-			"Comment": "null-9",
-			"Rev": "364fb577de68fb646c4cb39cc0e09c887ee16376"
+			"Comment": "null-13",
+			"Rev": "5d3ddcf53a508cc2f7404eaebf546ef2cb5cdb6e"
 		},
 		{
 			"ImportPath": "code.google.com/p/go.crypto/bcrypt",
-			"Comment": "null-185",
-			"Rev": "6478cc9340cbbe6c04511280c5007722269108e9"
+			"Comment": "null-213",
+			"Rev": "aa2644fe4aa50e3b38d75187b4799b1f0c9ddcef"
 		},
 		{
 			"ImportPath": "code.google.com/p/go.crypto/blowfish",
-			"Comment": "null-185",
-			"Rev": "6478cc9340cbbe6c04511280c5007722269108e9"
+			"Comment": "null-213",
+			"Rev": "aa2644fe4aa50e3b38d75187b4799b1f0c9ddcef"
 		},
 		{
 			"ImportPath": "code.google.com/p/go.text/transform",
-			"Comment": "null-81",
-			"Rev": "9cbe983aed9b0dfc73954433fead5e00866342ac"
+			"Comment": "null-89",
+			"Rev": "df15baaf13e3f62b6b7a901e74caa3818a7c0a7c"
 		},
 		{
 			"ImportPath": "code.google.com/p/go.text/unicode/norm",
-			"Comment": "null-81",
-			"Rev": "9cbe983aed9b0dfc73954433fead5e00866342ac"
+			"Comment": "null-89",
+			"Rev": "df15baaf13e3f62b6b7a901e74caa3818a7c0a7c"
 		},
 		{
-			"ImportPath": "github.com/codegangsta/inject",
-			"Rev": "9aea7a2fa5b79ef7fc00f63a575e72df33b4e886"
+			"ImportPath": "code.google.com/p/snappy-go/snappy",
+			"Comment": "null-15",
+			"Rev": "12e4b4183793ac4b061921e7980845e750679fd0"
 		},
 		{
-			"ImportPath": "github.com/codegangsta/martini",
-			"Comment": "v0.1-142-g8659df7",
-			"Rev": "8659df7a51aebe6c6120268cd5a8b4c34fa8441a"
+			"ImportPath": "github.com/bkaradzic/go-lz4",
+			"Rev": "77e2ba877bde9da31213bec75dbbe197fa507c21"
 		},
 		{
-			"ImportPath": "github.com/golang/groupcache/lru",
-			"Rev": "d781998583680cda80cf61e0b37dd0cd8da2eb52"
+			"ImportPath": "github.com/calmh/xdr",
+			"Rev": "694859acb207675085232438780db923ceb43e96"
 		},
 		{
 			"ImportPath": "github.com/juju/ratelimit",
-			"Rev": "cbaa435c80a9716e086f25d409344b26c4039358"
+			"Rev": "f9f36d11773655c0485207f0ad30dc2655f69d56"
+		},
+		{
+			"ImportPath": "github.com/syndtr/goleveldb/leveldb",
+			"Rev": "c5955912e3287376475731c5bc59c79a5a799105"
+		},
+		{
+			"ImportPath": "github.com/vitrun/qart/coding",
+			"Rev": "ccb109cf25f0cd24474da73b9fee4e7a3e8a8ce0"
+		},
+		{
+			"ImportPath": "github.com/vitrun/qart/gf256",
+			"Rev": "ccb109cf25f0cd24474da73b9fee4e7a3e8a8ce0"
+		},
+		{
+			"ImportPath": "github.com/vitrun/qart/qr",
+			"Rev": "ccb109cf25f0cd24474da73b9fee4e7a3e8a8ce0"
 		}
 	]
 }
