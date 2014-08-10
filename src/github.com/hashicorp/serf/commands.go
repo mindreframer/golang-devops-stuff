@@ -28,6 +28,13 @@ func init() {
 			}, nil
 		},
 
+		"query": func() (cli.Command, error) {
+			return &command.QueryCommand{
+				ShutdownCh: makeShutdownCh(),
+				Ui:         ui,
+			}, nil
+		},
+
 		"force-leave": func() (cli.Command, error) {
 			return &command.ForceLeaveCommand{
 				Ui: ui,
@@ -42,6 +49,12 @@ func init() {
 
 		"keygen": func() (cli.Command, error) {
 			return &command.KeygenCommand{
+				Ui: ui,
+			}, nil
+		},
+
+		"keys": func() (cli.Command, error) {
+			return &command.KeysCommand{
 				Ui: ui,
 			}, nil
 		},
@@ -62,6 +75,25 @@ func init() {
 			return &command.MonitorCommand{
 				ShutdownCh: makeShutdownCh(),
 				Ui:         ui,
+			}, nil
+		},
+
+		"tags": func() (cli.Command, error) {
+			return &command.TagsCommand{
+				Ui: ui,
+			}, nil
+		},
+
+		"reachability": func() (cli.Command, error) {
+			return &command.ReachabilityCommand{
+				ShutdownCh: makeShutdownCh(),
+				Ui:         ui,
+			}, nil
+		},
+
+		"info": func() (cli.Command, error) {
+			return &command.InfoCommand{
+				Ui: ui,
 			}, nil
 		},
 

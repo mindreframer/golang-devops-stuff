@@ -32,8 +32,11 @@ import (
 	"log"
 	"net"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 const (
@@ -42,15 +45,25 @@ const (
 )
 
 const (
-	handshakeCommand  = "handshake"
-	eventCommand      = "event"
-	forceLeaveCommand = "force-leave"
-	joinCommand       = "join"
-	membersCommand    = "members"
-	streamCommand     = "stream"
-	stopCommand       = "stop"
-	monitorCommand    = "monitor"
-	leaveCommand      = "leave"
+	handshakeCommand       = "handshake"
+	eventCommand           = "event"
+	forceLeaveCommand      = "force-leave"
+	joinCommand            = "join"
+	membersCommand         = "members"
+	membersFilteredCommand = "members-filtered"
+	streamCommand          = "stream"
+	stopCommand            = "stop"
+	monitorCommand         = "monitor"
+	leaveCommand           = "leave"
+	installKeyCommand      = "install-key"
+	useKeyCommand          = "use-key"
+	removeKeyCommand       = "remove-key"
+	listKeysCommand        = "list-keys"
+	tagsCommand            = "tags"
+	queryCommand           = "query"
+	respondCommand         = "respond"
+	authCommand            = "auth"
+	statsCommand           = "stats"
 )
 
 const (
@@ -61,6 +74,15 @@ const (
 	monitorExists         = "Monitor already exists"
 	invalidFilter         = "Invalid event filter"
 	streamExists          = "Stream with given sequence exists"
+	invalidQueryID        = "No pending queries matching ID"
+	authRequired          = "Authentication required"
+	invalidAuthToken      = "Invalid authentication token"
+)
+
+const (
+	queryRecordAck      = "ack"
+	queryRecordResponse = "response"
+	queryRecordDone     = "done"
 )
 
 // Request header is sent before each request
@@ -77,6 +99,10 @@ type responseHeader struct {
 
 type handshakeRequest struct {
 	Version int32
+}
+
+type authRequest struct {
+	AuthKey string
 }
 
 type eventRequest struct {
@@ -98,8 +124,26 @@ type joinResponse struct {
 	Num int32
 }
 
+type membersFilteredRequest struct {
+	Tags   map[string]string
+	Status string
+	Name   string
+}
+
 type membersResponse struct {
 	Members []Member
+}
+
+type keyRequest struct {
+	Key string
+}
+
+type keyResponse struct {
+	Messages map[string]string
+	Keys     map[string]int
+	NumNodes int
+	NumErr   int
+	NumResp  int
 }
 
 type monitorRequest struct {
@@ -114,6 +158,31 @@ type stopRequest struct {
 	Stop uint64
 }
 
+type tagsRequest struct {
+	Tags       map[string]string
+	DeleteTags []string
+}
+
+type queryRequest struct {
+	FilterNodes []string
+	FilterTags  map[string]string
+	RequestAck  bool
+	Timeout     time.Duration
+	Name        string
+	Payload     []byte
+}
+
+type respondRequest struct {
+	ID      uint64
+	Payload []byte
+}
+
+type queryRecord struct {
+	Type    string
+	From    string
+	Payload []byte
+}
+
 type logRecord struct {
 	Log string
 }
@@ -124,6 +193,14 @@ type userEventRecord struct {
 	Name     string
 	Payload  []byte
 	Coalesce bool
+}
+
+type queryEventRecord struct {
+	Event   string
+	ID      uint64 // ID is opaque to client, used to respond
+	LTime   serf.LamportTime
+	Name    string
+	Payload []byte
 }
 
 type Member struct {
@@ -148,6 +225,7 @@ type memberEventRecord struct {
 type AgentIPC struct {
 	sync.Mutex
 	agent     *Agent
+	authKey   string
 	clients   map[string]*IPCClient
 	listener  net.Listener
 	logger    *log.Logger
@@ -157,6 +235,7 @@ type AgentIPC struct {
 }
 
 type IPCClient struct {
+	queryID      uint64 // Used to increment query IDs
 	name         string
 	conn         net.Conn
 	reader       *bufio.Reader
@@ -167,6 +246,11 @@ type IPCClient struct {
 	version      int32 // From the handshake, 0 before
 	logStreamer  *logStream
 	eventStreams map[uint64]*eventStream
+
+	pendingQueries map[uint64]*serf.Query
+	queryLock      sync.Mutex
+
+	didAuth bool // Did we get an auth token yet?
 }
 
 // send is used to send an object using the MsgPack encoding. send
@@ -193,17 +277,49 @@ func (c *IPCClient) Send(header *responseHeader, obj interface{}) error {
 }
 
 func (c *IPCClient) String() string {
-	return fmt.Sprintf("ipc.client: %v", c.conn)
+	return fmt.Sprintf("ipc.client: %v", c.conn.RemoteAddr())
+}
+
+// nextQueryID safely generates a new query ID
+func (c *IPCClient) nextQueryID() uint64 {
+	return atomic.AddUint64(&c.queryID, 1)
+}
+
+// RegisterQuery is used to register a pending query that may
+// get a response. The ID of the query is returned
+func (c *IPCClient) RegisterQuery(q *serf.Query) uint64 {
+	// Generate a unique-per-client ID
+	id := c.nextQueryID()
+
+	// Ensure the query deadline is in the future
+	timeout := q.Deadline().Sub(time.Now())
+	if timeout < 0 {
+		return id
+	}
+
+	// Register the query
+	c.queryLock.Lock()
+	c.pendingQueries[id] = q
+	c.queryLock.Unlock()
+
+	// Setup a timer to deregister after the timeout
+	time.AfterFunc(timeout, func() {
+		c.queryLock.Lock()
+		delete(c.pendingQueries, id)
+		c.queryLock.Unlock()
+	})
+	return id
 }
 
 // NewAgentIPC is used to create a new Agent IPC handler
-func NewAgentIPC(agent *Agent, listener net.Listener,
+func NewAgentIPC(agent *Agent, authKey string, listener net.Listener,
 	logOutput io.Writer, logWriter *logWriter) *AgentIPC {
 	if logOutput == nil {
 		logOutput = os.Stderr
 	}
 	ipc := &AgentIPC{
 		agent:     agent,
+		authKey:   authKey,
 		clients:   make(map[string]*IPCClient),
 		listener:  listener,
 		logger:    log.New(logOutput, "", log.LstdFlags),
@@ -249,11 +365,12 @@ func (i *AgentIPC) listen() {
 
 		// Wrap the connection in a client
 		client := &IPCClient{
-			name:         conn.RemoteAddr().String(),
-			conn:         conn,
-			reader:       bufio.NewReader(conn),
-			writer:       bufio.NewWriter(conn),
-			eventStreams: make(map[uint64]*eventStream),
+			name:           conn.RemoteAddr().String(),
+			conn:           conn,
+			reader:         bufio.NewReader(conn),
+			writer:         bufio.NewWriter(conn),
+			eventStreams:   make(map[uint64]*eventStream),
+			pendingQueries: make(map[uint64]*serf.Query),
 		}
 		client.dec = codec.NewDecoder(client.reader,
 			&codec.MsgpackHandle{RawToString: true, WriteExt: true})
@@ -307,8 +424,13 @@ func (i *AgentIPC) handleClient(client *IPCClient) {
 	for {
 		// Decode the header
 		if err := client.dec.Decode(&reqHeader); err != nil {
-			if err != io.EOF && !i.stop {
-				i.logger.Printf("[ERR] agent.ipc: failed to decode request header: %v", err)
+			if !i.stop {
+				// The second part of this if is to block socket
+				// errors from Windows which appear to happen every
+				// time there is an EOF.
+				if err != io.EOF && !strings.Contains(err.Error(), "WSARecv") {
+					i.logger.Printf("[ERR] agent.ipc: failed to decode request header: %v", err)
+				}
 			}
 			return
 		}
@@ -335,16 +457,27 @@ func (i *AgentIPC) handleRequest(client *IPCClient, reqHeader *requestHeader) er
 	}
 	metrics.IncrCounter([]string{"agent", "ipc", "command"}, 1)
 
+	// Ensure the client has authenticated after the handshake if necessary
+	if i.authKey != "" && !client.didAuth && command != authCommand && command != handshakeCommand {
+		i.logger.Printf("[WARN] agent.ipc: Client sending commands before auth")
+		respHeader := responseHeader{Seq: seq, Error: authRequired}
+		client.Send(&respHeader, nil)
+		return nil
+	}
+
 	// Dispatch command specific handlers
 	switch command {
 	case handshakeCommand:
 		return i.handleHandshake(client, seq)
 
+	case authCommand:
+		return i.handleAuth(client, seq)
+
 	case eventCommand:
 		return i.handleEvent(client, seq)
 
-	case membersCommand:
-		return i.handleMembers(client, seq)
+	case membersCommand, membersFilteredCommand:
+		return i.handleMembers(client, command, seq)
 
 	case streamCommand:
 		return i.handleStream(client, seq)
@@ -363,6 +496,30 @@ func (i *AgentIPC) handleRequest(client *IPCClient, reqHeader *requestHeader) er
 
 	case leaveCommand:
 		return i.handleLeave(client, seq)
+
+	case installKeyCommand:
+		return i.handleInstallKey(client, seq)
+
+	case useKeyCommand:
+		return i.handleUseKey(client, seq)
+
+	case removeKeyCommand:
+		return i.handleRemoveKey(client, seq)
+
+	case listKeysCommand:
+		return i.handleListKeys(client, seq)
+
+	case tagsCommand:
+		return i.handleTags(client, seq)
+
+	case queryCommand:
+		return i.handleQuery(client, seq)
+
+	case respondCommand:
+		return i.handleRespond(client, seq)
+
+	case statsCommand:
+		return i.handleStats(client, seq)
 
 	default:
 		respHeader := responseHeader{Seq: seq, Error: unsupportedCommand}
@@ -389,6 +546,26 @@ func (i *AgentIPC) handleHandshake(client *IPCClient, seq uint64) error {
 		resp.Error = duplicateHandshake
 	} else {
 		client.version = req.Version
+	}
+	return client.Send(&resp, nil)
+}
+
+func (i *AgentIPC) handleAuth(client *IPCClient, seq uint64) error {
+	var req authRequest
+	if err := client.dec.Decode(&req); err != nil {
+		return fmt.Errorf("decode failed: %v", err)
+	}
+
+	resp := responseHeader{
+		Seq:   seq,
+		Error: "",
+	}
+
+	// Check the token matches
+	if req.AuthKey == i.authKey {
+		client.didAuth = true
+	} else {
+		resp.Error = invalidAuthToken
 	}
 	return client.Send(&resp, nil)
 }
@@ -447,11 +624,23 @@ func (i *AgentIPC) handleJoin(client *IPCClient, seq uint64) error {
 	return client.Send(&header, &resp)
 }
 
-func (i *AgentIPC) handleMembers(client *IPCClient, seq uint64) error {
+func (i *AgentIPC) handleMembers(client *IPCClient, command string, seq uint64) error {
 	serf := i.agent.Serf()
 	raw := serf.Members()
-
 	members := make([]Member, 0, len(raw))
+
+	if command == membersFilteredCommand {
+		var req membersFilteredRequest
+		err := client.dec.Decode(&req)
+		if err != nil {
+			return fmt.Errorf("decode failed: %v", err)
+		}
+		raw, err = i.filterMembers(raw, req.Tags, req.Status, req.Name)
+		if err != nil {
+			return err
+		}
+	}
+
 	for _, m := range raw {
 		sm := Member{
 			Name:        m.Name,
@@ -476,6 +665,141 @@ func (i *AgentIPC) handleMembers(client *IPCClient, seq uint64) error {
 	resp := membersResponse{
 		Members: members,
 	}
+	return client.Send(&header, &resp)
+}
+
+func (i *AgentIPC) filterMembers(members []serf.Member, tags map[string]string,
+	status string, name string) ([]serf.Member, error) {
+
+	result := make([]serf.Member, 0, len(members))
+
+	// Pre-compile all the regular expressions
+	tagsRe := make(map[string]*regexp.Regexp)
+	for tag, expr := range tags {
+		re, err := regexp.Compile(fmt.Sprintf("^%s$", expr))
+		if err != nil {
+			return nil, fmt.Errorf("Failed to compile regex: %v", err)
+		}
+		tagsRe[tag] = re
+	}
+
+	statusRe, err := regexp.Compile(fmt.Sprintf("^%s$", status))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to compile regex: %v", err)
+	}
+
+	nameRe, err := regexp.Compile(fmt.Sprintf("^%s$", name))
+	if err != nil {
+		return nil, fmt.Errorf("Failed to compile regex: %v", err)
+	}
+
+OUTER:
+	for _, m := range members {
+		// Check if tags were passed, and if they match
+		for tag := range tags {
+			if !tagsRe[tag].MatchString(m.Tags[tag]) {
+				continue OUTER
+			}
+		}
+
+		// Check if status matches
+		if status != "" && !statusRe.MatchString(m.Status.String()) {
+			continue
+		}
+
+		// Check if node name matches
+		if name != "" && !nameRe.MatchString(m.Name) {
+			continue
+		}
+
+		// Made it past the filters!
+		result = append(result, m)
+	}
+
+	return result, nil
+}
+
+func (i *AgentIPC) handleInstallKey(client *IPCClient, seq uint64) error {
+	var req keyRequest
+	if err := client.dec.Decode(&req); err != nil {
+		return fmt.Errorf("decode failed: %v", err)
+	}
+
+	queryResp, err := i.agent.InstallKey(req.Key)
+
+	header := responseHeader{
+		Seq:   seq,
+		Error: errToString(err),
+	}
+	resp := keyResponse{
+		Messages: queryResp.Messages,
+		NumNodes: queryResp.NumNodes,
+		NumErr:   queryResp.NumErr,
+		NumResp:  queryResp.NumResp,
+	}
+
+	return client.Send(&header, &resp)
+}
+
+func (i *AgentIPC) handleUseKey(client *IPCClient, seq uint64) error {
+	var req keyRequest
+	if err := client.dec.Decode(&req); err != nil {
+		return fmt.Errorf("decode failed: %v", err)
+	}
+
+	queryResp, err := i.agent.UseKey(req.Key)
+
+	header := responseHeader{
+		Seq:   seq,
+		Error: errToString(err),
+	}
+	resp := keyResponse{
+		Messages: queryResp.Messages,
+		NumNodes: queryResp.NumNodes,
+		NumErr:   queryResp.NumErr,
+		NumResp:  queryResp.NumResp,
+	}
+
+	return client.Send(&header, &resp)
+}
+
+func (i *AgentIPC) handleRemoveKey(client *IPCClient, seq uint64) error {
+	var req keyRequest
+	if err := client.dec.Decode(&req); err != nil {
+		return fmt.Errorf("decode failed: %v", err)
+	}
+
+	queryResp, err := i.agent.RemoveKey(req.Key)
+
+	header := responseHeader{
+		Seq:   seq,
+		Error: errToString(err),
+	}
+	resp := keyResponse{
+		Messages: queryResp.Messages,
+		NumNodes: queryResp.NumNodes,
+		NumErr:   queryResp.NumErr,
+		NumResp:  queryResp.NumResp,
+	}
+
+	return client.Send(&header, &resp)
+}
+
+func (i *AgentIPC) handleListKeys(client *IPCClient, seq uint64) error {
+	queryResp, err := i.agent.ListKeys()
+
+	header := responseHeader{
+		Seq:   seq,
+		Error: errToString(err),
+	}
+	resp := keyResponse{
+		Messages: queryResp.Messages,
+		Keys:     queryResp.Keys,
+		NumNodes: queryResp.NumNodes,
+		NumErr:   queryResp.NumErr,
+		NumResp:  queryResp.NumResp,
+	}
+
 	return client.Send(&header, &resp)
 }
 
@@ -600,6 +924,104 @@ func (i *AgentIPC) handleLeave(client *IPCClient, seq uint64) error {
 		i.logger.Printf("[ERR] agent.ipc: shutdown failed: %v", err)
 	}
 	return err
+}
+
+func (i *AgentIPC) handleTags(client *IPCClient, seq uint64) error {
+	var req tagsRequest
+	if err := client.dec.Decode(&req); err != nil {
+		return fmt.Errorf("decode failed: %v", err)
+	}
+
+	tags := make(map[string]string)
+
+	for key, val := range i.agent.SerfConfig().Tags {
+		var delTag bool
+		for _, delkey := range req.DeleteTags {
+			delTag = (delTag || delkey == key)
+		}
+		if !delTag {
+			tags[key] = val
+		}
+	}
+
+	for key, val := range req.Tags {
+		tags[key] = val
+	}
+
+	err := i.agent.SetTags(tags)
+
+	resp := responseHeader{Seq: seq, Error: errToString(err)}
+	return client.Send(&resp, nil)
+}
+
+func (i *AgentIPC) handleQuery(client *IPCClient, seq uint64) error {
+	var req queryRequest
+	if err := client.dec.Decode(&req); err != nil {
+		return fmt.Errorf("decode failed: %v", err)
+	}
+
+	// Setup the query
+	params := serf.QueryParam{
+		FilterNodes: req.FilterNodes,
+		FilterTags:  req.FilterTags,
+		RequestAck:  req.RequestAck,
+		Timeout:     req.Timeout,
+	}
+
+	// Start the query
+	queryResp, err := i.agent.Query(req.Name, req.Payload, &params)
+
+	// Stream the query responses
+	if err == nil {
+		qs := newQueryResponseStream(client, seq, i.logger)
+		defer func() {
+			go qs.Stream(queryResp)
+		}()
+	}
+
+	// Respond
+	resp := responseHeader{
+		Seq:   seq,
+		Error: errToString(err),
+	}
+	return client.Send(&resp, nil)
+}
+
+func (i *AgentIPC) handleRespond(client *IPCClient, seq uint64) error {
+	var req respondRequest
+	if err := client.dec.Decode(&req); err != nil {
+		return fmt.Errorf("decode failed: %v", err)
+	}
+
+	// Lookup the query
+	client.queryLock.Lock()
+	query, ok := client.pendingQueries[req.ID]
+	client.queryLock.Unlock()
+
+	// Respond if we have a pending query
+	var err error
+	if ok {
+		err = query.Respond(req.Payload)
+	} else {
+		err = fmt.Errorf(invalidQueryID)
+	}
+
+	// Respond
+	resp := responseHeader{
+		Seq:   seq,
+		Error: errToString(err),
+	}
+	return client.Send(&resp, nil)
+}
+
+// handleStats is used to get various statistics
+func (i *AgentIPC) handleStats(client *IPCClient, seq uint64) error {
+	header := responseHeader{
+		Seq:   seq,
+		Error: "",
+	}
+	resp := i.agent.Stats()
+	return client.Send(&header, resp)
 }
 
 // Used to convert an error to a string representation

@@ -14,9 +14,9 @@ var ProtocolVersionMap map[uint8]uint8
 
 func init() {
 	ProtocolVersionMap = map[uint8]uint8{
+		4: 2,
 		3: 2,
 		2: 2,
-		1: 1,
 	}
 }
 
@@ -128,6 +128,26 @@ type Config struct {
 	// buffer gets overrun and messages are not delivered.
 	EventBuffer int
 
+	// QueryBuffer is used to control how many queries are buffered.
+	// This is used to prevent re-delivery of queries to a client. The buffer
+	// must be large enough to handle all "recent" events, since Serf will not
+	// deliver queries older than the oldest entry in the buffer.
+	// Thus if a client is generating too many queries, it's possible that the
+	// buffer gets overrun and messages are not delivered.
+	QueryBuffer int
+
+	// QueryTimeoutMult configures the default timeout multipler for a query to run if no
+	// specific value is provided. Queries are real-time by nature, where the
+	// reply is time sensitive. As a result, results are collected in an async
+	// fashion, however the query must have a bounded duration. We want the timeout
+	// to be long enough that all nodes have time to receive the message, run a handler,
+	// and generate a reply. Once the timeout is exceeded, any further replies are ignored.
+	// The default value is
+	//
+	// Timeout = GossipInterval * QueryTimeoutMult * log(N+1)
+	//
+	QueryTimeoutMult int
+
 	// MemberlistConfig is the memberlist configuration that Serf will
 	// use to do the underlying membership management and gossip. Some
 	// fields in the MemberlistConfig will be overwritten by Serf no
@@ -151,6 +171,26 @@ type Config struct {
 	// it will attempt to join all the previously known nodes until one
 	// succeeds and will also avoid replaying old user events.
 	SnapshotPath string
+
+	// RejoinAfterLeave controls our interaction with the snapshot file.
+	// When set to false (default), a leave causes a Serf to not rejoin
+	// the cluster until an explicit join is received. If this is set to
+	// true, we ignore the leave, and rejoin the cluster on start.
+	RejoinAfterLeave bool
+
+	// EnableNameConflictResolution controls if Serf will actively attempt
+	// to resolve a name conflict. Since each Serf member must have a unique
+	// name, a cluster can run into issues if multiple nodes claim the same
+	// name. Without automatic resolution, Serf merely logs some warnings, but
+	// otherwise does not take any action. Automatic resolution detects the
+	// conflict and issues a special query which asks the cluster for the
+	// Name -> IP:Port mapping. If there is a simple majority of votes, that
+	// node stays while the other node will leave the cluster and exit.
+	EnableNameConflictResolution bool
+
+	// KeyringFile provides the location of a writable file where Serf can
+	// persist changes to the encryption keyring.
+	KeyringFile string
 }
 
 // Init allocates the subdata structures
@@ -169,18 +209,21 @@ func DefaultConfig() *Config {
 	}
 
 	return &Config{
-		NodeName:           hostname,
-		BroadcastTimeout:   5 * time.Second,
-		EventBuffer:        512,
-		LogOutput:          os.Stderr,
-		ProtocolVersion:    ProtocolVersionMax,
-		ReapInterval:       15 * time.Second,
-		RecentIntentBuffer: 128,
-		ReconnectInterval:  30 * time.Second,
-		ReconnectTimeout:   24 * time.Hour,
-		QueueDepthWarning:  128,
-		MaxQueueDepth:      4096,
-		TombstoneTimeout:   24 * time.Hour,
-		MemberlistConfig:   memberlist.DefaultLANConfig(),
+		NodeName:                     hostname,
+		BroadcastTimeout:             5 * time.Second,
+		EventBuffer:                  512,
+		QueryBuffer:                  512,
+		LogOutput:                    os.Stderr,
+		ProtocolVersion:              ProtocolVersionMax,
+		ReapInterval:                 15 * time.Second,
+		RecentIntentBuffer:           128,
+		ReconnectInterval:            30 * time.Second,
+		ReconnectTimeout:             24 * time.Hour,
+		QueueDepthWarning:            128,
+		MaxQueueDepth:                4096,
+		TombstoneTimeout:             24 * time.Hour,
+		MemberlistConfig:             memberlist.DefaultLANConfig(),
+		QueryTimeoutMult:             16,
+		EnableNameConflictResolution: true,
 	}
 }

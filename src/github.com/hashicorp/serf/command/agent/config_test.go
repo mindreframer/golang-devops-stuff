@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestConfigBindAddrParts(t *testing.T) {
@@ -189,6 +190,17 @@ func TestDecodeConfig(t *testing.T) {
 		t.Fatalf("bad: %#v", config)
 	}
 
+	// tags file
+	input = `{"tags_file": "/some/path"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.TagsFile != "/some/path" {
+		t.Fatalf("bad: %#v", config)
+	}
+
 	// Discover
 	input = `{"discover": "foobar"}`
 	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
@@ -198,6 +210,143 @@ func TestDecodeConfig(t *testing.T) {
 
 	if config.Discover != "foobar" {
 		t.Fatalf("bad: %#v", config)
+	}
+
+	// Interface
+	input = `{"interface": "eth0"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.Interface != "eth0" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Reconnect intervals
+	input = `{"reconnect_interval": "15s", "reconnect_timeout": "48h"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.ReconnectInterval != 15*time.Second {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	if config.ReconnectTimeout != 48*time.Hour {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// RPC Auth
+	input = `{"rpc_auth": "foobar"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.RPCAuthKey != "foobar" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// DisableNameResolution
+	input = `{"disable_name_resolution": true}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if !config.DisableNameResolution {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Tombstone intervals
+	input = `{"tombstone_timeout": "48h"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.TombstoneTimeout != 48*time.Hour {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Syslog
+	input = `{"enable_syslog": true, "syslog_facility": "LOCAL4"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if !config.EnableSyslog {
+		t.Fatalf("bad: %#v", config)
+	}
+	if config.SyslogFacility != "LOCAL4" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Retry configs
+	input = `{"retry_max_attempts": 5, "retry_interval": "60s"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.RetryMaxAttempts != 5 {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	if config.RetryInterval != 60*time.Second {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Retry configs
+	input = `{"retry_join": ["127.0.0.1", "127.0.0.2"]}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if len(config.RetryJoin) != 2 {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	if config.RetryJoin[0] != "127.0.0.1" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	if config.RetryJoin[1] != "127.0.0.2" {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Rejoin configs
+	input = `{"rejoin_after_leave": true}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if !config.RejoinAfterLeave {
+		t.Fatalf("bad: %#v", config)
+	}
+
+	// Rejoin configs
+	input = `{"statsite_addr": "127.0.0.1:8123"}`
+	config, err = DecodeConfig(bytes.NewReader([]byte(input)))
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	if config.StatsiteAddr != "127.0.0.1:8123" {
+		t.Fatalf("bad: %#v", config)
+	}
+}
+
+func TestDecodeConfig_unknownDirective(t *testing.T) {
+	input := `{"unknown_directive": "titi"}`
+	_, err := DecodeConfig(bytes.NewReader([]byte(input)))
+	if err == nil {
+		t.Fatal("should have err")
 	}
 }
 
@@ -209,17 +358,30 @@ func TestMergeConfig(t *testing.T) {
 		EventHandlers: []string{"foo"},
 		StartJoin:     []string{"foo"},
 		ReplayOnJoin:  true,
+		RetryJoin:     []string{"zab"},
 	}
 
 	b := &Config{
-		NodeName:       "bname",
-		Protocol:       -1,
-		EncryptKey:     "foo",
-		EventHandlers:  []string{"bar"},
-		StartJoin:      []string{"bar"},
-		LeaveOnTerm:    true,
-		SkipLeaveOnInt: true,
-		Discover:       "tubez",
+		NodeName:              "bname",
+		Protocol:              -1,
+		EncryptKey:            "foo",
+		EventHandlers:         []string{"bar"},
+		StartJoin:             []string{"bar"},
+		LeaveOnTerm:           true,
+		SkipLeaveOnInt:        true,
+		Discover:              "tubez",
+		Interface:             "eth0",
+		ReconnectInterval:     15 * time.Second,
+		ReconnectTimeout:      48 * time.Hour,
+		RPCAuthKey:            "foobar",
+		DisableNameResolution: true,
+		TombstoneTimeout:      36 * time.Hour,
+		EnableSyslog:          true,
+		RetryJoin:             []string{"zip"},
+		RetryMaxAttempts:      10,
+		RetryInterval:         120 * time.Second,
+		RejoinAfterLeave:      true,
+		StatsiteAddr:          "127.0.0.1:8125",
 	}
 
 	c := MergeConfig(a, b)
@@ -256,12 +418,61 @@ func TestMergeConfig(t *testing.T) {
 		t.Fatalf("Bad: %v", c.Discover)
 	}
 
+	if c.Interface != "eth0" {
+		t.Fatalf("Bad: %v", c.Interface)
+	}
+
+	if c.ReconnectInterval != 15*time.Second {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if c.ReconnectTimeout != 48*time.Hour {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if c.TombstoneTimeout != 36*time.Hour {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if c.RPCAuthKey != "foobar" {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if !c.DisableNameResolution {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if !c.EnableSyslog {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if c.RetryMaxAttempts != 10 {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if c.RetryInterval != 120*time.Second {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if !c.RejoinAfterLeave {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	if c.StatsiteAddr != "127.0.0.1:8125" {
+		t.Fatalf("bad: %#v", c)
+	}
+
 	expected := []string{"foo", "bar"}
 	if !reflect.DeepEqual(c.EventHandlers, expected) {
 		t.Fatalf("bad: %#v", c)
 	}
 
 	if !reflect.DeepEqual(c.StartJoin, expected) {
+		t.Fatalf("bad: %#v", c)
+	}
+
+	expected = []string{"zab", "zip"}
+	if !reflect.DeepEqual(c.RetryJoin, expected) {
 		t.Fatalf("bad: %#v", c)
 	}
 }

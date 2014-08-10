@@ -61,6 +61,27 @@ func (d *delegate) NotifyMsg(buf []byte) {
 		rebroadcast = d.serf.handleUserEvent(&event)
 		rebroadcastQueue = d.serf.eventBroadcasts
 
+	case messageQueryType:
+		var query messageQuery
+		if err := decodeMessage(buf[1:], &query); err != nil {
+			d.serf.logger.Printf("[ERR] serf: Error decoding query message: %s", err)
+			break
+		}
+
+		d.serf.logger.Printf("[DEBUG] serf: messageQueryType: %s", query.Name)
+		rebroadcast = d.serf.handleQuery(&query)
+		rebroadcastQueue = d.serf.queryBroadcasts
+
+	case messageQueryResponseType:
+		var resp messageQueryResponse
+		if err := decodeMessage(buf[1:], &resp); err != nil {
+			d.serf.logger.Printf("[ERR] serf: Error decoding query response message: %s", err)
+			break
+		}
+
+		d.serf.logger.Printf("[DEBUG] serf: messageQueryResponseType: %v", resp.From)
+		d.serf.handleQueryResponse(&resp)
+
 	default:
 		d.serf.logger.Printf("[WARN] serf: Received message of unknown type: %d", t)
 	}
@@ -88,11 +109,24 @@ func (d *delegate) GetBroadcasts(overhead, limit int) [][]byte {
 		metrics.AddSample([]string{"serf", "msgs", "sent"}, float32(lm))
 	}
 
+	// Get any additional query broadcasts
+	queryMsgs := d.serf.queryBroadcasts.GetBroadcasts(overhead, limit-bytesUsed)
+	if queryMsgs != nil {
+		for _, m := range queryMsgs {
+			lm := len(m)
+			bytesUsed += lm + overhead
+			metrics.AddSample([]string{"serf", "msgs", "sent"}, float32(lm))
+		}
+		msgs = append(msgs, queryMsgs...)
+	}
+
 	// Get any additional event broadcasts
 	eventMsgs := d.serf.eventBroadcasts.GetBroadcasts(overhead, limit-bytesUsed)
 	if eventMsgs != nil {
 		for _, m := range eventMsgs {
-			metrics.AddSample([]string{"serf", "msgs", "sent"}, float32(len(m)))
+			lm := len(m)
+			bytesUsed += lm + overhead
+			metrics.AddSample([]string{"serf", "msgs", "sent"}, float32(lm))
 		}
 		msgs = append(msgs, eventMsgs...)
 	}
@@ -113,6 +147,7 @@ func (d *delegate) LocalState(join bool) []byte {
 		LeftMembers:  make([]string, 0, len(d.serf.leftMembers)),
 		EventLTime:   d.serf.eventClock.Time(),
 		Events:       d.serf.eventBuffer,
+		QueryLTime:   d.serf.queryClock.Time(),
 	}
 
 	// Add all the join LTimes
@@ -150,8 +185,15 @@ func (d *delegate) MergeRemoteState(buf []byte, isJoin bool) {
 
 	// Witness the Lamport clocks first.
 	// We subtract 1 since no message with that clock has been sent yet
-	d.serf.clock.Witness(pp.LTime - 1)
-	d.serf.eventClock.Witness(pp.EventLTime - 1)
+	if pp.LTime > 0 {
+		d.serf.clock.Witness(pp.LTime - 1)
+	}
+	if pp.EventLTime > 0 {
+		d.serf.eventClock.Witness(pp.EventLTime - 1)
+	}
+	if pp.QueryLTime > 0 {
+		d.serf.queryClock.Witness(pp.QueryLTime - 1)
+	}
 
 	// Process the left nodes first to avoid the LTimes from being increment
 	// in the wrong order

@@ -59,7 +59,7 @@ change the algorithm they use. It is currently always set to 0.
 
 ### TCP Message Format
 
-TCP provides a stream abstraction and therefor we must provide our own framing.
+TCP provides a stream abstraction and therefore we must provide our own framing.
 This intoduces a potential attack vector since we cannot verify the tag
 until the entire message is received, and the message length must be in plaintext.
 Our current strategy is to limit the maximum size of a framed message to prevent
@@ -101,13 +101,28 @@ Our goal is not to protect top secret data but to provide a "reasonable"
 level of security that would require an attacker to commit a considerable
 amount of resources to defeat.
 
+## Key Rotation
+
+Serf supports rotating keys. Because our security model assumes that all current
+Serf members are not compromised, we are able to use our own gossip mechanism to
+distribute new keys.
+
+The basic flow of changing the encryption key on a given Serf cluster is:
+
+* Broadcast new key to cluster via gossip
+* Instruct all members to update the key used to encrypt messages
+* Remove old key
+
+Due to the nature of distributed systems, it is difficult to reason about when
+to change they key used for message encryption on any given member in a
+cluster. Therefore, Serf allows multiple keys to be used to decrypt messages
+while the cluster converges. Decrypting messages becomes more expensive while
+there is more than one key active, as multiple attempts to decrypt any given
+message are required. For this reason, utilizing multiple keys is only
+recommended as a transition state.
+
 ## Future Roadmap
 
 Eventually, Serf will be able to use the versioning byte to support
 different encryption algorithms. These could be configured at the
 start time of the agent.
-
-Additionally, we need to support key rotation so that it is possible
-for network administrators to periodically change keys to ensure
-perfect forward security.
-

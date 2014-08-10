@@ -14,9 +14,9 @@ of a reference for all available features.
 
 ## What is Serf?
 
-Serf is a service discovery and orchestration tool that is decentralized,
-highly available, and fault tolerant.
-Serf runs on every major platform: Linux, Mac OS X, and Windows. It is
+Serf is a tool for cluster membership, failure detection,
+and orchestration that is decentralized, fault-tolerant and
+highly available. Serf runs on every major platform: Linux, Mac OS X, and Windows. It is
 extremely lightweight: it uses 5 to 10 MB of resident memory and primarily
 communicates using infrequent UDP messages.
 
@@ -34,8 +34,11 @@ to solve three major problems:
   Serf will attempt to recover failed nodes by reconnecting to them
   periodically.
 
-* **Custom event propagation**: Serf can broadcast custom events to the cluster.
-  These can be used to trigger deploys, propagate configuration, etc.
+* **Custom event propagation**: Serf can broadcast custom events and queries
+  to the cluster. These can be used to trigger deploys, propagate configuration, etc.
+  Events are simply fire-and-forget broadcast, and Serf makes a best effort to
+  deliver messages in the face of offline nodes or network partitions. Queries
+  provide a simple realtime request/response mechanism.
 
 See the [use cases page](/intro/use-cases.html) for a list of concrete use
 cases built on top of the features Serf provides. See the page on

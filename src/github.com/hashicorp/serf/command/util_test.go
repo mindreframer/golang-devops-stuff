@@ -19,15 +19,22 @@ func init() {
 }
 
 func testAgent(t *testing.T) *agent.Agent {
-	config := serf.DefaultConfig()
-	config.MemberlistConfig.BindAddr = testutil.GetBindAddr().String()
-	config.MemberlistConfig.ProbeInterval = 50 * time.Millisecond
-	config.MemberlistConfig.ProbeTimeout = 25 * time.Millisecond
-	config.MemberlistConfig.SuspicionMult = 1
-	config.NodeName = config.MemberlistConfig.BindAddr
-	config.Tags = map[string]string{"role": "test", "tag1": "foo", "tag2": "bar"}
+	agentConfig := agent.DefaultConfig()
+	serfConfig := serf.DefaultConfig()
+	return testAgentWithConfig(t, agentConfig, serfConfig)
+}
 
-	agent, err := agent.Create(config, nil)
+func testAgentWithConfig(t *testing.T, agentConfig *agent.Config,
+	serfConfig *serf.Config) *agent.Agent {
+
+	serfConfig.MemberlistConfig.BindAddr = testutil.GetBindAddr().String()
+	serfConfig.MemberlistConfig.ProbeInterval = 50 * time.Millisecond
+	serfConfig.MemberlistConfig.ProbeTimeout = 25 * time.Millisecond
+	serfConfig.MemberlistConfig.SuspicionMult = 1
+	serfConfig.NodeName = serfConfig.MemberlistConfig.BindAddr
+	serfConfig.Tags = map[string]string{"role": "test", "tag1": "foo", "tag2": "bar"}
+
+	agent, err := agent.Create(agentConfig, serfConfig, nil)
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -61,6 +68,6 @@ func testIPC(t *testing.T, a *agent.Agent) (string, *agent.AgentIPC) {
 
 	lw := agent.NewLogWriter(512)
 	mult := io.MultiWriter(os.Stderr, lw)
-	ipc := agent.NewAgentIPC(a, l, mult, lw)
+	ipc := agent.NewAgentIPC(a, "", l, mult, lw)
 	return rpcAddr, ipc
 }

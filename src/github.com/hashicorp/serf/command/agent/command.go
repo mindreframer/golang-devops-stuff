@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/armon/go-metrics"
+	"github.com/hashicorp/go-syslog"
 	"github.com/hashicorp/logutils"
 	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/serf"
@@ -18,8 +19,13 @@ import (
 	"time"
 )
 
-// gracefulTimeout controls how long we wait before forcefully terminating
-var gracefulTimeout = 3 * time.Second
+const (
+	// gracefulTimeout controls how long we wait before forcefully terminating
+	gracefulTimeout = 3 * time.Second
+
+	// minRetryInterval applies a lower bound to the join retry interval
+	minRetryInterval = time.Second
+)
 
 // Command is a Command implementation that runs a Serf agent.
 // The command will not end unless a shutdown message is sent on the
@@ -31,6 +37,7 @@ type Command struct {
 	args          []string
 	scriptHandler *ScriptEventHandler
 	logFilter     *logutils.LevelFilter
+	logger        *log.Logger
 }
 
 // readConfig is responsible for setup of our configuration using
@@ -39,6 +46,7 @@ func (c *Command) readConfig() *Config {
 	var cmdConfig Config
 	var configFiles []string
 	var tags []string
+	var retryInterval string
 	cmdFlags := flag.NewFlagSet("agent", flag.ContinueOnError)
 	cmdFlags.Usage = func() { c.Ui.Output(c.Help()) }
 	cmdFlags.StringVar(&cmdConfig.BindAddr, "bind", "", "address to bind listeners to")
@@ -48,6 +56,7 @@ func (c *Command) readConfig() *Config {
 	cmdFlags.Var((*AppendSliceValue)(&configFiles), "config-dir",
 		"directory of json files to read")
 	cmdFlags.StringVar(&cmdConfig.EncryptKey, "encrypt", "", "encryption key")
+	cmdFlags.StringVar(&cmdConfig.KeyringFile, "keyring-file", "", "path to the keyring file")
 	cmdFlags.Var((*AppendSliceValue)(&cmdConfig.EventHandlers), "event-handler",
 		"command to execute when events occur")
 	cmdFlags.Var((*AppendSliceValue)(&cmdConfig.StartJoin), "join",
@@ -65,19 +74,36 @@ func (c *Command) readConfig() *Config {
 	cmdFlags.Var((*AppendSliceValue)(&tags), "tag",
 		"tag pair, specified as key=value")
 	cmdFlags.StringVar(&cmdConfig.Discover, "discover", "", "mDNS discovery name")
+	cmdFlags.StringVar(&cmdConfig.Interface, "iface", "", "interface to bind to")
+	cmdFlags.StringVar(&cmdConfig.TagsFile, "tags-file", "", "tag persistence file")
+	cmdFlags.BoolVar(&cmdConfig.EnableSyslog, "syslog", false,
+		"enable logging to syslog facility")
+	cmdFlags.Var((*AppendSliceValue)(&cmdConfig.RetryJoin), "retry-join",
+		"address of agent to join on startup with retry")
+	cmdFlags.IntVar(&cmdConfig.RetryMaxAttempts, "retry-max", 0, "maximum retry join attempts")
+	cmdFlags.StringVar(&retryInterval, "retry-interval", "", "retry join interval")
+	cmdFlags.BoolVar(&cmdConfig.RejoinAfterLeave, "rejoin", false,
+		"enable re-joining after a previous leave")
 	if err := cmdFlags.Parse(c.args); err != nil {
 		return nil
 	}
 
 	// Parse any command line tag values
-	cmdConfig.Tags = make(map[string]string)
-	for _, tag := range tags {
-		parts := strings.SplitN(tag, "=", 2)
-		if len(parts) != 2 {
-			c.Ui.Error(fmt.Sprintf("Invalid tag '%s' provided", tag))
+	tagValues, err := UnmarshalTags(tags)
+	if err != nil {
+		c.Ui.Error(fmt.Sprintf("Error: %s", err))
+		return nil
+	}
+	cmdConfig.Tags = tagValues
+
+	// Decode the interval if given
+	if retryInterval != "" {
+		dur, err := time.ParseDuration(retryInterval)
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Error: %s", err))
 			return nil
 		}
-		cmdConfig.Tags[parts[0]] = parts[1]
+		cmdConfig.RetryInterval = dur
 	}
 
 	config := DefaultConfig()
@@ -110,10 +136,27 @@ func (c *Command) readConfig() *Config {
 		}
 	}
 
+	// Check for a valid interface
+	if _, err := config.NetworkInterface(); err != nil {
+		c.Ui.Error(fmt.Sprintf("Invalid network interface: %s", err))
+		return nil
+	}
+
 	// Backward compatibility hack for 'Role'
 	if config.Role != "" {
 		c.Ui.Output("Deprecation warning: 'Role' has been replaced with 'Tags'")
 		config.Tags["role"] = config.Role
+	}
+
+	// Check for sane retry interval
+	if config.RetryInterval < minRetryInterval {
+		c.Ui.Output(fmt.Sprintf("Warning: 'RetryInterval' is too low. Setting to %v", config.RetryInterval))
+		config.RetryInterval = minRetryInterval
+	}
+
+	// Check snapshot file is provided if we have RejoinAfterLeave
+	if config.RejoinAfterLeave && config.SnapshotPath == "" {
+		c.Ui.Output("Warning: 'RejoinAfterLeave' enabled without snapshot file")
 	}
 
 	return config
@@ -125,6 +168,71 @@ func (c *Command) setupAgent(config *Config, logOutput io.Writer) *Agent {
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Invalid bind address: %s", err))
 		return nil
+	}
+
+	// Check if we have an interface
+	if iface, _ := config.NetworkInterface(); iface != nil {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Failed to get interface addresses: %s", err))
+			return nil
+		}
+		if len(addrs) == 0 {
+			c.Ui.Error(fmt.Sprintf("Interface '%s' has no addresses", config.Interface))
+			return nil
+		}
+
+		// If there is no bind IP, pick an address
+		if bindIP == "0.0.0.0" {
+			found := false
+			for _, a := range addrs {
+				addr, ok := a.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				// Skip self-assigned IPs
+				if addr.IP.IsLinkLocalUnicast() {
+					continue
+				}
+
+				// Found an IP
+				found = true
+				bindIP = addr.IP.String()
+				c.Ui.Output(fmt.Sprintf("Using interface '%s' address '%s'",
+					config.Interface, bindIP))
+
+				// Update the configuration
+				bindAddr := &net.TCPAddr{
+					IP:   net.ParseIP(bindIP),
+					Port: bindPort,
+				}
+				config.BindAddr = bindAddr.String()
+				break
+			}
+			if !found {
+				c.Ui.Error(fmt.Sprintf("Failed to find usable address for interface '%s'", config.Interface))
+				return nil
+			}
+
+		} else {
+			// If there is a bind IP, ensure it is available
+			found := false
+			for _, a := range addrs {
+				addr, ok := a.(*net.IPNet)
+				if !ok {
+					continue
+				}
+				if addr.IP.String() == bindIP {
+					found = true
+					break
+				}
+			}
+			if !found {
+				c.Ui.Error(fmt.Sprintf("Interface '%s' has no '%s' address",
+					config.Interface, bindIP))
+				return nil
+			}
+		}
 	}
 
 	var advertiseIP string
@@ -169,10 +277,24 @@ func (c *Command) setupAgent(config *Config, logOutput io.Writer) *Agent {
 	serfConfig.QuiescentPeriod = time.Second
 	serfConfig.UserCoalescePeriod = 3 * time.Second
 	serfConfig.UserQuiescentPeriod = time.Second
+	if config.ReconnectInterval != 0 {
+		serfConfig.ReconnectInterval = config.ReconnectInterval
+	}
+	if config.ReconnectTimeout != 0 {
+		serfConfig.ReconnectTimeout = config.ReconnectTimeout
+	}
+	if config.TombstoneTimeout != 0 {
+		serfConfig.TombstoneTimeout = config.TombstoneTimeout
+	}
+	serfConfig.EnableNameConflictResolution = !config.DisableNameResolution
+	if config.KeyringFile != "" {
+		serfConfig.KeyringFile = config.KeyringFile
+	}
+	serfConfig.RejoinAfterLeave = config.RejoinAfterLeave
 
 	// Start Serf
 	c.Ui.Output("Starting Serf agent...")
-	agent, err := Create(serfConfig, logOutput)
+	agent, err := Create(config, serfConfig, logOutput)
 	if err != nil {
 		c.Ui.Error(fmt.Sprintf("Failed to start the Serf agent: %v", err))
 		return nil
@@ -199,9 +321,28 @@ func (c *Command) setupLoggers(config *Config) (*GatedWriter, *logWriter, io.Wri
 		return nil, nil, nil
 	}
 
+	// Check if syslog is enabled
+	var syslog io.Writer
+	if config.EnableSyslog {
+		l, err := gsyslog.NewLogger(gsyslog.LOG_NOTICE, config.SyslogFacility, "serf")
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Syslog setup failed: %v", err))
+			return nil, nil, nil
+		}
+		syslog = &SyslogWrapper{l}
+	}
+
 	// Create a log writer, and wrap a logOutput around it
 	logWriter := NewLogWriter(512)
-	logOutput := io.MultiWriter(c.logFilter, logWriter)
+	var logOutput io.Writer
+	if syslog != nil {
+		logOutput = io.MultiWriter(c.logFilter, logWriter, syslog)
+	} else {
+		logOutput = io.MultiWriter(c.logFilter, logWriter)
+	}
+
+	// Create a logger
+	c.logger = log.New(logOutput, "", log.LstdFlags)
 	return logGate, logWriter, logOutput
 }
 
@@ -210,12 +351,9 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 	logWriter *logWriter, logOutput io.Writer) *AgentIPC {
 	// Add the script event handlers
 	c.scriptHandler = &ScriptEventHandler{
-		Self: serf.Member{
-			Name: config.NodeName,
-			Tags: config.Tags,
-		},
-		Scripts: config.EventScripts(),
-		Logger:  log.New(logOutput, "", log.LstdFlags),
+		SelfFunc: func() serf.Member { return agent.Serf().LocalMember() },
+		Scripts:  config.EventScripts(),
+		Logger:   log.New(logOutput, "", log.LstdFlags),
 	}
 	agent.RegisterEventHandler(c.scriptHandler)
 
@@ -234,8 +372,11 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 		// Use the advertise addr and port
 		local := agent.Serf().Memberlist().LocalNode()
 
+		// Get the bind interface if any
+		iface, _ := config.NetworkInterface()
+
 		_, err := NewAgentMDNS(agent, logOutput, config.ReplayOnJoin,
-			config.NodeName, config.Discover, local.Addr, int(local.Port))
+			config.NodeName, config.Discover, iface, local.Addr, int(local.Port))
 		if err != nil {
 			c.Ui.Error(fmt.Sprintf("Error starting mDNS listener: %s", err))
 			return nil
@@ -252,7 +393,7 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 
 	// Start the IPC layer
 	c.Ui.Output("Starting Serf agent RPC...")
-	ipc := NewAgentIPC(agent, rpcListener, logOutput, logWriter)
+	ipc := NewAgentIPC(agent, config.RPCAuthKey, rpcListener, logOutput, logWriter)
 
 	c.Ui.Output("Serf agent running!")
 	c.Ui.Info(fmt.Sprintf("     Node name: '%s'", config.NodeName))
@@ -265,7 +406,7 @@ func (c *Command) startAgent(config *Config, agent *Agent,
 	}
 
 	c.Ui.Info(fmt.Sprintf("      RPC addr: '%s'", config.RPCAddr))
-	c.Ui.Info(fmt.Sprintf("     Encrypted: %#v", config.EncryptKey != ""))
+	c.Ui.Info(fmt.Sprintf("     Encrypted: %#v", agent.serf.EncryptionEnabled()))
 	c.Ui.Info(fmt.Sprintf("      Snapshot: %v", config.SnapshotPath != ""))
 	c.Ui.Info(fmt.Sprintf("       Profile: %s", config.Profile))
 
@@ -291,6 +432,39 @@ func (c *Command) startupJoin(config *Config, agent *Agent) error {
 	return nil
 }
 
+// retryJoin is invoked to handle joins with retries. This runs until at least a
+// single successful join or RetryMaxAttempts is reached
+func (c *Command) retryJoin(config *Config, agent *Agent, errCh chan struct{}) {
+	// Quit fast if there is no nodes to join
+	if len(config.RetryJoin) == 0 {
+		return
+	}
+
+	// Track the number of join attempts
+	attempt := 0
+	for {
+		// Try to perform the join
+		c.logger.Printf("[INFO] agent: Joining cluster...(replay: %v)", config.ReplayOnJoin)
+		n, err := agent.Join(config.RetryJoin, config.ReplayOnJoin)
+		if err == nil {
+			c.logger.Printf("[INFO] agent: Join completed. Synced with %d initial agents", n)
+			return
+		}
+
+		// Check if the maximum attempts has been exceeded
+		attempt++
+		if config.RetryMaxAttempts > 0 && attempt > config.RetryMaxAttempts {
+			c.logger.Printf("[ERR] agent: maximum retry join attempts made, exiting")
+			close(errCh)
+			return
+		}
+
+		// Log the failure and sleep
+		c.logger.Printf("[WARN] agent: Join failed: %v, retrying in %v", err, config.RetryInterval)
+		time.Sleep(config.RetryInterval)
+	}
+}
+
 func (c *Command) Run(args []string) int {
 	c.Ui = &cli.PrefixedUi{
 		OutputPrefix: "==> ",
@@ -312,15 +486,27 @@ func (c *Command) Run(args []string) int {
 		return 1
 	}
 
-	/* Setup telemetry
+	/*
+	Setup telemetry
 	Aggregate on 10 second intervals for 1 minute. Expose the
 	metrics over stderr when there is a SIGUSR1 received.
 	*/
 	inm := metrics.NewInmemSink(10*time.Second, time.Minute)
 	metrics.DefaultInmemSignal(inm)
 	metricsConf := metrics.DefaultConfig("serf-agent")
-	metricsConf.EnableHostname = false
-	metrics.NewGlobal(metricsConf, inm)
+
+	if config.StatsiteAddr != "" {
+		sink, err := metrics.NewStatsiteSink(config.StatsiteAddr)
+		if err != nil {
+			c.Ui.Error(fmt.Sprintf("Failed to start statsite sink. Got: %s", err))
+			return 1
+		}
+		fanout := metrics.FanoutSink{inm, sink}
+		metrics.NewGlobal(metricsConf, fanout)
+	} else {
+		metricsConf.EnableHostname = false
+		metrics.NewGlobal(metricsConf, inm)
+	}
 
 	// Setup serf
 	agent := c.setupAgent(config, logOutput)
@@ -347,12 +533,16 @@ func (c *Command) Run(args []string) int {
 	c.Ui.Output("Log data will now stream in as it occurs:\n")
 	logGate.Flush()
 
+	// Start the retry joins
+	retryJoinCh := make(chan struct{})
+	go c.retryJoin(config, agent, retryJoinCh)
+
 	// Wait for exit
-	return c.handleSignals(config, agent)
+	return c.handleSignals(config, agent, retryJoinCh)
 }
 
 // handleSignals blocks until we get an exit-causing signal
-func (c *Command) handleSignals(config *Config, agent *Agent) int {
+func (c *Command) handleSignals(config *Config, agent *Agent, retryJoin chan struct{}) int {
 	signalCh := make(chan os.Signal, 4)
 	signal.Notify(signalCh, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 
@@ -364,6 +554,9 @@ WAIT:
 		sig = s
 	case <-c.ShutdownCh:
 		sig = os.Interrupt
+	case <-retryJoin:
+		// Retry join failed!
+		return 1
 	case <-agent.ShutdownCh():
 		// Agent is already shutdown!
 		return 0
@@ -434,17 +627,13 @@ func (c *Command) handleReload(config *Config, agent *Agent) *Config {
 	}
 
 	// Change the event handlers
-	c.scriptHandler.UpdateScripts(config.EventScripts())
+	c.scriptHandler.UpdateScripts(newConf.EventScripts())
 
 	// Update the tags in serf
-	serf := agent.Serf()
-	if err := serf.SetTags(newConf.Tags); err != nil {
+	if err := agent.SetTags(newConf.Tags); err != nil {
 		c.Ui.Error(fmt.Sprintf("Failed to update tags: %v", err))
 		return newConf
 	}
-
-	// Change the tags for the event handlers
-	c.scriptHandler.Self.Tags = newConf.Tags
 
 	return newConf
 }
@@ -463,6 +652,11 @@ Usage: serf agent [options]
 Options:
 
   -bind=0.0.0.0            Address to bind network listeners to
+  -iface                   Network interface to bind to. Can be used instead of
+                           -bind if the interface is known but not the address.
+                           If both are provided, then Serf verifies that the
+                           interface has the bind address that is provided. This
+                           flag also sets the multicast device used for -discover.
   -advertise=0.0.0.0       Address to advertise to the other cluster members
   -config-file=foo         Path to a JSON file to read configuration from.
                            This can be specified multiple times.
@@ -475,6 +669,10 @@ Options:
                            peers join each other without an explicit join.
   -encrypt=foo             Key for encrypting network traffic within Serf.
                            Must be a base64-encoded 16-byte key.
+  -keyring-file            The keyring file is used to store encryption keys used
+                           by Serf. As encryption keys are changed, the content of
+                           this file is updated so that the same keys may be used
+                           during later agent starts.
   -event-handler=foo       Script to execute when events occur. This can
                            be specified multiple times. See the event scripts
                            section below for more info.
@@ -486,6 +684,13 @@ Options:
 						   The default if not provided is lan.
   -protocol=n              Serf protocol version to use. This defaults to
                            the latest version, but can be set back for upgrades.
+  -rejoin                  Ignores a previous leave and attempts to rejoin the cluster.
+                           Only works if provided along with a snapshot file.
+  -retry-join=addr         An agent to join with. This flag be specified multiple times.
+                           Does not exit on failure like -join, used to retry until success.
+  -retry-interval=30s      Sets the interval on which a node will attempt to retry joining
+                           nodes provided by -retry-join. Defaults to 30s.
+  -retry-max=0             Limits the number of retry events. Defaults to 0 for unlimited.
   -role=foo                The role of this node, if any. This can be used
                            by event scripts to differentiate different types
                            of nodes that may be part of the same cluster.
@@ -493,9 +698,15 @@ Options:
   -rpc-addr=127.0.0.1:7373 Address to bind the RPC listener.
   -snapshot=path/to/file   The snapshot file is used to store alive nodes and
                            event information so that Serf can rejoin a cluster
-						   and avoid event replay on restart.
+                           and avoid event replay on restart.
   -tag key=value           Tag can be specified multiple times to attach multiple
                            key/value tag pairs to the given node.
+  -tags-file=/path/to/file The tags file is used to persist tag data. As an agent's
+                           tags are changed, the tags file will be updated. Tags
+                           can be reloaded during later agent starts. This option
+                           is incompatible with the '-tag' option and requires there
+                           be no tags in the agent configuration file, if given.
+  -syslog                  When provided, logs will also be sent to syslog.
 
 Event handlers:
 

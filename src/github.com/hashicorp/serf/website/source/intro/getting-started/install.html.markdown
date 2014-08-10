@@ -24,6 +24,19 @@ depending on if you want to restrict the install to a single user or
 expose it to the entire system. On Windows systems, you can put it wherever
 you would like.
 
+### OS X
+
+If you are using [homebrew](http://brew.sh/#install) as a package manager,
+than you can install serf as simple as:
+```
+brew cask install serf
+```
+
+if you are missing the [cask plugin](http://caskroom.io/) you can install it with:
+```
+brew install caskroom/cask/brew-cask
+```
+
 ## Verifying the Installation
 
 After installing Serf, verify the installation worked by opening a new
@@ -43,6 +56,8 @@ Available commands are:
     leave          Gracefully leaves the Serf cluster and shuts down
     members        Lists the members of a Serf cluster
     monitor        Stream logs from a Serf agent
+    query          Send a query to the Serf cluster
+    tags           Modify tags of a running Serf agent
     version        Prints the Serf version
 ```
 

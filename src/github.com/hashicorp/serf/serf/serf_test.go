@@ -1,10 +1,14 @@
 package serf
 
 import (
+	"encoding/base64"
 	"fmt"
+	"github.com/hashicorp/memberlist"
 	"github.com/hashicorp/serf/testutil"
 	"io/ioutil"
 	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -42,9 +46,8 @@ func testMember(t *testing.T, members []Member, name string, status MemberStatus
 	for _, m := range members {
 		if m.Name == name {
 			if m.Status != status {
-				t.Fatalf("bad state for %s: %d", name, m.Status)
+				panic(fmt.Sprintf("bad state for %s: %d", name, m.Status))
 			}
-
 			return
 		}
 	}
@@ -54,7 +57,7 @@ func testMember(t *testing.T, members []Member, name string, status MemberStatus
 		return
 	}
 
-	t.Fatalf("node not found: %s", name)
+	panic(fmt.Sprintf("node not found: %s", name))
 }
 
 func TestCreate_badProtocolVersion(t *testing.T) {
@@ -124,7 +127,7 @@ func TestSerf_eventsFailed(t *testing.T) {
 
 	// Since s2 shutdown, we check the events to make sure we got failures.
 	testEvents(t, eventCh, s2Config.NodeName,
-		[]EventType{EventMemberJoin, EventMemberFailed})
+		[]EventType{EventMemberJoin, EventMemberFailed, EventMemberReap})
 }
 
 func TestSerf_eventsJoin(t *testing.T) {
@@ -265,7 +268,10 @@ func TestSerf_eventsUser_sizeLimit(t *testing.T) {
 	name := "this is too large an event"
 	payload := make([]byte, UserEventSizeLimit)
 	err = s1.UserEvent(name, payload, false)
-	if strings.HasPrefix(err.Error(), "user event exceeds limit of ") {
+	if err == nil {
+		t.Fatalf("expect error")
+	}
+	if !strings.HasPrefix(err.Error(), "user event exceeds limit of ") {
 		t.Fatalf("should get size limit error")
 	}
 }
@@ -450,6 +456,65 @@ func TestSerf_reconnect(t *testing.T) {
 	// Bring back s2 by mimicking its name and address
 	s2Config = testConfig()
 	s2Config.MemberlistConfig.BindAddr = s2Addr
+	s2Config.NodeName = s2Name
+	s2, err = Create(s2Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	time.Sleep(s1Config.ReconnectInterval * 5)
+
+	testEvents(t, eventCh, s2Name,
+		[]EventType{EventMemberJoin, EventMemberFailed, EventMemberJoin})
+}
+
+func TestSerf_reconnect_sameIP(t *testing.T) {
+	eventCh := make(chan Event, 64)
+	s1Config := testConfig()
+	s1Config.EventCh = eventCh
+
+	s2Config := testConfig()
+	s2Config.MemberlistConfig.BindAddr = s1Config.MemberlistConfig.BindAddr
+	s2Config.MemberlistConfig.BindPort = s1Config.MemberlistConfig.BindPort + 1
+
+	s2Addr := fmt.Sprintf("%s:%d",
+		s2Config.MemberlistConfig.BindAddr,
+		s2Config.MemberlistConfig.BindPort)
+	s2Name := s2Config.NodeName
+
+	s1, err := Create(s1Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	s2, err := Create(s2Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	defer s1.Shutdown()
+	defer s2.Shutdown()
+
+	testutil.Yield()
+
+	_, err = s1.Join([]string{s2Addr}, false)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	testutil.Yield()
+
+	// Now force the shutdown of s2 so it appears to fail.
+	if err := s2.Shutdown(); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	time.Sleep(s2Config.MemberlistConfig.ProbeInterval * 5)
+
+	// Bring back s2 by mimicking its name and address
+	s2Config = testConfig()
+	s2Config.MemberlistConfig.BindAddr = s1Config.MemberlistConfig.BindAddr
+	s2Config.MemberlistConfig.BindPort = s1Config.MemberlistConfig.BindPort + 1
 	s2Config.NodeName = s2Name
 	s2, err = Create(s2Config)
 	if err != nil {
@@ -941,7 +1006,7 @@ func TestSerf_SnapshotRecovery(t *testing.T) {
 	if err := s2.Shutdown(); err != nil {
 		t.Fatalf("err: %s", err)
 	}
-	time.Sleep(s2Config.MemberlistConfig.ProbeInterval * 5)
+	time.Sleep(s2Config.MemberlistConfig.ProbeInterval * 10)
 
 	// Verify that s2 is "failed"
 	testMember(t, s1.Members(), s2Config.NodeName, StatusFailed)
@@ -966,9 +1031,14 @@ func TestSerf_SnapshotRecovery(t *testing.T) {
 	defer s2.Shutdown()
 
 	// Wait for the node to auto rejoin
-	testutil.Yield()
-	testutil.Yield()
-	testutil.Yield()
+	start := time.Now()
+	for time.Now().Sub(start) < time.Second {
+		members := s1.Members()
+		if len(members) == 2 && members[0].Status == StatusAlive && members[1].Status == StatusAlive {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Verify that s2 is "alive"
 	testMember(t, s1.Members(), s2Config.NodeName, StatusAlive)
@@ -1103,5 +1173,390 @@ func TestSerf_SetTags(t *testing.T) {
 
 	if m := m2m_tags[s2.config.NodeName]; m["datacenter"] != "east-aws" {
 		t.Fatalf("bad: %v", m1m_tags)
+	}
+}
+
+func TestSerf_Query(t *testing.T) {
+	eventCh := make(chan Event, 4)
+	s1Config := testConfig()
+	s1Config.EventCh = eventCh
+	s1, err := Create(s1Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s1.Shutdown()
+
+	// Listen for the query
+	go func() {
+		for {
+			select {
+			case e := <-eventCh:
+				if e.EventType() != EventQuery {
+					continue
+				}
+				q := e.(*Query)
+				if err := q.Respond([]byte("test")); err != nil {
+					t.Fatalf("err: %s", err)
+				}
+				return
+			case <-time.After(time.Second):
+				t.Fatalf("timeout")
+			}
+		}
+	}()
+
+	s2Config := testConfig()
+	s2, err := Create(s2Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s2.Shutdown()
+	testutil.Yield()
+
+	_, err = s1.Join([]string{s2Config.MemberlistConfig.BindAddr}, false)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	testutil.Yield()
+
+	// Start a query from s2
+	params := s2.DefaultQueryParams()
+	params.RequestAck = true
+	resp, err := s2.Query("load", []byte("sup girl"), params)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	var acks []string
+	var responses []string
+
+	ackCh := resp.AckCh()
+	respCh := resp.ResponseCh()
+	for i := 0; i < 3; i++ {
+		select {
+		case a := <-ackCh:
+			acks = append(acks, a)
+
+		case r := <-respCh:
+			if r.From != s1Config.NodeName {
+				t.Fatalf("bad: %v", r)
+			}
+			if string(r.Payload) != "test" {
+				t.Fatalf("bad: %v", r)
+			}
+			responses = append(responses, r.From)
+
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+
+	if len(acks) != 2 {
+		t.Fatalf("missing acks: %v", acks)
+	}
+	if len(responses) != 1 {
+		t.Fatalf("missing responses: %v", responses)
+	}
+}
+
+func TestSerf_Query_Filter(t *testing.T) {
+	eventCh := make(chan Event, 4)
+	s1Config := testConfig()
+	s1Config.EventCh = eventCh
+	s1, err := Create(s1Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s1.Shutdown()
+
+	// Listen for the query
+	go func() {
+		for {
+			select {
+			case e := <-eventCh:
+				if e.EventType() != EventQuery {
+					continue
+				}
+				q := e.(*Query)
+				if err := q.Respond([]byte("test")); err != nil {
+					t.Fatalf("err: %s", err)
+				}
+				return
+			case <-time.After(time.Second):
+				t.Fatalf("timeout")
+			}
+		}
+	}()
+
+	s2Config := testConfig()
+	s2, err := Create(s2Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s2.Shutdown()
+	testutil.Yield()
+
+	_, err = s1.Join([]string{s2Config.MemberlistConfig.BindAddr}, false)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	testutil.Yield()
+
+	// Filter to only s1!
+	params := s2.DefaultQueryParams()
+	params.FilterNodes = []string{s1Config.NodeName}
+	params.RequestAck = true
+
+	// Start a query from s2
+	resp, err := s2.Query("load", []byte("sup girl"), params)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	var acks []string
+	var responses []string
+
+	ackCh := resp.AckCh()
+	respCh := resp.ResponseCh()
+	for i := 0; i < 2; i++ {
+		select {
+		case a := <-ackCh:
+			acks = append(acks, a)
+
+		case r := <-respCh:
+			if r.From != s1Config.NodeName {
+				t.Fatalf("bad: %v", r)
+			}
+			if string(r.Payload) != "test" {
+				t.Fatalf("bad: %v", r)
+			}
+			responses = append(responses, r.From)
+
+		case <-time.After(time.Second):
+			t.Fatalf("timeout")
+		}
+	}
+
+	if len(acks) != 1 {
+		t.Fatalf("missing acks: %v", acks)
+	}
+	if len(responses) != 1 {
+		t.Fatalf("missing responses: %v", responses)
+	}
+}
+
+func TestSerf_Query_sizeLimit(t *testing.T) {
+	// Create the s1 config with an event channel so we can listen
+	s1Config := testConfig()
+	s1, err := Create(s1Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s1.Shutdown()
+
+	name := "this is too large a query"
+	payload := make([]byte, QuerySizeLimit)
+	_, err = s1.Query(name, payload, nil)
+	if err == nil {
+		t.Fatalf("should get error")
+	}
+	if !strings.HasPrefix(err.Error(), "query exceeds limit of ") {
+		t.Fatalf("should get size limit error: %v", err)
+	}
+}
+
+func TestSerf_NameResolution(t *testing.T) {
+	// Create the s1 config with an event channel so we can listen
+	s1Config := testConfig()
+	s2Config := testConfig()
+	s3Config := testConfig()
+
+	s1, err := Create(s1Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s1.Shutdown()
+
+	s2, err := Create(s2Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s2.Shutdown()
+
+	// Create an artifical node name conflict!
+	s3Config.NodeName = s1Config.NodeName
+	s3, err := Create(s3Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s3.Shutdown()
+
+	testutil.Yield()
+
+	// Join s1 to s2 first. s2 should vote for s1 in conflict
+	_, err = s1.Join([]string{s2Config.MemberlistConfig.BindAddr}, false)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	_, err = s1.Join([]string{s3Config.MemberlistConfig.BindAddr}, false)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	testutil.Yield()
+
+	// Wait for the query period to end
+	time.Sleep(s1.DefaultQueryTimeout() * 2)
+
+	// s3 should have shutdown, while s1 is running
+	if s1.State() != SerfAlive {
+		t.Fatalf("bad: %v", s1.State())
+	}
+	if s2.State() != SerfAlive {
+		t.Fatalf("bad: %v", s2.State())
+	}
+	if s3.State() != SerfShutdown {
+		t.Fatalf("bad: %v", s3.State())
+	}
+}
+
+func TestSerf_LocalMember(t *testing.T) {
+	s1Config := testConfig()
+	s1, err := Create(s1Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s1.Shutdown()
+
+	m := s1.LocalMember()
+	if m.Name != s1Config.NodeName {
+		t.Fatalf("bad: %v", m)
+	}
+	if !reflect.DeepEqual(m.Tags, s1Config.Tags) {
+		t.Fatalf("bad: %v", m)
+	}
+	if m.Status != StatusAlive {
+		t.Fatalf("bad: %v", m)
+	}
+
+	newTags := map[string]string{
+		"foo":  "bar",
+		"test": "ing",
+	}
+	if err := s1.SetTags(newTags); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	m = s1.LocalMember()
+	if !reflect.DeepEqual(m.Tags, newTags) {
+		t.Fatalf("bad: %v", m)
+	}
+}
+
+func TestSerf_WriteKeyringFile(t *testing.T) {
+	existing := "jbuQMI4gMUeh1PPmKOtiBg=="
+	newKey := "eodFZZjm7pPwIZ0Miy7boQ=="
+
+	td, err := ioutil.TempDir("", "serf")
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer os.RemoveAll(td)
+
+	keyringFile := filepath.Join(td, "tags.json")
+
+	existingBytes, err := base64.StdEncoding.DecodeString(existing)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	keys := [][]byte{existingBytes}
+	keyring, err := memberlist.NewKeyring(keys, existingBytes)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	s1Config := testConfig()
+	s1Config.MemberlistConfig.Keyring = keyring
+	s1Config.KeyringFile = keyringFile
+	s1, err := Create(s1Config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer s1.Shutdown()
+
+	manager := s1.KeyManager()
+
+	if _, err := manager.InstallKey(newKey); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	content, err := ioutil.ReadFile(keyringFile)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("bad: %v", lines)
+	}
+
+	// Ensure both the original key and the new key are present in the file
+	if !strings.Contains(string(content), existing) {
+		t.Fatalf("key not found in keyring file: %s", existing)
+	}
+	if !strings.Contains(string(content), newKey) {
+		t.Fatalf("key not found in keyring file: %s", newKey)
+	}
+
+	// Ensure the existing key remains primary. This is in position 1 because
+	// the file writer will use json.MarshalIndent(), leaving the first line as
+	// the opening bracket.
+	if !strings.Contains(lines[1], existing) {
+		t.Fatalf("expected key to be primary: %s", existing)
+	}
+
+	// Swap primary keys
+	if _, err := manager.UseKey(newKey); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	content, err = ioutil.ReadFile(keyringFile)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	lines = strings.Split(string(content), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("bad: %v", lines)
+	}
+
+	// Key order should have changed in keyring file
+	if !strings.Contains(lines[1], newKey) {
+		t.Fatalf("expected key to be primary: %s", newKey)
+	}
+
+	// Remove the old key
+	if _, err := manager.RemoveKey(existing); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	content, err = ioutil.ReadFile(keyringFile)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	lines = strings.Split(string(content), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("bad: %v", lines)
+	}
+
+	// Only the new key should now be present in the keyring file
+	if len(lines) != 3 {
+		t.Fatalf("bad: %v", lines)
+	}
+	if !strings.Contains(lines[1], newKey) {
+		t.Fatalf("expected key to be primary: %s", newKey)
 	}
 }
