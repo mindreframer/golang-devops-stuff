@@ -2,10 +2,11 @@ package lookupd
 
 import (
 	"fmt"
-	"github.com/bitly/nsq/util"
-	"github.com/bitly/nsq/util/semver"
 	"sort"
 	"time"
+
+	"github.com/bitly/nsq/util"
+	"github.com/bitly/nsq/util/semver"
 )
 
 type ProducerTopic struct {
@@ -26,7 +27,7 @@ type Producer struct {
 	TcpPort          int             `json:"tcp_port"`
 	HttpPort         int             `json:"http_port"`
 	Version          string          `json:"version"`
-	VersionObj       *semver.Version `json:-`
+	VersionObj       *semver.Version `json:"-"`
 	Topics           ProducerTopics  `json:"topics"`
 	OutOfDate        bool
 }
@@ -111,7 +112,7 @@ type ChannelStats struct {
 	ClientCount   int
 	Selected      bool
 	HostStats     []*ChannelStats
-	Clients       []*ClientInfo
+	Clients       []*ClientStats
 	Paused        bool
 
 	E2eProcessingLatency *util.E2eProcessingLatencyAggregate
@@ -152,11 +153,13 @@ func (c *ChannelStats) Host() string {
 	return h
 }
 
-type ClientInfo struct {
+type ClientStats struct {
 	HostAddress       string
-	ClientVersion     string
-	ClientUserAgent   string
-	ClientIdentifier  string
+	RemoteAddress     string
+	Version           string
+	ClientID          string
+	Hostname          string
+	UserAgent         string
 	ConnectedDuration time.Duration
 	InFlightCount     int
 	ReadyCount        int
@@ -164,16 +167,24 @@ type ClientInfo struct {
 	RequeueCount      int64
 	MessageCount      int64
 	SampleRate        int32
-	TLS               bool
 	Deflate           bool
 	Snappy            bool
+	Authed            bool
+	AuthIdentity      string
+	AuthIdentityUrl   string
+
+	TLS                           bool
+	CipherSuite                   string `json:"tls_cipher_suite"`
+	TLSVersion                    string `json:"tls_version"`
+	TLSNegotiatedProtocol         string `json:"tls_negotiated_protocol"`
+	TLSNegotiatedProtocolIsMutual bool   `json:"tls_negotiated_protocol_is_mutual"`
 }
 
-func (c *ClientInfo) HasUserAgent() bool {
-	return c.ClientUserAgent != ""
+func (c *ClientStats) HasUserAgent() bool {
+	return c.UserAgent != ""
 }
 
-func (c *ClientInfo) HasSampleRate() bool {
+func (c *ClientStats) HasSampleRate() bool {
 	return c.SampleRate > 0
 }
 
@@ -182,9 +193,9 @@ type ChannelStatsByHost struct {
 	ChannelStatsList
 }
 
-type ClientInfoList []*ClientInfo
+type ClientStatsList []*ClientStats
 type ClientsByHost struct {
-	ClientInfoList
+	ClientStatsList
 }
 type TopicStatsList []*TopicStats
 type TopicStatsByHost struct {
@@ -197,8 +208,8 @@ type ProducersByHost struct {
 
 func (c ChannelStatsList) Len() int      { return len(c) }
 func (c ChannelStatsList) Swap(i, j int) { c[i], c[j] = c[j], c[i] }
-func (c ClientInfoList) Len() int        { return len(c) }
-func (c ClientInfoList) Swap(i, j int)   { c[i], c[j] = c[j], c[i] }
+func (c ClientStatsList) Len() int       { return len(c) }
+func (c ClientStatsList) Swap(i, j int)  { c[i], c[j] = c[j], c[i] }
 func (t TopicStatsList) Len() int        { return len(t) }
 func (t TopicStatsList) Swap(i, j int)   { t[i], t[j] = t[j], t[i] }
 func (t ProducerList) Len() int          { return len(t) }
@@ -208,10 +219,10 @@ func (c ChannelStatsByHost) Less(i, j int) bool {
 	return c.ChannelStatsList[i].HostAddress < c.ChannelStatsList[j].HostAddress
 }
 func (c ClientsByHost) Less(i, j int) bool {
-	if c.ClientInfoList[i].ClientIdentifier == c.ClientInfoList[j].ClientIdentifier {
-		return c.ClientInfoList[i].HostAddress < c.ClientInfoList[j].HostAddress
+	if c.ClientStatsList[i].ClientID == c.ClientStatsList[j].ClientID {
+		return c.ClientStatsList[i].HostAddress < c.ClientStatsList[j].HostAddress
 	}
-	return c.ClientInfoList[i].ClientIdentifier < c.ClientInfoList[j].ClientIdentifier
+	return c.ClientStatsList[i].ClientID < c.ClientStatsList[j].ClientID
 }
 func (c TopicStatsByHost) Less(i, j int) bool {
 	return c.TopicStatsList[i].HostAddress < c.TopicStatsList[j].HostAddress

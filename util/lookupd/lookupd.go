@@ -3,15 +3,31 @@ package lookupd
 import (
 	"errors"
 	"fmt"
-	"github.com/bitly/nsq/util"
-	"github.com/bitly/nsq/util/semver"
 	"log"
+	"net"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/bitly/nsq/util"
+	"github.com/bitly/nsq/util/semver"
 )
+
+// GetVersion returns a semver.Version object by querying /info
+func GetVersion(addr string) (*semver.Version, error) {
+	endpoint := fmt.Sprintf("http://%s/info", addr)
+	log.Printf("version negotiation %s", endpoint)
+	info, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
+	if err != nil {
+		log.Printf("ERROR: %s - %s", endpoint, err)
+		return nil, err
+	}
+	version := info.Get("version").MustString("unknown")
+	return semver.Parse(version)
+}
 
 // GetLookupdTopics returns a []string containing a union of all the topics
 // from all the given lookupd
@@ -24,9 +40,8 @@ func GetLookupdTopics(lookupdHTTPAddrs []string) ([]string, error) {
 		wg.Add(1)
 		endpoint := fmt.Sprintf("http://%s/topics", addr)
 		log.Printf("LOOKUPD: querying %s", endpoint)
-
 		go func(endpoint string) {
-			data, err := util.ApiRequest(endpoint)
+			data, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
 			lock.Lock()
 			defer lock.Unlock()
 			defer wg.Done()
@@ -60,7 +75,7 @@ func GetLookupdTopicChannels(topic string, lookupdHTTPAddrs []string) ([]string,
 		endpoint := fmt.Sprintf("http://%s/channels?topic=%s", addr, url.QueryEscape(topic))
 		log.Printf("LOOKUPD: querying %s", endpoint)
 		go func(endpoint string) {
-			data, err := util.ApiRequest(endpoint)
+			data, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
 			lock.Lock()
 			defer lock.Unlock()
 			defer wg.Done()
@@ -97,7 +112,7 @@ func GetLookupdProducers(lookupdHTTPAddrs []string) ([]*Producer, error) {
 		endpoint := fmt.Sprintf("http://%s/nodes", addr)
 		log.Printf("LOOKUPD: querying %s", endpoint)
 		go func(addr string, endpoint string) {
-			data, err := util.ApiRequest(endpoint)
+			data, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
 			lock.Lock()
 			defer lock.Unlock()
 			defer wg.Done()
@@ -198,7 +213,7 @@ func GetLookupdTopicProducers(topic string, lookupdHTTPAddrs []string) ([]string
 		log.Printf("LOOKUPD: querying %s", endpoint)
 
 		go func(endpoint string) {
-			data, err := util.ApiRequest(endpoint)
+			data, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
 			lock.Lock()
 			defer lock.Unlock()
 			defer wg.Done()
@@ -213,7 +228,7 @@ func GetLookupdTopicProducers(topic string, lookupdHTTPAddrs []string) ([]string
 				producer := producers.GetIndex(i)
 				broadcastAddress := producer.Get("broadcast_address").MustString()
 				httpPort := producer.Get("http_port").MustInt()
-				key := fmt.Sprintf("%s:%d", broadcastAddress, httpPort)
+				key := net.JoinHostPort(broadcastAddress, strconv.Itoa(httpPort))
 				allSources = util.StringAdd(allSources, key)
 			}
 		}(endpoint)
@@ -238,7 +253,7 @@ func GetNSQDTopics(nsqdHTTPAddrs []string) ([]string, error) {
 		log.Printf("NSQD: querying %s", endpoint)
 
 		go func(endpoint string) {
-			data, err := util.ApiRequest(endpoint)
+			data, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
 			lock.Lock()
 			defer lock.Unlock()
 			defer wg.Done()
@@ -274,8 +289,8 @@ func GetNSQDTopicProducers(topic string, nsqdHTTPAddrs []string) ([]string, erro
 		endpoint := fmt.Sprintf("http://%s/stats?format=json", addr)
 		log.Printf("NSQD: querying %s", endpoint)
 
-		go func(endpoint string) {
-			data, err := util.ApiRequest(endpoint)
+		go func(endpoint, addr string) {
+			data, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
 			lock.Lock()
 			defer lock.Unlock()
 			defer wg.Done()
@@ -292,7 +307,7 @@ func GetNSQDTopicProducers(topic string, nsqdHTTPAddrs []string) ([]string, erro
 					return
 				}
 			}
-		}(endpoint)
+		}(endpoint, addr)
 	}
 	wg.Wait()
 	if success == false {
@@ -319,7 +334,7 @@ func GetNSQDStats(nsqdHTTPAddrs []string, selectedTopic string) ([]*TopicStats, 
 		log.Printf("NSQD: querying %s", endpoint)
 
 		go func(endpoint string, addr string) {
-			data, err := util.ApiRequest(endpoint)
+			data, err := util.APIRequestNegotiateV1("GET", endpoint, nil)
 			lock.Lock()
 			defer lock.Unlock()
 			defer wg.Done()
@@ -410,12 +425,25 @@ func GetNSQDStats(nsqdHTTPAddrs []string, selectedTopic string) ([]*TopicStats, 
 						connected := time.Unix(client.Get("connect_ts").MustInt64(), 0)
 						connectedDuration := time.Now().Sub(connected).Seconds()
 
-						clientInfo := &ClientInfo{
-							HostAddress:     addr,
-							ClientVersion:   client.Get("version").MustString(),
-							ClientUserAgent: client.Get("user_agent").MustString(),
-							ClientIdentifier: fmt.Sprintf("%s:%s", client.Get("name").MustString(),
-								strings.Split(client.Get("remote_address").MustString(), ":")[1]),
+						clientId := client.Get("clientId").MustString()
+						if clientId == "" {
+							// TODO: deprecated, remove in 1.0
+							name := client.Get("name").MustString()
+							remoteAddressParts := strings.Split(client.Get("remote_address").MustString(), ":")
+							port := remoteAddressParts[len(remoteAddressParts)-1]
+							if len(remoteAddressParts) < 2 {
+								port = "NA"
+							}
+							clientId = fmt.Sprintf("%s:%s", name, port)
+						}
+
+						clientStats := &ClientStats{
+							HostAddress:       addr,
+							RemoteAddress:     client.Get("remote_address").MustString(),
+							Version:           client.Get("version").MustString(),
+							ClientID:          clientId,
+							Hostname:          client.Get("hostname").MustString(),
+							UserAgent:         client.Get("user_agent").MustString(),
 							ConnectedDuration: time.Duration(int64(connectedDuration)) * time.Second, // truncate to second
 							InFlightCount:     client.Get("in_flight_count").MustInt(),
 							ReadyCount:        client.Get("ready_count").MustInt(),
@@ -423,12 +451,20 @@ func GetNSQDStats(nsqdHTTPAddrs []string, selectedTopic string) ([]*TopicStats, 
 							RequeueCount:      client.Get("requeue_count").MustInt64(),
 							MessageCount:      client.Get("message_count").MustInt64(),
 							SampleRate:        int32(client.Get("sample_rate").MustInt()),
-							TLS:               client.Get("tls").MustBool(),
 							Deflate:           client.Get("deflate").MustBool(),
 							Snappy:            client.Get("snappy").MustBool(),
+							Authed:            client.Get("authed").MustBool(),
+							AuthIdentity:      client.Get("auth_identity").MustString(),
+							AuthIdentityUrl:   client.Get("auth_identity_url").MustString(),
+
+							TLS:                           client.Get("tls").MustBool(),
+							CipherSuite:                   client.Get("tls_cipher_suite").MustString(),
+							TLSVersion:                    client.Get("tls_version").MustString(),
+							TLSNegotiatedProtocol:         client.Get("tls_negotiated_protocol").MustString(),
+							TLSNegotiatedProtocolIsMutual: client.Get("tls_negotiated_protocol_is_mutual").MustBool(),
 						}
-						hostChannelStats.Clients = append(hostChannelStats.Clients, clientInfo)
-						channelStats.Clients = append(channelStats.Clients, clientInfo)
+						hostChannelStats.Clients = append(hostChannelStats.Clients, clientStats)
+						channelStats.Clients = append(channelStats.Clients, clientStats)
 					}
 					sort.Sort(ClientsByHost{hostChannelStats.Clients})
 					sort.Sort(ClientsByHost{channelStats.Clients})

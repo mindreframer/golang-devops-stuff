@@ -1,8 +1,7 @@
-package main
+package nsqd
 
 import (
 	"bytes"
-	"github.com/bitly/go-nsq"
 )
 
 // BackendQueue represents the behavior for the secondary message
@@ -16,41 +15,41 @@ type BackendQueue interface {
 	Empty() error
 }
 
-type DummyBackendQueue struct {
+type dummyBackendQueue struct {
 	readChan chan []byte
 }
 
-func NewDummyBackendQueue() BackendQueue {
-	return &DummyBackendQueue{readChan: make(chan []byte)}
+func newDummyBackendQueue() BackendQueue {
+	return &dummyBackendQueue{readChan: make(chan []byte)}
 }
 
-func (d *DummyBackendQueue) Put([]byte) error {
+func (d *dummyBackendQueue) Put([]byte) error {
 	return nil
 }
 
-func (d *DummyBackendQueue) ReadChan() chan []byte {
+func (d *dummyBackendQueue) ReadChan() chan []byte {
 	return d.readChan
 }
 
-func (d *DummyBackendQueue) Close() error {
+func (d *dummyBackendQueue) Close() error {
 	return nil
 }
 
-func (d *DummyBackendQueue) Delete() error {
+func (d *dummyBackendQueue) Delete() error {
 	return nil
 }
 
-func (d *DummyBackendQueue) Depth() int64 {
+func (d *dummyBackendQueue) Depth() int64 {
 	return int64(0)
 }
 
-func (d *DummyBackendQueue) Empty() error {
+func (d *dummyBackendQueue) Empty() error {
 	return nil
 }
 
-func WriteMessageToBackend(buf *bytes.Buffer, msg *nsq.Message, bq BackendQueue) error {
+func writeMessageToBackend(buf *bytes.Buffer, msg *Message, bq BackendQueue) error {
 	buf.Reset()
-	err := msg.Write(buf)
+	_, err := msg.WriteTo(buf)
 	if err != nil {
 		return err
 	}

@@ -3,14 +3,16 @@ package main
 import (
 	"flag"
 	"fmt"
-	"github.com/BurntSushi/toml"
-	"github.com/bitly/nsq/util"
-	"github.com/bitly/nsq/nsqlookupd"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/BurntSushi/toml"
+	"github.com/bitly/nsq/nsqlookupd"
+	"github.com/bitly/nsq/util"
+	"github.com/mreiferson/go-options"
 )
 
 var (
@@ -52,14 +54,11 @@ func main() {
 		}
 	}
 
-	options := nsqlookupd.NewNSQLookupdOptions()
-	util.ResolveOptions(options, flagSet, cfg)
-	daemon := nsqlookupd.NewNSQLookupd(options)
-
-	log.Println(util.Version("nsqlookupd"))
+	opts := nsqlookupd.NewNSQLookupdOptions()
+	options.Resolve(opts, flagSet, cfg)
+	daemon := nsqlookupd.NewNSQLookupd(opts)
 
 	daemon.Main()
 	<-exitChan
 	daemon.Exit()
 }
-

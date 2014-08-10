@@ -1,13 +1,13 @@
-package main
+package nsqd
 
 import (
 	"fmt"
-	"github.com/bitly/nsq/util"
-	"log"
 	"math"
 	"runtime"
 	"sort"
 	"time"
+
+	"github.com/bitly/nsq/util"
 )
 
 type Uint64Slice []uint64
@@ -27,22 +27,22 @@ func (s Uint64Slice) Less(i, j int) bool {
 func (n *NSQD) statsdLoop() {
 	var lastMemStats runtime.MemStats
 	lastStats := make([]TopicStats, 0)
-	ticker := time.NewTicker(n.options.StatsdInterval)
+	ticker := time.NewTicker(n.opts.StatsdInterval)
 	for {
 		select {
 		case <-n.exitChan:
 			goto exit
 		case <-ticker.C:
-			statsd := util.NewStatsdClient(n.options.StatsdAddress, n.options.StatsdPrefix)
+			statsd := util.NewStatsdClient(n.opts.StatsdAddress, n.opts.StatsdPrefix)
 			err := statsd.CreateSocket()
 			if err != nil {
-				log.Printf("ERROR: failed to create UDP socket to statsd(%s)", statsd)
+				n.logf("ERROR: failed to create UDP socket to statsd(%s)", statsd)
 				continue
 			}
 
-			log.Printf("STATSD: pushing stats to %s", statsd)
+			n.logf("STATSD: pushing stats to %s", statsd)
 
-			stats := n.getStats()
+			stats := n.GetStats()
 			for _, topic := range stats {
 				// try to find the topic in the last collection
 				lastTopic := TopicStats{}
@@ -114,17 +114,11 @@ func (n *NSQD) statsdLoop() {
 			}
 			lastStats = stats
 
-			if n.options.StatsdMemStats {
+			if n.opts.StatsdMemStats {
 				var memStats runtime.MemStats
 				runtime.ReadMemStats(&memStats)
 
-				// sort the GC pause array
-				length := 256
-				if len(memStats.PauseNs) <= 256 {
-					length = int(memStats.NumGC)
-				}
-				gcPauses := make(Uint64Slice, length)
-				copy(gcPauses, memStats.PauseNs[:])
+				gcPauses := recentGCPauses(memStats, int(memStats.NumGC-lastMemStats.NumGC))
 				sort.Sort(gcPauses)
 
 				statsd.Gauge("mem.heap_objects", int64(memStats.HeapObjects))
@@ -148,8 +142,51 @@ exit:
 	ticker.Stop()
 }
 
+func recentGCPauses(memStats runtime.MemStats, runsCaredAbout int) Uint64Slice {
+	if runsCaredAbout == 0 {
+		return make([]uint64, 0)
+	}
+	pauseBufSize := len(memStats.PauseNs)
+
+	// Gets the most recent GC pauseN index
+	numGC := int(memStats.NumGC)
+	mostRecentGC := numGC % pauseBufSize
+
+	// can't use min from stdlib
+	numGCRuns := runsCaredAbout
+	if runsCaredAbout > numGC {
+		numGCRuns = numGC
+	}
+
+	var gcPauses Uint64Slice
+	unwrappedIndex := mostRecentGC - numGCRuns
+	if numGCRuns > pauseBufSize {
+		// doesn't matter --some GC PauseN's have been lost
+		gcPauses = make(Uint64Slice, pauseBufSize)
+		copy(gcPauses[:], memStats.PauseNs[:])
+	} else if unwrappedIndex >= 0 {
+		// not wrapped in circular buffer
+		gcPauses = make(Uint64Slice, numGCRuns)
+		copy(gcPauses[:], memStats.PauseNs[unwrappedIndex:mostRecentGC])
+	} else {
+		// wrapped in circular buffer
+		gcPauses = make(Uint64Slice, numGCRuns)
+
+		// tail of circular buffer, comes first
+		tailSize := numGCRuns - mostRecentGC - 1
+		copy(gcPauses[:tailSize], memStats.PauseNs[pauseBufSize-tailSize:])
+
+		// head of circular buffer, comes second
+		copy(gcPauses[tailSize:], memStats.PauseNs[:mostRecentGC])
+	}
+	return gcPauses
+}
+
 func percentile(perc float64, arr []uint64, length int) uint64 {
-	indexOfPerc := int(math.Ceil(((perc / 100.0) * float64(length)) + 0.5))
+	if length == 0 {
+		return 0
+	}
+	indexOfPerc := int(math.Floor(((perc / 100.0) * float64(length)) + 0.5))
 	if indexOfPerc >= length {
 		indexOfPerc = length - 1
 	}

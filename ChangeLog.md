@@ -2,6 +2,142 @@
 
 ## Binaries
 
+### 0.2.30 - 2014-07-28
+
+**Upgrading from 0.2.29**: No backwards incompatible changes.
+
+**IMPORTANT**: this is a quick bug-fix release to address a panic in `nsq_to_nsq` and
+`nsq_to_http`, see #425.
+
+New Features / Enhancements:
+
+ * #417 - `nsqadmin`/`nsqd`: expose TLS connection state
+ * #425 - `nsq_to_nsq`/`nsq_to_file`: display per-destination-address timings
+
+Bugs:
+
+ * #425 - `nsq_to_nsq`/`nsq_to_file`: fix shared mutable state panic
+
+### 0.2.29 - 2014-07-25
+
+**Upgrading from 0.2.28**: No backwards incompatible changes.
+
+This release includes a slew of new features and bug fixes, with contributions from 8
+members of the community, thanks!
+
+The most important new feature is authentication (the `AUTH` command for `nsqd`), added in #356.
+When `nsqd` is configured with an `--auth-http-address` it will require clients to send the `AUTH`
+command. The `AUTH` command body is opaque to `nsqd`, it simply passes it along to the configured
+auth daemon which responds with well formed JSON, indicating which topics/channels and properties
+on those entities are accessible to that client (rejecting the client if it accesses anything
+prohibited). For more details, see [the spec](http://nsq.io/clients/tcp_protocol_spec.html) or [the
+`nsqd` guide](http://nsq.io/components/nsqd.html#auth).
+
+Additionally, we've improved performance in a few areas. First, we refactored in-flight handling in
+`nsqd` to reduce garbage creation and improve baseline performance 6%. End-to-end processing
+latency calculations are also significantly faster, thanks to improvements in the
+[`perks`](https://github.com/bmizerany/perks/pulls/7) package.
+
+HTTP response formats have been improved (removing the redundant response wrapper) and cleaning up
+some of the endpoint namespaces. This change is backwards compatible. Clients wishing to move
+towards the new response format can either use the new endpoint names or send the following header:
+
+    Accept: application/vnd.nsq version=1.0
+
+Other changes including officially bumping the character limit for topic and channel names to 64
+(thanks @svmehta), making the `REQ` timeout limit configurable in `nsqd` (thanks @AlphaB), and
+compiling static asset dependencies into `nsqadmin` to simplify deployment (thanks @crossjam).
+
+Finally, `to_nsq` was added to the suite of bundled apps. It takes a stdin stream and publishes to
+`nsqd`, an extremely flexible solution (thanks @matryer)!
+
+As for bugs, they're mostly minor, see the pull requests referenced in the section below for
+details.
+
+New Features / Enhancements:
+
+ * #304 - apps: added `to_nsq` for piping stdin to NSQ (thanks @matryer)
+ * #406 - `nsqadmin`: embed external static asset dependencies (thanks @crossjam)
+ * #389 - apps: report app name and version via `user_agent`
+ * #378/#390 - `nsqd`: improve in-flight message handling (6% faster, GC reduction)
+ * #356/#370/#386 - `nsqd`: introduce `AUTH`
+ * #358 - increase topic/channel name max length to 64 (thanks @svmehta)
+ * #357 - remove internal `go-nsq` dependencies (GC reduction)
+ * #330/#366 - version HTTP endpoints, simplify response format
+ * #352 - `nsqd`: make `REQ` timeout limit configurable (thanks @AlphaB)
+ * #340 - `nsqd`: bump perks dependency (E2E performance improvement, see 25086e4)
+
+Bugs:
+
+ * #384 - `nsqd`: fix statsd GC time reporting
+ * #407 - `nsqd`: fix double `TOUCH` and use of client's configured msg timeout
+ * #392 - `nsqadmin`: fix HTTPS warning (thanks @juliangruber)
+ * #383 - `nsqlookupd`: fix race on last update timestamp
+ * #385 - `nsqd`: properly handle empty `FIN`
+ * #365 - `nsqd`: fix `IDENTIFY` `msg_timeout` response (thanks @visionmedia)
+ * #345 - `nsq_to_file`: set proper permissions on new directories (thanks @bschwartz)
+ * #338 - `nsqd`: fix windows diskqueue filenames (thanks @politician)
+
+### 0.2.28 - 2014-04-28
+
+**Upgrading from 0.2.27**: No backwards incompatible changes.  We've deprecated the `short_id`
+and `long_id` options in the `IDENTIFY` command in favor of `client_id` and `hostname`, which
+more accurately reflect the data typically used.
+
+This release includes a few important new features, in particular enhanced `nsqd`
+TLS support thanks to a big contribution by @chrisroberts.
+
+You can now *require* that clients negotiate TLS with `--tls-required` and you can configure a
+client certificate policy via `--tls-client-auth-policy` (`require` or `require-verify`):
+
+ * `require` - the client must offer a certificate, otherwise rejected
+ * `require-verify` - the client must offer a valid certificate according to the default CA or
+                      the chain specified by `--tls-root-ca-file`, otherwise rejected
+
+This can be used as a form of client authentication.
+
+Additionally, `nsqd` is now structured such that it is importable in other Go applications
+via `github.com/bitly/nsq/nsqd`, thanks to @kzvezdarov.
+
+Finally, thanks to @paddyforan, `nsq_to_file` can now archive *multiple* topics or 
+optionally archive *all* discovered topics (by specifying no `--topic` params
+and using `--lookupd-http-address`).
+
+New Features / Enhancements:
+
+ * #334 - `nsq_to_file` can archive many topics (thanks @paddyforan)
+ * #327 - add `nsqd` TLS client certificate verification policy, ability
+          to require TLS, and HTTPS support (thanks @chrisroberts)
+ * #325 - make `nsqd` importable (`github.com/bitly/nsq/nsqd`) (thanks @kzvezdarov)
+ * #321 - improve `IDENTIFY` options (replace `short_id` and `long_id` with
+          `client_id` and `hostname`)
+ * #319 - allow path separator in `nsq_to_file` filenames (thanks @jsocol)
+ * #324 - display memory depth and total depth in `nsq_stat`
+
+Bug Fixes:
+
+ * bitly/go-nsq#19 and bitly/go-nsq#29 - fix deadlocks on `nsq.Reader` connection close/exit, this
+                                         impacts the utilities packaged with the NSQ binary
+                                         distribution such as `nsq_to_file`, `nsq_to_http`,
+                                         `nsq_to_nsq` and `nsq_tail`.
+ * #329 - use heartbeat interval for write deadline
+ * #321/#326 - improve benchmarking tests
+ * #315/#318 - fix test data races / flakiness
+
+### 0.2.27 - 2014-02-17
+
+**Upgrading from 0.2.26**: No backwards incompatible changes.  We deprecated `--max-message-size`
+in favor of `--max-msg-size` for consistency with the rest of the flag names.
+
+IMPORTANT: this is another quick bug-fix release to address an issue in `nsqadmin` where templates
+were incompatible with older versions of Go (pre-1.2).
+
+ * #306 - fix `nsqadmin` template compatibility (and formatting)
+ * #310 - fix `nsqadmin` behavior when E2E stats are disabled
+ * #309 - fix `nsqadmin` `INVALID_ERROR` on node page tombstone link
+ * #311/#312 - fix `nsqd` client metadata race condition and test flakiness
+ * #314 - fix `nsqd` test races (run w/ `-race` and `GOMAXPROCS=4`) deprecate `--max-message-size`
+
 ### 0.2.26 - 2014-02-06
 
 **Upgrading from 0.2.25**: No backwards incompatible changes.
@@ -60,7 +196,7 @@ NOTE: we are now publishing additional binaries built against go1.2
 The most prominent addition is the tracking of end-to-end message processing percentiles. This
 measures the amount of time it's taking from `PUB` to `FIN` per topic/channel. The percentiles are
 configurable and, because there is *some* overhead in collecting this data, it can be turned off
-entirely. Please see [the section in the docs](http://bitly.github.io/nsq/components/nsqd.html) for
+entirely. Please see [the section in the docs](http://nsq.io/components/nsqd.html) for
 implementation details.
 
 Additionally, the utility apps received comprehensive support for all configurable reader options
