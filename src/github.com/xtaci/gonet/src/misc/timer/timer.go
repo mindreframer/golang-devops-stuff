@@ -17,9 +17,9 @@ const (
 )
 
 var (
-	_eventlist [TIMER_LEVEL]map[uint32]*_timer_event // 事件列表
+	_eventlist [TIMER_LEVEL]map[uint32]_timer_event // 事件列表
 
-	_eventqueue      map[uint32]*_timer_event // 事件添加队列
+	_eventqueue      map[uint32]_timer_event // 事件添加队列
 	_eventqueue_lock sync.Mutex
 
 	_timer_id uint32 // 内部事件编号
@@ -27,10 +27,10 @@ var (
 
 func init() {
 	for k := range _eventlist {
-		_eventlist[k] = make(map[uint32]*_timer_event)
+		_eventlist[k] = make(map[uint32]_timer_event)
 	}
 
-	_eventqueue = make(map[uint32]*_timer_event)
+	_eventqueue = make(map[uint32]_timer_event)
 
 	go _timer()
 }
@@ -49,19 +49,23 @@ func _timer() {
 		// 最小的时间间隔，处理为1s
 		_eventqueue_lock.Lock()
 		for k, v := range _eventqueue {
+			// 处理微小间隔
 			diff := v.Timeout - time.Now().Unix()
 			if diff <= 0 {
 				diff = 1
 			}
 
+			// 发到合适的框
 			for i := TIMER_LEVEL - 1; i >= 0; i-- {
 				if diff >= 1<<i {
 					_eventlist[i][k] = v
 					break
 				}
 			}
+
+			// 从队列中删除这个事件
+			delete(_eventqueue, k)
 		}
-		_eventqueue = make(map[uint32]*_timer_event)
 		_eventqueue_lock.Unlock()
 
 		// 检查事件触发
@@ -120,7 +124,7 @@ func _trigger(level uint) {
 // 添加一个定时，timeout为到期的Unix时间
 // id 是调用者定义的编号, 事件发生时，会把id发送到ch
 func Add(id int32, timeout int64, ch chan int32) {
-	event := &_timer_event{Id: id, CH: ch, Timeout: timeout}
+	event := _timer_event{Id: id, CH: ch, Timeout: timeout}
 
 	timer_id := atomic.AddUint32(&_timer_id, 1)
 	_eventqueue_lock.Lock()
