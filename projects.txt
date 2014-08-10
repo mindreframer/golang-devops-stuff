@@ -1,5 +1,6 @@
 https://github.com/abh/geodns.git
 https://github.com/abhishekkr/goshare.git
+https://github.com/ActiveState/tail
 https://github.com/adnaan/hamster.git
 https://github.com/apcera/gnatsd.git
 https://github.com/apcera/nats.git
@@ -77,4 +78,3 @@ https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/ActiveState/tail
