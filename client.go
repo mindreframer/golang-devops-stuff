@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"encoding/gob"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -288,35 +289,55 @@ func (c *gobClientCodec) Close() error {
 // DialHTTP connects to an HTTP RPC server at the specified network address
 // listening on the default HTTP RPC path.
 func DialHTTP(network, address string) (*Client, error) {
-	return DialHTTPPath(network, address, DefaultRPCPath)
+	return DialHTTPPath(network, address, DefaultRPCPath, nil)
 }
+
+type DialFunc func(network, address string) (net.Conn, error)
 
 // DialHTTPPath connects to an HTTP RPC server
 // at the specified network address and path.
-func DialHTTPPath(network, address, path string) (*Client, error) {
+func DialHTTPPath(network, address, path string, dial DialFunc) (*Client, error) {
+	if dial == nil {
+		dial = net.Dial
+	}
 	var err error
-	conn, err := net.Dial(network, address)
+	conn, err := dial(network, address)
 	if err != nil {
 		return nil, err
 	}
-	io.WriteString(conn, "CONNECT "+path+" HTTP/1.0\r\nAccept: application/vnd.flynn.rpc-hijack+gob\r\n\r\n")
+	client, err := NewHTTPClient(conn, path, nil)
+	if err != nil {
+		conn.Close()
+		return nil, &net.OpError{
+			Op:   "dial-http",
+			Net:  network + " " + address,
+			Addr: nil,
+			Err:  err,
+		}
+	}
+	return client, nil
+}
+
+func NewHTTPClient(conn io.ReadWriteCloser, path string, header http.Header) (*Client, error) {
+	if header == nil {
+		header = make(http.Header)
+	}
+	header.Set("Accept", "application/vnd.flynn.rpc-hijack+gob")
+
+	fmt.Fprintf(conn, "CONNECT %s HTTP/1.0\r\n", path)
+	header.Write(conn)
+	conn.Write([]byte("\r\n"))
 
 	// Require successful HTTP response
 	// before switching to RPC protocol.
 	resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: "CONNECT"})
-	if err == nil && resp.Status == connected {
-		return NewClient(conn), nil
+	if err != nil || resp.Status != connected {
+		if err == nil {
+			err = errors.New("unexpected HTTP response: " + resp.Status)
+		}
+		return nil, err
 	}
-	if err == nil {
-		err = errors.New("unexpected HTTP response: " + resp.Status)
-	}
-	conn.Close()
-	return nil, &net.OpError{
-		Op:   "dial-http",
-		Net:  network + " " + address,
-		Addr: nil,
-		Err:  err,
-	}
+	return NewClient(conn), nil
 }
 
 // Dial connects to an RPC server at the specified network address.
