@@ -6,12 +6,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/coreos/etcd/third_party/github.com/coreos/raft"
+	"github.com/coreos/etcd/third_party/github.com/goraft/raft"
 	"github.com/coreos/etcd/third_party/github.com/gorilla/mux"
 
 	etcdErr "github.com/coreos/etcd/error"
-	uhttp "github.com/coreos/etcd/pkg/http"
 	"github.com/coreos/etcd/log"
+	uhttp "github.com/coreos/etcd/pkg/http"
 	"github.com/coreos/etcd/store"
 )
 
@@ -150,15 +150,13 @@ func (ps *PeerServer) EtcdURLHttpHandler(w http.ResponseWriter, req *http.Reques
 // Response to the join request
 func (ps *PeerServer) JoinHttpHandler(w http.ResponseWriter, req *http.Request) {
 	command := &JoinCommand{}
-
-	err := uhttp.DecodeJsonRequest(req, command)
-	if err != nil {
+	if err := uhttp.DecodeJsonRequest(req, command); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
 	log.Debugf("Receive Join Request from %s", command.Name)
-	err = ps.server.Dispatch(command, w, req)
+	err := ps.server.Dispatch(command, w, req)
 
 	// Return status.
 	if err != nil {
@@ -186,6 +184,83 @@ func (ps *PeerServer) RemoveHttpHandler(w http.ResponseWriter, req *http.Request
 	log.Debugf("[recv] Remove Request [%s]", command.Name)
 
 	ps.server.Dispatch(command, w, req)
+}
+
+// Returns a JSON-encoded cluster configuration.
+func (ps *PeerServer) getClusterConfigHttpHandler(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ps.ClusterConfig())
+}
+
+// Updates the cluster configuration.
+func (ps *PeerServer) setClusterConfigHttpHandler(w http.ResponseWriter, req *http.Request) {
+	// Decode map.
+	m := make(map[string]interface{})
+	if err := json.NewDecoder(req.Body).Decode(&m); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Copy config and update fields passed in.
+	config := ps.ClusterConfig()
+	if activeSize, ok := m["activeSize"].(float64); ok {
+		config.ActiveSize = int(activeSize)
+	}
+	if removeDelay, ok := m["removeDelay"].(float64); ok {
+		config.RemoveDelay = removeDelay
+	}
+	if syncInterval, ok := m["syncInterval"].(float64); ok {
+		config.SyncInterval = syncInterval
+	}
+
+	// Issue command to update.
+	c := &SetClusterConfigCommand{Config: config}
+	log.Debugf("[recv] Update Cluster Config Request")
+	ps.server.Dispatch(c, w, req)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ps.ClusterConfig())
+}
+
+// Retrieves a list of peers and standbys.
+func (ps *PeerServer) getMachinesHttpHandler(w http.ResponseWriter, req *http.Request) {
+	machines := make([]*machineMessage, 0)
+	leader := ps.raftServer.Leader()
+	for _, name := range ps.registry.Names() {
+		if msg := ps.getMachineMessage(name, leader); msg != nil {
+			machines = append(machines, msg)
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(&machines)
+}
+
+// Retrieve single peer or standby.
+func (ps *PeerServer) getMachineHttpHandler(w http.ResponseWriter, req *http.Request) {
+	vars := mux.Vars(req)
+	m := ps.getMachineMessage(vars["name"], ps.raftServer.Leader())
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(m)
+}
+
+func (ps *PeerServer) getMachineMessage(name string, leader string) *machineMessage {
+	if !ps.registry.Exists(name) {
+		return nil
+	}
+
+	clientURL, _ := ps.registry.ClientURL(name)
+	peerURL, _ := ps.registry.PeerURL(name)
+	msg := &machineMessage{
+		Name:      name,
+		State:     raft.Follower,
+		ClientURL: clientURL,
+		PeerURL:   peerURL,
+	}
+	if name == leader {
+		msg.State = raft.Leader
+	}
+	return msg
 }
 
 // Response to the name request
@@ -232,4 +307,12 @@ func (ps *PeerServer) UpgradeHttpHandler(w http.ResponseWriter, req *http.Reques
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// machineMessage represents information about a peer or standby in the registry.
+type machineMessage struct {
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	ClientURL string `json:"clientURL"`
+	PeerURL   string `json:"peerURL"`
 }

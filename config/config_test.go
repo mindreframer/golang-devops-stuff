@@ -27,9 +27,11 @@ func TestConfigTOML(t *testing.T) {
 		max_result_buffer = 512
 		max_retry_attempts = 5
 		name = "test-name"
+		http_read_timeout = 2.34
 		snapshot = true
 		verbose = true
 		very_verbose = true
+		http_write_timeout = 1.23
 
 		[peer]
 		addr = "127.0.0.1:7002"
@@ -37,6 +39,11 @@ func TestConfigTOML(t *testing.T) {
 		cert_file = "/tmp/peer/file.cert"
 		key_file = "/tmp/peer/file.key"
 		bind_addr = "127.0.0.1:7003"
+
+		[cluster]
+		active_size = 5
+		remove_delay = 100.0
+		sync_interval = 10.0
 	`
 	c := New()
 	_, err := toml.Decode(content, &c)
@@ -47,11 +54,12 @@ func TestConfigTOML(t *testing.T) {
 	assert.Equal(t, c.CorsOrigins, []string{"*"}, "")
 	assert.Equal(t, c.DataDir, "/tmp/data", "")
 	assert.Equal(t, c.Discovery, "http://example.com/foobar", "")
+	assert.Equal(t, c.HTTPReadTimeout, 2.34, "")
+	assert.Equal(t, c.HTTPWriteTimeout, 1.23, "")
 	assert.Equal(t, c.KeyFile, "/tmp/file.key", "")
 	assert.Equal(t, c.BindAddr, "127.0.0.1:4003", "")
 	assert.Equal(t, c.Peers, []string{"coreos.com:4001", "coreos.com:4002"}, "")
 	assert.Equal(t, c.PeersFile, "/tmp/peers", "")
-	assert.Equal(t, c.MaxClusterSize, 10, "")
 	assert.Equal(t, c.MaxResultBuffer, 512, "")
 	assert.Equal(t, c.MaxRetryAttempts, 5, "")
 	assert.Equal(t, c.Name, "test-name", "")
@@ -63,6 +71,9 @@ func TestConfigTOML(t *testing.T) {
 	assert.Equal(t, c.Peer.CertFile, "/tmp/peer/file.cert", "")
 	assert.Equal(t, c.Peer.KeyFile, "/tmp/peer/file.key", "")
 	assert.Equal(t, c.Peer.BindAddr, "127.0.0.1:7003", "")
+	assert.Equal(t, c.Cluster.ActiveSize, 5, "")
+	assert.Equal(t, c.Cluster.RemoveDelay, 100.0, "")
+	assert.Equal(t, c.Cluster.SyncInterval, 10.0, "")
 }
 
 // Ensures that a configuration can be retrieved from environment variables.
@@ -73,6 +84,8 @@ func TestConfigEnv(t *testing.T) {
 	os.Setenv("ETCD_CORS", "localhost:4001,localhost:4002")
 	os.Setenv("ETCD_DATA_DIR", "/tmp/data")
 	os.Setenv("ETCD_DISCOVERY", "http://example.com/foobar")
+	os.Setenv("ETCD_HTTP_READ_TIMEOUT", "2.34")
+	os.Setenv("ETCD_HTTP_WRITE_TIMEOUT", "1.23")
 	os.Setenv("ETCD_KEY_FILE", "/tmp/file.key")
 	os.Setenv("ETCD_BIND_ADDR", "127.0.0.1:4003")
 	os.Setenv("ETCD_PEERS", "coreos.com:4001,coreos.com:4002")
@@ -89,6 +102,9 @@ func TestConfigEnv(t *testing.T) {
 	os.Setenv("ETCD_PEER_CERT_FILE", "/tmp/peer/file.cert")
 	os.Setenv("ETCD_PEER_KEY_FILE", "/tmp/peer/file.key")
 	os.Setenv("ETCD_PEER_BIND_ADDR", "127.0.0.1:7003")
+	os.Setenv("ETCD_CLUSTER_ACTIVE_SIZE", "5")
+	os.Setenv("ETCD_CLUSTER_REMOVE_DELAY", "100")
+	os.Setenv("ETCD_CLUSTER_SYNC_INTERVAL", "10")
 
 	c := New()
 	c.LoadEnv()
@@ -97,11 +113,12 @@ func TestConfigEnv(t *testing.T) {
 	assert.Equal(t, c.CorsOrigins, []string{"localhost:4001", "localhost:4002"}, "")
 	assert.Equal(t, c.DataDir, "/tmp/data", "")
 	assert.Equal(t, c.Discovery, "http://example.com/foobar", "")
+	assert.Equal(t, c.HTTPReadTimeout, 2.34, "")
+	assert.Equal(t, c.HTTPWriteTimeout, 1.23, "")
 	assert.Equal(t, c.KeyFile, "/tmp/file.key", "")
 	assert.Equal(t, c.BindAddr, "127.0.0.1:4003", "")
 	assert.Equal(t, c.Peers, []string{"coreos.com:4001", "coreos.com:4002"}, "")
 	assert.Equal(t, c.PeersFile, "/tmp/peers", "")
-	assert.Equal(t, c.MaxClusterSize, 10, "")
 	assert.Equal(t, c.MaxResultBuffer, 512, "")
 	assert.Equal(t, c.MaxRetryAttempts, 5, "")
 	assert.Equal(t, c.Name, "test-name", "")
@@ -113,6 +130,9 @@ func TestConfigEnv(t *testing.T) {
 	assert.Equal(t, c.Peer.CertFile, "/tmp/peer/file.cert", "")
 	assert.Equal(t, c.Peer.KeyFile, "/tmp/peer/file.key", "")
 	assert.Equal(t, c.Peer.BindAddr, "127.0.0.1:7003", "")
+	assert.Equal(t, c.Cluster.ActiveSize, 5, "")
+	assert.Equal(t, c.Cluster.RemoveDelay, 100.0, "")
+	assert.Equal(t, c.Cluster.SyncInterval, 10.0, "")
 
 	// Clear this as it will mess up other tests
 	os.Setenv("ETCD_DISCOVERY", "")
@@ -153,7 +173,7 @@ func TestConfigAbbreviatedForceFlag(t *testing.T) {
 	assert.True(t, c.Force)
 }
 
-// Ensures that a the advertised url can be parsed from the environment.
+// Ensures that the advertised url can be parsed from the environment.
 func TestConfigAddrEnv(t *testing.T) {
 	withEnv("ETCD_ADDR", "127.0.0.1:4002", func(c *Config) {
 		assert.Nil(t, c.LoadEnv(), "")
@@ -161,14 +181,14 @@ func TestConfigAddrEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the advertised flag can be parsed.
+// Ensures that the advertised flag can be parsed.
 func TestConfigAddrFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-addr", "127.0.0.1:4002"}), "")
 	assert.Equal(t, c.Addr, "127.0.0.1:4002", "")
 }
 
-// Ensures that a the CA file can be parsed from the environment.
+// Ensures that the CA file can be parsed from the environment.
 func TestConfigCAFileEnv(t *testing.T) {
 	withEnv("ETCD_CA_FILE", "/tmp/file.ca", func(c *Config) {
 		assert.Nil(t, c.LoadEnv(), "")
@@ -176,14 +196,14 @@ func TestConfigCAFileEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the CA file flag can be parsed.
+// Ensures that the CA file flag can be parsed.
 func TestConfigCAFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-ca-file", "/tmp/file.ca"}), "")
 	assert.Equal(t, c.CAFile, "/tmp/file.ca", "")
 }
 
-// Ensures that a the CA file can be parsed from the environment.
+// Ensures that the CA file can be parsed from the environment.
 func TestConfigCertFileEnv(t *testing.T) {
 	withEnv("ETCD_CERT_FILE", "/tmp/file.cert", func(c *Config) {
 		assert.Nil(t, c.LoadEnv(), "")
@@ -191,14 +211,14 @@ func TestConfigCertFileEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Cert file flag can be parsed.
+// Ensures that the Cert file flag can be parsed.
 func TestConfigCertFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-cert-file", "/tmp/file.cert"}), "")
 	assert.Equal(t, c.CertFile, "/tmp/file.cert", "")
 }
 
-// Ensures that a the Key file can be parsed from the environment.
+// Ensures that the Key file can be parsed from the environment.
 func TestConfigKeyFileEnv(t *testing.T) {
 	withEnv("ETCD_KEY_FILE", "/tmp/file.key", func(c *Config) {
 		assert.Nil(t, c.LoadEnv(), "")
@@ -206,14 +226,14 @@ func TestConfigKeyFileEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Key file flag can be parsed.
+// Ensures that the Key file flag can be parsed.
 func TestConfigKeyFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-key-file", "/tmp/file.key"}), "")
 	assert.Equal(t, c.KeyFile, "/tmp/file.key", "")
 }
 
-// Ensures that a the Listen Host can be parsed from the environment.
+// Ensures that the Listen Host can be parsed from the environment.
 func TestConfigBindAddrEnv(t *testing.T) {
 	withEnv("ETCD_BIND_ADDR", "127.0.0.1:4003", func(c *Config) {
 		assert.Nil(t, c.LoadEnv(), "")
@@ -221,14 +241,14 @@ func TestConfigBindAddrEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Listen Host file flag can be parsed.
+// Ensures that the Listen Host file flag can be parsed.
 func TestConfigBindAddrFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-bind-addr", "127.0.0.1:4003"}), "")
 	assert.Equal(t, c.BindAddr, "127.0.0.1:4003", "")
 }
 
-// Ensures that a the Listen Host port overrides the advertised port
+// Ensures that the Listen Host port overrides the advertised port
 func TestConfigBindAddrOverride(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-addr", "127.0.0.1:4009", "-bind-addr", "127.0.0.1:4010"}), "")
@@ -236,7 +256,23 @@ func TestConfigBindAddrOverride(t *testing.T) {
 	assert.Equal(t, c.BindAddr, "127.0.0.1:4010", "")
 }
 
-// Ensures that a the Listen Host inherits its port from the advertised addr
+// Ensures that the Listen Host port overrides the advertised port
+func TestConfigBindIPv6AddrOverride(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-addr", "[::1]:4009", "-bind-addr", "[::1]:4010"}), "")
+	assert.Nil(t, c.Sanitize())
+	assert.Equal(t, c.BindAddr, "[::1]:4010", "")
+}
+
+// Ensures that the Listen Host port overrides the advertised port
+func TestConfigBindIPv6WithZoneAddrOverride(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-addr", "[::1%25lo]:4009", "-bind-addr", "[::1%25lo]:4010"}), "")
+	assert.Nil(t, c.Sanitize())
+	assert.Equal(t, c.BindAddr, "[::1%25lo]:4010", "")
+}
+
+// Ensures that the Listen Host inherits its port from the advertised addr
 func TestConfigBindAddrInheritPort(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-addr", "127.0.0.1:4009", "-bind-addr", "127.0.0.1"}), "")
@@ -244,10 +280,33 @@ func TestConfigBindAddrInheritPort(t *testing.T) {
 	assert.Equal(t, c.BindAddr, "127.0.0.1:4009", "")
 }
 
+// Ensures that the Listen Host inherits its port from the advertised addr
+func TestConfigBindIPv6AddrInheritPort(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-addr", "[::1]:4009", "-bind-addr", "::1"}), "")
+	assert.Nil(t, c.Sanitize())
+	assert.Equal(t, c.BindAddr, "[::1]:4009", "")
+}
+
+// Ensures that the Listen Host inherits its port from the advertised addr
+func TestConfigBindIPv6WithZoneAddrInheritPort(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-addr", "[::1%25lo]:4009", "-bind-addr", "::1%25lo"}), "")
+	assert.Nil(t, c.Sanitize())
+	assert.Equal(t, c.BindAddr, "[::1%25lo]:4009", "")
+}
+
 // Ensures that a port only argument errors out
 func TestConfigBindAddrErrorOnNoHost(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-addr", "127.0.0.1:4009", "-bind-addr", ":4010"}), "")
+	assert.Error(t, c.Sanitize())
+}
+
+// Ensures that a bad IPv6 address will raise an error
+func TestConfigBindAddrErrorOnBadIPv6Addr(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-addr", "[::1%lo]:4009"}), "")
 	assert.Error(t, c.Sanitize())
 }
 
@@ -259,7 +318,7 @@ func TestConfigPeersEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Peers flag can be parsed.
+// Ensures that the Peers flag can be parsed.
 func TestConfigPeersFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peers", "coreos.com:4001,coreos.com:4002"}), "")
@@ -274,26 +333,11 @@ func TestConfigPeersFileEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Peers File flag can be parsed.
+// Ensures that the Peers File flag can be parsed.
 func TestConfigPeersFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peers-file", "/tmp/peers"}), "")
 	assert.Equal(t, c.PeersFile, "/tmp/peers", "")
-}
-
-// Ensures that the Max Cluster Size can be parsed from the environment.
-func TestConfigMaxClusterSizeEnv(t *testing.T) {
-	withEnv("ETCD_MAX_CLUSTER_SIZE", "5", func(c *Config) {
-		assert.Nil(t, c.LoadEnv(), "")
-		assert.Equal(t, c.MaxClusterSize, 5, "")
-	})
-}
-
-// Ensures that a the Max Cluster Size flag can be parsed.
-func TestConfigMaxClusterSizeFlag(t *testing.T) {
-	c := New()
-	assert.Nil(t, c.LoadFlags([]string{"-max-cluster-size", "5"}), "")
-	assert.Equal(t, c.MaxClusterSize, 5, "")
 }
 
 // Ensures that the Max Result Buffer can be parsed from the environment.
@@ -304,7 +348,7 @@ func TestConfigMaxResultBufferEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Max Result Buffer flag can be parsed.
+// Ensures that the Max Result Buffer flag can be parsed.
 func TestConfigMaxResultBufferFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-max-result-buffer", "512"}), "")
@@ -319,7 +363,7 @@ func TestConfigMaxRetryAttemptsEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Max Retry Attempts flag can be parsed.
+// Ensures that the Max Retry Attempts flag can be parsed.
 func TestConfigMaxRetryAttemptsFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-max-retry-attempts", "10"}), "")
@@ -334,7 +378,7 @@ func TestConfigNameEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Name flag can be parsed.
+// Ensures that the Name flag can be parsed.
 func TestConfigNameFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-name", "test-name"}), "")
@@ -367,7 +411,7 @@ func TestConfigSnapshotEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Snapshot flag can be parsed.
+// Ensures that the Snapshot flag can be parsed.
 func TestConfigSnapshotFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-snapshot"}), "")
@@ -382,7 +426,7 @@ func TestConfigVerboseEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Verbose flag can be parsed.
+// Ensures that the Verbose flag can be parsed.
 func TestConfigVerboseFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-v"}), "")
@@ -397,7 +441,7 @@ func TestConfigVeryVerboseEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Very Verbose flag can be parsed.
+// Ensures that the Very Verbose flag can be parsed.
 func TestConfigVeryVerboseFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-vv"}), "")
@@ -412,7 +456,7 @@ func TestConfigPeerAddrEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Peer Advertised URL flag can be parsed.
+// Ensures that the Peer Advertised URL flag can be parsed.
 func TestConfigPeerAddrFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peer-addr", "localhost:7002"}), "")
@@ -427,7 +471,7 @@ func TestConfigPeerCAFileEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Peer CA file flag can be parsed.
+// Ensures that the Peer CA file flag can be parsed.
 func TestConfigPeerCAFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peer-ca-file", "/tmp/peer/file.ca"}), "")
@@ -442,7 +486,7 @@ func TestConfigPeerCertFileEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Cert file flag can be parsed.
+// Ensures that the Cert file flag can be parsed.
 func TestConfigPeerCertFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peer-cert-file", "/tmp/peer/file.cert"}), "")
@@ -457,7 +501,7 @@ func TestConfigPeerKeyFileEnv(t *testing.T) {
 	})
 }
 
-// Ensures that a the Peer Key file flag can be parsed.
+// Ensures that the Peer Key file flag can be parsed.
 func TestConfigPeerKeyFileFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peer-key-file", "/tmp/peer/file.key"}), "")
@@ -480,11 +524,49 @@ func TestConfigBadFlag(t *testing.T) {
 	assert.Equal(t, err.Error(), `flag provided but not defined: -no-such-flag`)
 }
 
-// Ensures that a the Peer Listen Host file flag can be parsed.
+// Ensures that the Peer Listen Host file flag can be parsed.
 func TestConfigPeerBindAddrFlag(t *testing.T) {
 	c := New()
 	assert.Nil(t, c.LoadFlags([]string{"-peer-bind-addr", "127.0.0.1:4003"}), "")
 	assert.Equal(t, c.Peer.BindAddr, "127.0.0.1:4003", "")
+}
+
+// Ensures that the cluster active size can be parsed from the environment.
+func TestConfigClusterActiveSizeEnv(t *testing.T) {
+	withEnv("ETCD_CLUSTER_ACTIVE_SIZE", "5", func(c *Config) {
+		assert.Nil(t, c.LoadEnv(), "")
+		assert.Equal(t, c.Cluster.ActiveSize, 5, "")
+	})
+}
+
+// Ensures that the cluster active size flag can be parsed.
+func TestConfigClusterActiveSizeFlag(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-cluster-active-size", "5"}), "")
+	assert.Equal(t, c.Cluster.ActiveSize, 5, "")
+}
+
+// Ensures that the cluster remove delay can be parsed from the environment.
+func TestConfigClusterRemoveDelayEnv(t *testing.T) {
+	withEnv("ETCD_CLUSTER_REMOVE_DELAY", "100", func(c *Config) {
+		assert.Nil(t, c.LoadEnv(), "")
+		assert.Equal(t, c.Cluster.RemoveDelay, 100.0, "")
+	})
+}
+
+// Ensures that the cluster remove delay flag can be parsed.
+func TestConfigClusterRemoveDelayFlag(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-cluster-remove-delay", "100"}), "")
+	assert.Equal(t, c.Cluster.RemoveDelay, 100.0, "")
+}
+
+func TestConfigClusterSyncIntervalFlag(t *testing.T) {
+	c := New()
+	assert.Nil(t, c.LoadFlags([]string{"-http-read-timeout", "2.34"}), "")
+	assert.Equal(t, c.HTTPReadTimeout, 2.34, "")
+	assert.Nil(t, c.LoadFlags([]string{"-http-write-timeout", "1.23"}), "")
+	assert.Equal(t, c.HTTPWriteTimeout, 1.23, "")
 }
 
 // Ensures that a system config field is overridden by a custom config field.
@@ -496,7 +578,7 @@ func TestConfigCustomConfigOverrideSystemConfig(t *testing.T) {
 			c := New()
 			c.SystemPath = p1
 			assert.Nil(t, c.Load([]string{"-config", p2}), "")
-			assert.Equal(t, c.Addr, "http://127.0.0.1:6000", "")
+			assert.Equal(t, c.Addr, "127.0.0.1:6000", "")
 		})
 	})
 }
@@ -511,7 +593,7 @@ func TestConfigEnvVarOverrideCustomConfig(t *testing.T) {
 		c := New()
 		c.SystemPath = ""
 		assert.Nil(t, c.Load([]string{"-config", path}), "")
-		assert.Equal(t, c.Peer.Addr, "http://127.0.0.1:8000", "")
+		assert.Equal(t, c.Peer.Addr, "127.0.0.1:8000", "")
 	})
 }
 
@@ -523,7 +605,7 @@ func TestConfigCLIArgsOverrideEnvVar(t *testing.T) {
 	c := New()
 	c.SystemPath = ""
 	assert.Nil(t, c.Load([]string{"-addr", "127.0.0.1:2000"}), "")
-	assert.Equal(t, c.Addr, "http://127.0.0.1:2000", "")
+	assert.Equal(t, c.Addr, "127.0.0.1:2000", "")
 }
 
 //--------------------------------------
@@ -598,26 +680,6 @@ func TestConfigDeprecatedPeersFileFlag(t *testing.T) {
 		assert.Equal(t, c.PeersFile, "/tmp/machines", "")
 	})
 	assert.Equal(t, stderr, "[deprecated] use -peers-file, not -CF\n", "")
-}
-
-func TestConfigDeprecatedMaxClusterSizeFlag(t *testing.T) {
-	_, stderr := capture(func() {
-		c := New()
-		err := c.LoadFlags([]string{"-maxsize", "5"})
-		assert.NoError(t, err)
-		assert.Equal(t, c.MaxClusterSize, 5, "")
-	})
-	assert.Equal(t, stderr, "[deprecated] use -max-cluster-size, not -maxsize\n", "")
-}
-
-func TestConfigDeprecatedMaxResultBufferFlag(t *testing.T) {
-	_, stderr := capture(func() {
-		c := New()
-		err := c.LoadFlags([]string{"-m", "512"})
-		assert.NoError(t, err)
-		assert.Equal(t, c.MaxResultBuffer, 512, "")
-	})
-	assert.Equal(t, stderr, "[deprecated] use -max-result-buffer, not -m\n", "")
 }
 
 func TestConfigDeprecatedMaxRetryAttemptsFlag(t *testing.T) {

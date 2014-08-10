@@ -54,11 +54,16 @@ type CORSHandler struct {
 func (h *CORSHandler) addHeader(w http.ResponseWriter, origin string) {
 	w.Header().Add("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
 	w.Header().Add("Access-Control-Allow-Origin", origin)
+	w.Header().Add("Access-Control-Allow-Headers", "accept, content-type")
 }
 
-// ServeHTTP adds the correct CORS headers based on the origin and returns immediatly
+// ServeHTTP adds the correct CORS headers based on the origin and returns immediately
 // with a 200 OK if the method is OPTIONS.
 func (h *CORSHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	// It is important to flush before leaving the goroutine.
+	// Or it may miss the latest info written.
+	defer w.(http.Flusher).Flush()
+
 	// Write CORS header.
 	if h.Info.OriginAllowed("*") {
 		h.addHeader(w, "*")

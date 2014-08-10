@@ -7,19 +7,21 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/coreos/etcd/third_party/github.com/stretchr/testify/assert"
 
-	etcdtest "github.com/coreos/etcd/tests"
 	"github.com/coreos/etcd/server"
+	etcdtest "github.com/coreos/etcd/tests"
 	goetcd "github.com/coreos/etcd/third_party/github.com/coreos/go-etcd/etcd"
 )
 
 type garbageHandler struct {
 	t       *testing.T
 	success bool
+	sync.Mutex
 }
 
 func (g *garbageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -27,6 +29,9 @@ func (g *garbageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.String() != "/v2/keys/_etcd/registry/1/node1" {
 		g.t.Fatalf("Unexpected web request")
 	}
+	g.Lock()
+	defer g.Unlock()
+
 	g.success = true
 }
 
@@ -51,6 +56,8 @@ func TestDiscoveryDownNoBackupPeers(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 
+	g.Lock()
+	defer g.Unlock()
 	if !g.success {
 		t.Fatal("Discovery server never called")
 	}
@@ -65,7 +72,7 @@ func TestDiscoveryDownWithBackupPeers(t *testing.T) {
 		defer ts.Close()
 
 		discover := ts.URL + "/v2/keys/_etcd/registry/1"
-		u, ok := s.PeerURL("ETCDTEST")
+		u, ok := s.PeerHost("ETCDTEST")
 		if !ok {
 			t.Fatalf("Couldn't find the URL")
 		}
@@ -77,6 +84,84 @@ func TestDiscoveryDownWithBackupPeers(t *testing.T) {
 		defer stopServer(proc)
 
 		client := http.Client{}
+		err = assertServerFunctional(client, "http")
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		g.Lock()
+		defer g.Unlock()
+		if !g.success {
+			t.Fatal("Discovery server never called")
+		}
+	})
+}
+
+// TestDiscoveryNoWithBackupPeers ensures that etcd runs if it is started with
+// no discovery URL and a peer list.
+func TestDiscoveryNoWithBackupPeers(t *testing.T) {
+	etcdtest.RunServer(func(s *server.Server) {
+		u, ok := s.PeerHost("ETCDTEST")
+		if !ok {
+			t.Fatalf("Couldn't find the URL")
+		}
+		proc, err := startServer([]string{"-peers", u})
+
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+		defer stopServer(proc)
+
+		client := http.Client{}
+		err = assertServerFunctional(client, "http")
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+	})
+}
+
+// TestDiscoveryDownNoBackupPeersWithDataDir ensures that etcd runs if it is
+// started with a bad discovery URL, no backups and valid data dir.
+func TestDiscoveryDownNoBackupPeersWithDataDir(t *testing.T) {
+	etcdtest.RunServer(func(s *server.Server) {
+		u, ok := s.PeerHost("ETCDTEST")
+		if !ok {
+			t.Fatalf("Couldn't find the URL")
+		}
+
+		// run etcd and connect to ETCDTEST server
+		proc, err := startServer([]string{"-peers", u})
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		// check it runs well
+		client := http.Client{}
+		err = assertServerFunctional(client, "http")
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		// stop etcd, and leave valid data dir for later usage
+		stopServer(proc)
+
+		g := garbageHandler{t: t}
+		ts := httptest.NewServer(&g)
+		defer ts.Close()
+
+		discover := ts.URL + "/v2/keys/_etcd/registry/1"
+		// connect to ETCDTEST server again with previous data dir
+		proc, err = startServerWithDataDir([]string{"-discovery", discover})
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+		defer stopServer(proc)
+
+		// TODO(yichengq): it needs some time to do leader election
+		// improve to get rid of it
+		time.Sleep(1 * time.Second)
+
+		client = http.Client{}
 		err = assertServerFunctional(client, "http")
 		if err != nil {
 			t.Fatal(err.Error())
@@ -216,9 +301,55 @@ func TestDiscoverySecondPeerUp(t *testing.T) {
 	})
 }
 
+// TestDiscoveryRestart ensures that a discovery cluster could be restarted.
+func TestDiscoveryRestart(t *testing.T) {
+	etcdtest.RunServer(func(s *server.Server) {
+		proc, err := startServer([]string{"-discovery", s.URL() + "/v2/keys/_etcd/registry/4"})
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		client := http.Client{}
+		err = assertServerFunctional(client, "http")
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		proc2, err := startServer2([]string{"-discovery", s.URL() + "/v2/keys/_etcd/registry/4", "-addr", "127.0.0.1:4002", "-peer-addr", "127.0.0.1:7002"})
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		err = assertServerFunctional(client, "http")
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		stopServer(proc)
+		stopServer(proc2)
+
+		proc, err = startServerWithDataDir([]string{"-discovery", s.URL() + "/v2/keys/_etcd/registry/4"})
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+		proc2, err = startServer2WithDataDir([]string{"-discovery", s.URL() + "/v2/keys/_etcd/registry/4", "-addr", "127.0.0.1:4002", "-peer-addr", "127.0.0.1:7002"})
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		err = assertServerFunctional(client, "http")
+		if err != nil {
+			t.Fatal(err.Error())
+		}
+
+		stopServer(proc)
+		stopServer(proc2)
+	})
+}
+
 func assertServerNotUp(client http.Client, scheme string) error {
 	path := fmt.Sprintf("%s://127.0.0.1:4001/v2/keys/foo", scheme)
-	fields := url.Values(map[string][]string{"value": []string{"bar"}})
+	fields := url.Values(map[string][]string{"value": {"bar"}})
 
 	for i := 0; i < 10; i++ {
 		time.Sleep(1 * time.Second)

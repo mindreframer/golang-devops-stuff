@@ -24,7 +24,7 @@ func TestV2SetKey(t *testing.T) {
 		assert.Equal(t, resp.StatusCode, http.StatusCreated)
 		body := tests.ReadBody(resp)
 		assert.Nil(t, err, "")
-		assert.Equal(t, string(body), `{"action":"set","node":{"key":"/foo/bar","value":"XXX","modifiedIndex":2,"createdIndex":2}}`, "")
+		assert.Equal(t, string(body), `{"action":"set","node":{"key":"/foo/bar","value":"XXX","modifiedIndex":3,"createdIndex":3}}`, "")
 	})
 }
 
@@ -38,7 +38,7 @@ func TestV2SetDirectory(t *testing.T) {
 		assert.Equal(t, resp.StatusCode, http.StatusCreated)
 		body := tests.ReadBody(resp)
 		assert.Nil(t, err, "")
-		assert.Equal(t, string(body), `{"action":"set","node":{"key":"/foo","dir":true,"modifiedIndex":2,"createdIndex":2}}`, "")
+		assert.Equal(t, string(body), `{"action":"set","node":{"key":"/foo","dir":true,"modifiedIndex":3,"createdIndex":3}}`, "")
 	})
 }
 
@@ -194,6 +194,42 @@ func TestV2UpdateKeyFailOnMissingDirectory(t *testing.T) {
 	})
 }
 
+// Ensures that a key could update TTL.
+//
+//   $ curl -X PUT localhost:4001/v2/keys/foo -d value=XXX
+//   $ curl -X PUT localhost:4001/v2/keys/foo -d value=XXX -d ttl=1000 -d prevExist=true
+//   $ curl -X PUT localhost:4001/v2/keys/foo -d value=XXX -d ttl= -d prevExist=true
+//
+func TestV2UpdateKeySuccessWithTTL(t *testing.T) {
+	tests.RunServer(func(s *server.Server) {
+		v := url.Values{}
+		v.Set("value", "XXX")
+		resp, _ := tests.PutForm(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo"), v)
+		assert.Equal(t, resp.StatusCode, http.StatusCreated)
+		node := (tests.ReadBodyJSON(resp)["node"]).(map[string]interface{})
+		createdIndex := node["createdIndex"]
+
+		v.Set("ttl", "1000")
+		v.Set("prevExist", "true")
+		resp, _ = tests.PutForm(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo"), v)
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+		node = (tests.ReadBodyJSON(resp)["node"]).(map[string]interface{})
+		assert.Equal(t, node["value"], "XXX", "")
+		assert.Equal(t, node["ttl"], 1000, "")
+		assert.NotEqual(t, node["expiration"], "", "")
+		assert.Equal(t, node["createdIndex"], createdIndex, "")
+
+		v.Del("ttl")
+		resp, _ = tests.PutForm(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo"), v)
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
+		node = (tests.ReadBodyJSON(resp)["node"]).(map[string]interface{})
+		assert.Equal(t, node["value"], "XXX", "")
+		assert.Equal(t, node["ttl"], nil, "")
+		assert.Equal(t, node["expiration"], nil, "")
+		assert.Equal(t, node["createdIndex"], createdIndex, "")
+	})
+}
+
 // Ensures that a key is set only if the previous index matches.
 //
 //   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=XXX
@@ -208,14 +244,14 @@ func TestV2SetKeyCASOnIndexSuccess(t *testing.T) {
 		assert.Equal(t, resp.StatusCode, http.StatusCreated)
 		tests.ReadBody(resp)
 		v.Set("value", "YYY")
-		v.Set("prevIndex", "2")
+		v.Set("prevIndex", "3")
 		resp, _ = tests.PutForm(fullURL, v)
 		assert.Equal(t, resp.StatusCode, http.StatusOK)
 		body := tests.ReadBodyJSON(resp)
 		assert.Equal(t, body["action"], "compareAndSwap", "")
 		node := body["node"].(map[string]interface{})
 		assert.Equal(t, node["value"], "YYY", "")
-		assert.Equal(t, node["modifiedIndex"], 3, "")
+		assert.Equal(t, node["modifiedIndex"], 4, "")
 	})
 }
 
@@ -239,8 +275,8 @@ func TestV2SetKeyCASOnIndexFail(t *testing.T) {
 		body := tests.ReadBodyJSON(resp)
 		assert.Equal(t, body["errorCode"], 101, "")
 		assert.Equal(t, body["message"], "Compare failed", "")
-		assert.Equal(t, body["cause"], "[ != XXX] [10 != 2]", "")
-		assert.Equal(t, body["index"], 2, "")
+		assert.Equal(t, body["cause"], "[10 != 3]", "")
+		assert.Equal(t, body["index"], 3, "")
 	})
 }
 
@@ -283,7 +319,7 @@ func TestV2SetKeyCASOnValueSuccess(t *testing.T) {
 		assert.Equal(t, body["action"], "compareAndSwap", "")
 		node := body["node"].(map[string]interface{})
 		assert.Equal(t, node["value"], "YYY", "")
-		assert.Equal(t, node["modifiedIndex"], 3, "")
+		assert.Equal(t, node["modifiedIndex"], 4, "")
 	})
 }
 
@@ -307,8 +343,8 @@ func TestV2SetKeyCASOnValueFail(t *testing.T) {
 		body := tests.ReadBodyJSON(resp)
 		assert.Equal(t, body["errorCode"], 101, "")
 		assert.Equal(t, body["message"], "Compare failed", "")
-		assert.Equal(t, body["cause"], "[AAA != XXX] [0 != 2]", "")
-		assert.Equal(t, body["index"], 2, "")
+		assert.Equal(t, body["cause"], "[AAA != XXX]", "")
+		assert.Equal(t, body["index"], 3, "")
 	})
 }
 
@@ -327,5 +363,98 @@ func TestV2SetKeyCASWithMissingValueFails(t *testing.T) {
 		assert.Equal(t, body["errorCode"], 201, "")
 		assert.Equal(t, body["message"], "PrevValue is Required in POST form", "")
 		assert.Equal(t, body["cause"], "CompareAndSwap", "")
+	})
+}
+
+// Ensures that a key is not set if both previous value and index do not match.
+//
+//   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=XXX
+//   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=YYY -d prevValue=AAA -d prevIndex=4
+//
+func TestV2SetKeyCASOnValueAndIndexFail(t *testing.T) {
+	tests.RunServer(func(s *server.Server) {
+		v := url.Values{}
+		v.Set("value", "XXX")
+		fullURL := fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo/bar")
+		resp, _ := tests.PutForm(fullURL, v)
+		assert.Equal(t, resp.StatusCode, http.StatusCreated)
+		tests.ReadBody(resp)
+		v.Set("value", "YYY")
+		v.Set("prevValue", "AAA")
+		v.Set("prevIndex", "4")
+		resp, _ = tests.PutForm(fullURL, v)
+		assert.Equal(t, resp.StatusCode, http.StatusPreconditionFailed)
+		body := tests.ReadBodyJSON(resp)
+		assert.Equal(t, body["errorCode"], 101, "")
+		assert.Equal(t, body["message"], "Compare failed", "")
+		assert.Equal(t, body["cause"], "[AAA != XXX] [4 != 3]", "")
+		assert.Equal(t, body["index"], 3, "")
+	})
+}
+
+// Ensures that a key is not set if previous value match but index does not.
+//
+//   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=XXX
+//   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=YYY -d prevValue=XXX -d prevIndex=4
+//
+func TestV2SetKeyCASOnValueMatchAndIndexFail(t *testing.T) {
+	tests.RunServer(func(s *server.Server) {
+		v := url.Values{}
+		v.Set("value", "XXX")
+		fullURL := fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo/bar")
+		resp, _ := tests.PutForm(fullURL, v)
+		assert.Equal(t, resp.StatusCode, http.StatusCreated)
+		tests.ReadBody(resp)
+		v.Set("value", "YYY")
+		v.Set("prevValue", "XXX")
+		v.Set("prevIndex", "4")
+		resp, _ = tests.PutForm(fullURL, v)
+		assert.Equal(t, resp.StatusCode, http.StatusPreconditionFailed)
+		body := tests.ReadBodyJSON(resp)
+		assert.Equal(t, body["errorCode"], 101, "")
+		assert.Equal(t, body["message"], "Compare failed", "")
+		assert.Equal(t, body["cause"], "[4 != 3]", "")
+		assert.Equal(t, body["index"], 3, "")
+	})
+}
+
+// Ensures that a key is not set if previous index matches but value does not.
+//
+//   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=XXX
+//   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=YYY -d prevValue=AAA -d prevIndex=3
+//
+func TestV2SetKeyCASOnIndexMatchAndValueFail(t *testing.T) {
+	tests.RunServer(func(s *server.Server) {
+		v := url.Values{}
+		v.Set("value", "XXX")
+		fullURL := fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo/bar")
+		resp, _ := tests.PutForm(fullURL, v)
+		assert.Equal(t, resp.StatusCode, http.StatusCreated)
+		tests.ReadBody(resp)
+		v.Set("value", "YYY")
+		v.Set("prevValue", "AAA")
+		v.Set("prevIndex", "3")
+		resp, _ = tests.PutForm(fullURL, v)
+		assert.Equal(t, resp.StatusCode, http.StatusPreconditionFailed)
+		body := tests.ReadBodyJSON(resp)
+		assert.Equal(t, body["errorCode"], 101, "")
+		assert.Equal(t, body["message"], "Compare failed", "")
+		assert.Equal(t, body["cause"], "[AAA != XXX]", "")
+		assert.Equal(t, body["index"], 3, "")
+	})
+}
+
+// Ensure that we can set an empty value
+//
+//   $ curl -X PUT localhost:4001/v2/keys/foo/bar -d value=
+//
+func TestV2SetKeyCASWithEmptyValueSuccess(t *testing.T) {
+	tests.RunServer(func(s *server.Server) {
+		v := url.Values{}
+		v.Set("value", "")
+		resp, _ := tests.PutForm(fmt.Sprintf("%s%s", s.URL(), "/v2/keys/foo/bar"), v)
+		assert.Equal(t, resp.StatusCode, http.StatusCreated)
+		body := tests.ReadBody(resp)
+		assert.Equal(t, string(body), `{"action":"set","node":{"key":"/foo/bar","value":"","modifiedIndex":3,"createdIndex":3}}`)
 	})
 }
