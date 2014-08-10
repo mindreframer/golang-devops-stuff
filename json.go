@@ -1,6 +1,10 @@
 package metrics
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"io"
+	"time"
+)
 
 // MarshalJSON returns a byte slice containing a JSON representation of all
 // the metrics in the Registry.
@@ -13,9 +17,14 @@ func (r StandardRegistry) MarshalJSON() ([]byte, error) {
 			values["count"] = metric.Count()
 		case Gauge:
 			values["value"] = metric.Value()
+		case GaugeFloat64:
+			values["value"] = metric.Value()
 		case Healthcheck:
+			values["error"] = nil
 			metric.Check()
-			values["error"] = metric.Error().Error()
+			if err := metric.Error(); nil != err {
+				values["error"] = metric.Error().Error()
+			}
 		case Histogram:
 			h := metric.Snapshot()
 			ps := h.Percentiles([]float64{0.5, 0.75, 0.95, 0.99, 0.999})
@@ -57,4 +66,18 @@ func (r StandardRegistry) MarshalJSON() ([]byte, error) {
 		data[name] = values
 	})
 	return json.Marshal(data)
+}
+
+// WriteJSON writes metrics from the given registry  periodically to the
+// specified io.Writer as JSON.
+func WriteJSON(r Registry, d time.Duration, w io.Writer) {
+	for _ = range time.Tick(d) {
+		WriteJSONOnce(r, w)
+	}
+}
+
+// WriteJSONOnce writes metrics from the given registry to the specified
+// io.Writer as JSON.
+func WriteJSONOnce(r Registry, w io.Writer) {
+	json.NewEncoder(w).Encode(r)
 }

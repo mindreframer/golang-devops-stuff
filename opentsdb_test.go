@@ -5,18 +5,18 @@ import (
 	"time"
 )
 
-func ExampleGraphite() {
+func ExampleOpenTSDB() {
 	addr, _ := net.ResolveTCPAddr("net", ":2003")
-	go Graphite(DefaultRegistry, 1*time.Second, "some.prefix", addr)
+	go OpenTSDB(DefaultRegistry, 1*time.Second, "some.prefix", addr)
 }
 
-func ExampleGraphiteWithConfig() {
+func ExampleOpenTSDBWithConfig() {
 	addr, _ := net.ResolveTCPAddr("net", ":2003")
-	go GraphiteWithConfig(GraphiteConfig{
+	go OpenTSDBWithConfig(OpenTSDBConfig{
 		Addr:          addr,
 		Registry:      DefaultRegistry,
 		FlushInterval: 1 * time.Second,
 		DurationUnit:  time.Millisecond,
-		Percentiles: []float64{ 0.5, 0.75, 0.99, 0.999 },
 	})
 }
+

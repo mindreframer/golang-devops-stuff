@@ -11,13 +11,15 @@ import (
 // Output each metric in the given registry to syslog periodically using
 // the given syslogger.
 func Syslog(r Registry, d time.Duration, w *syslog.Writer) {
-	for {
+	for _ = range time.Tick(d) {
 		r.Each(func(name string, i interface{}) {
 			switch metric := i.(type) {
 			case Counter:
 				w.Info(fmt.Sprintf("counter %s: count: %d", name, metric.Count()))
 			case Gauge:
 				w.Info(fmt.Sprintf("gauge %s: value: %d", name, metric.Value()))
+			case GaugeFloat64:
+				w.Info(fmt.Sprintf("gauge %s: value: %f", name, metric.Value()))
 			case Healthcheck:
 				metric.Check()
 				w.Info(fmt.Sprintf("healthcheck %s: error: %v", name, metric.Error()))
@@ -72,6 +74,5 @@ func Syslog(r Registry, d time.Duration, w *syslog.Writer) {
 				))
 			}
 		})
-		time.Sleep(d)
 	}
 }
