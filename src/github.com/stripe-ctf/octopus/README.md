@@ -81,8 +81,8 @@ across the network in a particular way:
 
 - The **Latency Monkey** selects a single network link and manipulates its
   latency.
-- The **Jitter Monkey** selects a single network link and maniuplates its
-  latency jitter (Octopus uses "jitter" to refer to random pertubations added to
+- The **Jitter Monkey** selects a single network link and manipulates its
+  latency jitter (Octopus uses "jitter" to refer to random perturbations added to
   the base latency. A connection with higher jitter will have more variance in
   the latency of individual chunks of data).
 - The **Lag Split Monkey** partitions the agents into two groups and makes
