@@ -8,6 +8,16 @@ import (
 	"os"
 )
 
+// Provides read, close and seek methods
+type MultiReader interface {
+	io.Reader
+	io.Seeker
+	io.Closer
+	// Calculates and returns the total size of the reader,
+	// not the length remaining.
+	TotalSize() (int64, error)
+}
+
 const MEMORY_BUFFER_LIMIT = 1048576
 
 // Constraints:
@@ -47,7 +57,7 @@ func (mr *multiReaderSeek) Read(p []byte) (n int, err error) {
 }
 
 func (mr *multiReaderSeek) TotalSize() (int64, error) {
-	// Unlike traditional .Len() this calcculates the total size of the reader,
+	// Unlike traditional .Len() this calculates the total size of the reader,
 	// not the length remaining.
 	if mr.length >= 0 {
 		return mr.length, nil
@@ -106,7 +116,7 @@ func (mr *multiReaderSeek) Seek(offset int64, whence int) (int64, error) {
 	return 0, nil
 }
 
-func NewBodyBuffer(input io.Reader) (*multiReaderSeek, error) {
+func NewBodyBuffer(input io.Reader) (MultiReader, error) {
 	var f *os.File
 	ior := make([]io.ReadSeeker, 0, 2)
 	lr := &io.LimitedReader{input, MEMORY_BUFFER_LIMIT}
