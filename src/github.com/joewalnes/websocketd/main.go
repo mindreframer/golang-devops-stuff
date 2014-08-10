@@ -6,7 +6,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,7 +34,6 @@ func log(l *libwebsocketd.LogScope, level libwebsocketd.LogLevel, levelName stri
 }
 
 func main() {
-	flag.Usage = PrintHelp
 	config := parseCommandLine()
 
 	log := libwebsocketd.RootLogScope(config.LogLevel, log)
@@ -51,14 +49,10 @@ func main() {
 		}
 	}
 
-	http.Handle(config.BasePath, libwebsocketd.HttpWsMuxHandler{
-		Config: config.Config,
-		Log:    log})
+	os.Clearenv() // it's ok to wipe it clean, we already read env variables from passenv into config
+	handler := libwebsocketd.NewWebsocketdServer(config.Config, log, config.MaxForks)
+	http.Handle(config.BasePath, handler)
 
-	log.Info("server", "Starting WebSocket server   : ws://%s%s", config.Addr, config.BasePath)
-	if config.DevConsole {
-		log.Info("server", "Developer console enable  d : http://%s/", config.Addr)
-	}
 	if config.UsingScriptDir {
 		log.Info("server", "Serving from directory      : %s", config.ScriptDir)
 	} else if config.CommandName != "" {
@@ -71,9 +65,28 @@ func main() {
 		log.Info("server", "Serving CGI scripts from    : %s", config.CgiDir)
 	}
 
-	err := http.ListenAndServe(config.Addr, nil)
-	if err != nil {
-		log.Fatal("server", "Could start server: %s", err)
+	rejects := make(chan error, 1)
+	for _, addrSingle := range config.Addr {
+		log.Info("server", "Starting WebSocket server   : %s", handler.TellURL("ws", addrSingle, config.BasePath))
+		if config.DevConsole {
+			log.Info("server", "Developer console enabled   : %s", handler.TellURL("http", addrSingle, "/"))
+		} else if config.StaticDir != "" || config.CgiDir != "" {
+			log.Info("server", "Serving CGI or static files : %s", handler.TellURL("http", addrSingle, "/"))
+		}
+		// ListenAndServe is blocking function. Let's run it in
+		// go routine, reporting result to control channel.
+		// Since it's blocking it'll never return non-error.
+		go func(addr string) {
+			if config.Ssl {
+				rejects <- http.ListenAndServeTLS(addr, config.CertFile, config.KeyFile, nil)
+			} else {
+				rejects <- http.ListenAndServe(addr, nil)
+			}
+		}(addrSingle)
+	}
+	select {
+	case err := <-rejects:
+		log.Fatal("server", "Can't start server: %s", err)
 		os.Exit(3)
 	}
 }
