@@ -3,6 +3,7 @@ package proto
 import (
 	"fmt"
 	"github.com/inconshreveable/muxado/proto/frame"
+	"io"
 	"net"
 	"reflect"
 	"sync"
@@ -262,6 +263,15 @@ func (s *Session) die(errorCode frame.ErrorCode, err error) error {
 func (s *Session) reader() {
 	defer s.recoverPanic("reader()")
 
+	// close all of the extension accept channels when we're done
+	// we do this here instead of in die() since otherwise it wouldn't
+	// be safe to access s.exts
+	defer func() {
+		for _, extAccept := range s.exts {
+			close(extAccept)
+		}
+	}()
+
 	for {
 		f, err := s.transport.ReadFrame()
 		if err != nil {
@@ -336,6 +346,12 @@ func (s *Session) handleFrame(rf frame.RFrame) {
 		if str := s.getStream(f.StreamId()); str != nil {
 			str.handleStreamData(f)
 		} else {
+			// if we get a data frame on a non-existent connection, we still
+			// need to read out the frame body so that the stream stays in a
+			// good state. read the payload into a throwaway buffer
+			discard := make([]byte, f.Length())
+			io.ReadFull(f.Reader(), discard)
+
 			// DATA frames on closed connections are just stream-level errors
 			fRst := frame.NewWStreamRst()
 			if err := fRst.Set(f.StreamId(), frame.StreamClosed); err != nil {
