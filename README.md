@@ -9,7 +9,7 @@ ngrok captures and analyzes all traffic over the tunnel for later inspection and
 ## What can I do with ngrok?
 - Expose any http service behind a NAT or firewall to the internet on a subdomain of ngrok.com
 - Expose any tcp service behind a NAT or firewall to the internet on a random port of ngrok.com
-- Inspect all http requests/resposes that are transmitted over the tunnel
+- Inspect all http requests/responses that are transmitted over the tunnel
 - Replay any request that was transmitted over the tunnel
 
 
@@ -25,10 +25,7 @@ ngrok captures and analyzes all traffic over the tunnel for later inspection and
 ngrok has _no_ runtime dependencies. Just download a single binary for your platform and run it. Some premium features
 are only available by creating an account on ngrok.com. If you need them, [create an account on ngrok.com](https://ngrok.com/signup).
 
-- [Linux](https://dl.ngrok.com/linux_386/ngrok.zip)
-- [Mac OSX](https://dl.ngrok.com/darwin_386/ngrok.zip)
-- [Windows](https://dl.ngrok.com/windows_386/ngrok.zip)
-
+#### [Download ngrok for your platform](https://ngrok.com/download)
 
 ## Developing on ngrok
 [ngrok developer's guide](docs/DEVELOPMENT.md)
