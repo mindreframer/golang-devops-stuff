@@ -13,7 +13,7 @@ package libwebsocketd
 // We can get by without jQuery or Bootstrap for this one ;).
 
 const (
-	ConsoleContent = `
+	defaultConsoleContent = `
 
 <!--
 websocketd console
@@ -137,7 +137,7 @@ Full documentation at http://websocketd.com/
 	<button class="disconnect" title="Disconnect" style="display:none">&times;</button>
 	<button class="connect" title="Connect" style="display:none">&#x2714;</button>
 	<div class="url-holder">
-		<input class="url" type="text" value="ws://localhost:1234/" spellcheck="false">
+		<input class="url" type="text" value="{{addr}}" spellcheck="false">
 	</div>
 </header>
 
@@ -169,7 +169,9 @@ Full documentation at http://websocketd.com/
 
 		select('.url').focus();
 		select('.url').addEventListener('keydown', function(ev) {
-			if (ev.keyIdentifier == 'Enter') {
+			var code = ev.which || ev.keyCode;
+			// Enter key pressed
+			if (code  == 13) { 			
 				updatePageUrl();
 				connect(select('.url').value);
 			}
@@ -177,15 +179,19 @@ Full documentation at http://websocketd.com/
 		select('.url').addEventListener('change', updatePageUrl);
 
 		select('.send-input').addEventListener('keydown', function(ev) {
-			if (ev.keyIdentifier == 'Enter') {
+			var code = ev.which || ev.keyCode;
+			// Enter key pressed
+			if (code == 13) { 
 				var msg = select('.send-input').value;
 				select('.send-input').value = '';
 				send(msg);
 			}
-			if (ev.keyIdentifier == 'Up') {
+			// Up key pressed
+			if (code == 38) {
 				moveThroughSendHistory(1);
 			}
-			if (ev.keyIdentifier == 'Down') {
+			// Down key pressed
+			if (code == 40) {
 				moveThroughSendHistory(-1);
 			}
 		});
@@ -216,8 +222,8 @@ Full documentation at http://websocketd.com/
 		var el = template.parentElement.insertBefore(template.cloneNode(true), select('.message.type-input'));
 		el.classList.remove('template');
 		el.classList.add('type-' + type.toLowerCase());
-		el.querySelector('.message-type').innerText = type;
-		el.querySelector('.message-data').innerText = data || '';
+		el.querySelector('.message-type').textContent = type;
+		el.querySelector('.message-data').textContent = data || '';
 		el.querySelector('.message-data').innerHTML += '&nbsp;';
 		el.scrollIntoView(true);
 	}
@@ -330,3 +336,5 @@ Full documentation at http://websocketd.com/
 
 `
 )
+
+var ConsoleContent = defaultConsoleContent
