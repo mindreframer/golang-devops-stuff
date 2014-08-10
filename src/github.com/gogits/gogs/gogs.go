@@ -13,17 +13,15 @@ import (
 
 	"github.com/codegangsta/cli"
 
-	"github.com/gogits/gogs/modules/base"
+	"github.com/gogits/gogs/cmd"
+	"github.com/gogits/gogs/modules/setting"
 )
 
-// Test that go1.2 tag above is included in builds. main.go refers to this definition.
-const go12tag = true
-
-const APP_VER = "0.3.0.0421 Alpha"
+const APP_VER = "0.4.5.0704 Alpha"
 
 func init() {
-	base.AppVer = APP_VER
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	setting.AppVer = APP_VER
 }
 
 func main() {
@@ -32,9 +30,11 @@ func main() {
 	app.Usage = "Go Git Service"
 	app.Version = APP_VER
 	app.Commands = []cli.Command{
-		CmdWeb,
-		CmdServ,
-		CmdUpdate,
+		cmd.CmdWeb,
+		cmd.CmdServ,
+		cmd.CmdUpdate,
+		cmd.CmdFix,
+		cmd.CmdDump,
 	}
 	app.Flags = append(app.Flags, []cli.Flag{}...)
 	app.Run(os.Args)

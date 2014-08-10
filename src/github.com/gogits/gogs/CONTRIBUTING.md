@@ -2,13 +2,13 @@
 
 > Thanks [drone](https://github.com/drone/drone) because this guidelines sheet is forked from its [CONTRIBUTING.md](https://github.com/drone/drone/blob/master/CONTRIBUTING.md).
 
-**This document is pre^2 release, we're not ready for receiving contribution until v0.5.0 release.**
-
 Want to hack on Gogs? Awesome! Here are instructions to get you started. They are probably not perfect, please let us know if anything feels wrong or incomplete.
 
 ## Contribution guidelines
 
 ### Pull requests are always welcome
+
+**ALL PULL REQUESTS MUST SEND TO `DEV` BRANCH**
 
 We are always thrilled to receive pull requests, and do our best to process them as fast as possible. Not sure if that typo is worth a pull request? Do it! We will appreciate it.
 
@@ -28,4 +28,4 @@ Any significant improvement should be documented as [a GitHub issue](https://git
 
 ### ...but check for existing issues first!
 
-Please take a moment to check that an issue doesn't already exist documenting your bug report or improvement proposal. If it does, it never hurts to add a quick "+1" or "I have this problem too". This will help prioritize the most common problems and requests.
+Please take a moment to check that an issue or card on [Trello](https://trello.com/b/uxAoeLUl/gogs-go-git-service) doesn't already exist documenting your bug report or improvement proposal. If it does, it never hurts to add a quick "+1" or "I have this problem too". This will help prioritize the most common problems and requests.

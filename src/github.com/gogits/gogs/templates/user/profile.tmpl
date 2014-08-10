@@ -6,18 +6,20 @@
             <a href="http://gravatar.com/emails/" class="center-block" data-toggle="tooltip" data-placement="bottom" title="Change your avatar at gravatar.com">
                 <img id="user-avatar" src="{{.Owner.AvatarLink}}?s=200" alt="user-avatar" title="{{.Owner.Name}}"/>
             </a>
+            {{if .Owner.FullName}}<span id="user-full-name" class="center-block">{{.Owner.FullName}}</span>{{end}}
             <span id="user-name" class="center-block">{{.Owner.Name}}</span>
         </div>
+        
         <div class="profile-info">
             <ul class="list-group">
                 {{if .Owner.Location}}
-                    <li class="list-group-item"><i class="fa fa-thumb-tack"></i>{{.Owner.Location}}</li>
+                <li class="list-group-item"><i class="fa fa-thumb-tack"></i>{{.Owner.Location}}</li>
                 {{end}}
                 {{if .Owner.Email}}
-                    <li class="list-group-item"><i class="fa fa-envelope"></i><a href="mailto:{{.Owner.Email}}">{{.Owner.Email}}</a></li>
+                <li class="list-group-item"><i class="fa fa-envelope"></i><a href="mailto:{{.Owner.Email}}" rel="nofollow">{{.Owner.Email}}</a></li>
                 {{end}}
                 {{if .Owner.Website}}
-                    <li class="list-group-item"><i class="fa fa-link"></i><a target="_blank" href="{{.Owner.Website}}">{{.Owner.Website}}</a></li>
+                <li class="list-group-item"><i class="fa fa-link"></i><a target="_blank" href="{{.Owner.Website}}">{{.Owner.Website}}</a></li>
                 {{end}}
                 <li class="list-group-item"><i class="fa fa-clock-o"></i>Joined on {{DateFormat .Owner.Created "M d, Y"}}</li>
                 <!-- <hr> -->

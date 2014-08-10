@@ -16,47 +16,67 @@ import (
 	"github.com/gogits/gogs/modules/middleware"
 )
 
+const (
+	USER_NEW  base.TplName = "admin/user/new"
+	USER_EDIT base.TplName = "admin/user/edit"
+)
+
 func NewUser(ctx *middleware.Context) {
 	ctx.Data["Title"] = "New Account"
 	ctx.Data["PageIsUsers"] = true
-	ctx.HTML(200, "admin/users/new")
+	auths, err := models.GetAuths()
+	if err != nil {
+		ctx.Handle(500, "admin.user.NewUser(GetAuths)", err)
+		return
+	}
+	ctx.Data["LoginSources"] = auths
+	ctx.HTML(200, USER_NEW)
 }
 
 func NewUserPost(ctx *middleware.Context, form auth.RegisterForm) {
 	ctx.Data["Title"] = "New Account"
 	ctx.Data["PageIsUsers"] = true
 
-	if form.Password != form.RetypePasswd {
-		ctx.Data["HasError"] = true
-		ctx.Data["Err_Password"] = true
-		ctx.Data["Err_RetypePasswd"] = true
-		ctx.Data["ErrorMsg"] = "Password and re-type password are not same"
-		auth.AssignForm(form, ctx.Data)
+	if ctx.HasError() {
+		ctx.HTML(200, USER_NEW)
+		return
 	}
 
-	if ctx.HasError() {
-		ctx.HTML(200, "admin/users/new")
+	if form.Password != form.RetypePasswd {
+		ctx.Data["Err_Password"] = true
+		ctx.Data["Err_RetypePasswd"] = true
+		ctx.RenderWithErr("Password and re-type password are not same.", "admin/users/new", &form)
 		return
 	}
 
 	u := &models.User{
-		Name:     form.UserName,
-		Email:    form.Email,
-		Passwd:   form.Password,
-		IsActive: true,
+		Name:      form.UserName,
+		Email:     form.Email,
+		Passwd:    form.Password,
+		IsActive:  true,
+		LoginType: models.PLAIN,
+	}
+
+	if len(form.LoginType) > 0 {
+		// NOTE: need rewrite.
+		fields := strings.Split(form.LoginType, "-")
+		tp, _ := base.StrTo(fields[0]).Int()
+		u.LoginType = models.LoginType(tp)
+		u.LoginSource, _ = base.StrTo(fields[1]).Int64()
+		u.LoginName = form.LoginName
 	}
 
 	var err error
-	if u, err = models.RegisterUser(u); err != nil {
+	if u, err = models.CreateUser(u); err != nil {
 		switch err {
 		case models.ErrUserAlreadyExist:
-			ctx.RenderWithErr("Username has been already taken", "admin/users/new", &form)
+			ctx.RenderWithErr("Username has been already taken", USER_NEW, &form)
 		case models.ErrEmailAlreadyUsed:
-			ctx.RenderWithErr("E-mail address has been already used", "admin/users/new", &form)
+			ctx.RenderWithErr("E-mail address has been already used", USER_NEW, &form)
 		case models.ErrUserNameIllegal:
-			ctx.RenderWithErr(models.ErrRepoNameIllegal.Error(), "admin/users/new", &form)
+			ctx.RenderWithErr(models.ErrRepoNameIllegal.Error(), USER_NEW, &form)
 		default:
-			ctx.Handle(500, "admin.user.NewUser", err)
+			ctx.Handle(500, "admin.user.NewUser(CreateUser)", err)
 		}
 		return
 	}
@@ -79,12 +99,18 @@ func EditUser(ctx *middleware.Context, params martini.Params) {
 
 	u, err := models.GetUserById(int64(uid))
 	if err != nil {
-		ctx.Handle(500, "admin.user.EditUser", err)
+		ctx.Handle(500, "admin.user.EditUser(GetUserById)", err)
 		return
 	}
 
 	ctx.Data["User"] = u
-	ctx.HTML(200, "admin/users/edit")
+	auths, err := models.GetAuths()
+	if err != nil {
+		ctx.Handle(500, "admin.user.NewUser(GetAuths)", err)
+		return
+	}
+	ctx.Data["LoginSources"] = auths
+	ctx.HTML(200, USER_EDIT)
 }
 
 func EditUserPost(ctx *middleware.Context, params martini.Params, form auth.AdminEditUserForm) {
@@ -93,13 +119,18 @@ func EditUserPost(ctx *middleware.Context, params martini.Params, form auth.Admi
 
 	uid, err := base.StrTo(params["userid"]).Int()
 	if err != nil {
-		ctx.Handle(404, "admin.user.EditUser", err)
+		ctx.Handle(404, "admin.user.EditUserPost", err)
 		return
 	}
 
 	u, err := models.GetUserById(int64(uid))
 	if err != nil {
-		ctx.Handle(500, "admin.user.EditUser", err)
+		ctx.Handle(500, "admin.user.EditUserPost(GetUserById)", err)
+		return
+	}
+
+	if ctx.HasError() {
+		ctx.HTML(200, USER_EDIT)
 		return
 	}
 
@@ -108,10 +139,10 @@ func EditUserPost(ctx *middleware.Context, params martini.Params, form auth.Admi
 	u.Location = form.Location
 	u.Avatar = base.EncodeMd5(form.Avatar)
 	u.AvatarEmail = form.Avatar
-	u.IsActive = form.Active == "on"
-	u.IsAdmin = form.Admin == "on"
+	u.IsActive = form.Active
+	u.IsAdmin = form.Admin
 	if err := models.UpdateUser(u); err != nil {
-		ctx.Handle(500, "admin.user.EditUser", err)
+		ctx.Handle(500, "admin.user.EditUserPost(UpdateUser)", err)
 		return
 	}
 	log.Trace("%s User profile updated by admin(%s): %s", ctx.Req.RequestURI,
@@ -126,16 +157,16 @@ func DeleteUser(ctx *middleware.Context, params martini.Params) {
 	ctx.Data["Title"] = "Delete Account"
 	ctx.Data["PageIsUsers"] = true
 
-	log.Info("delete")
+	//log.Info("delete")
 	uid, err := base.StrTo(params["userid"]).Int()
 	if err != nil {
-		ctx.Handle(404, "admin.user.EditUser", err)
+		ctx.Handle(404, "admin.user.DeleteUser", err)
 		return
 	}
 
 	u, err := models.GetUserById(int64(uid))
 	if err != nil {
-		ctx.Handle(500, "admin.user.EditUser", err)
+		ctx.Handle(500, "admin.user.DeleteUser(GetUserById)", err)
 		return
 	}
 

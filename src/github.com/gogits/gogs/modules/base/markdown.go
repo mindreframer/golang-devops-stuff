@@ -97,12 +97,31 @@ var (
 )
 
 func RenderSpecialLink(rawBytes []byte, urlPrefix string) []byte {
-	ms := MentionPattern.FindAll(rawBytes, -1)
-	for _, m := range ms {
-		rawBytes = bytes.Replace(rawBytes, m,
-			[]byte(fmt.Sprintf(`<a href="/user/%s">%s</a>`, m[1:], m)), -1)
+	buf := bytes.NewBufferString("")
+	inCodeBlock := false
+	codeBlockPrefix := []byte("```")
+	lineBreak := []byte("\n")
+	tab := []byte("\t")
+	lines := bytes.Split(rawBytes, lineBreak)
+	for _, line := range lines {
+		if bytes.HasPrefix(line, codeBlockPrefix) {
+			inCodeBlock = !inCodeBlock
+		}
+
+		if !inCodeBlock && !bytes.HasPrefix(line, tab) {
+			ms := MentionPattern.FindAll(line, -1)
+			for _, m := range ms {
+				line = bytes.Replace(line, m,
+					[]byte(fmt.Sprintf(`<a href="/user/%s">%s</a>`, m[1:], m)), -1)
+			}
+		}
+
+		buf.Write(line)
+		buf.Write(lineBreak)
 	}
-	ms = commitPattern.FindAll(rawBytes, -1)
+
+	rawBytes = buf.Bytes()
+	ms := commitPattern.FindAll(rawBytes, -1)
 	for _, m := range ms {
 		m = bytes.TrimSpace(m)
 		i := strings.Index(string(m), "commit/")
@@ -132,9 +151,7 @@ func RenderSpecialLink(rawBytes []byte, urlPrefix string) []byte {
 	return rawBytes
 }
 
-func RenderMarkdown(rawBytes []byte, urlPrefix string) []byte {
-	body := RenderSpecialLink(rawBytes, urlPrefix)
-	// fmt.Println(string(body))
+func RenderRawMarkdown(body []byte, urlPrefix string) []byte {
 	htmlFlags := 0
 	// htmlFlags |= gfm.HTML_USE_XHTML
 	// htmlFlags |= gfm.HTML_USE_SMARTYPANTS
@@ -163,7 +180,12 @@ func RenderMarkdown(rawBytes []byte, urlPrefix string) []byte {
 	extensions |= gfm.EXTENSION_NO_EMPTY_LINE_BEFORE_BLOCK
 
 	body = gfm.Markdown(body, renderer, extensions)
-	// fmt.Println(string(body))
+	return body
+}
+
+func RenderMarkdown(rawBytes []byte, urlPrefix string) []byte {
+	body := RenderSpecialLink(rawBytes, urlPrefix)
+	body = RenderRawMarkdown(body, urlPrefix)
 	return body
 }
 

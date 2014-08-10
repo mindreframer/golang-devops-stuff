@@ -8,7 +8,12 @@ import (
 	"github.com/gogits/gogs/models"
 	"github.com/gogits/gogs/modules/base"
 	"github.com/gogits/gogs/modules/middleware"
+	"github.com/gogits/gogs/modules/setting"
 	"github.com/gogits/gogs/routers/user"
+)
+
+const (
+	HOME base.TplName = "home"
 )
 
 func Home(ctx *middleware.Context) {
@@ -18,29 +23,33 @@ func Home(ctx *middleware.Context) {
 	}
 
 	// Check auto-login.
-	userName := ctx.GetCookie(base.CookieUserName)
+	userName := ctx.GetCookie(setting.CookieUserName)
 	if len(userName) != 0 {
 		ctx.Redirect("/user/login")
 		return
 	}
 
-	repos, _ := models.GetRecentUpdatedRepositories()
+	ctx.Data["PageIsHome"] = true
+
+	// Show recent updated repositories for new visitors.
+	repos, err := models.GetRecentUpdatedRepositories()
+	if err != nil {
+		ctx.Handle(500, "dashboard.Home(GetRecentUpdatedRepositories)", err)
+		return
+	}
+
 	for _, repo := range repos {
-		repo.Owner, _ = models.GetUserById(repo.OwnerId)
+		if err = repo.GetOwner(); err != nil {
+			ctx.Handle(500, "dashboard.Home(GetOwner)", err)
+			return
+		}
 	}
 	ctx.Data["Repos"] = repos
-	ctx.Data["PageIsHome"] = true
-	ctx.HTML(200, "home")
-}
-
-func Help(ctx *middleware.Context) {
-	ctx.Data["PageIsHelp"] = true
-	ctx.Data["Title"] = "Help"
-	ctx.HTML(200, "help")
+	ctx.HTML(200, HOME)
 }
 
 func NotFound(ctx *middleware.Context) {
-	ctx.Data["PageIsNotFound"] = true
 	ctx.Data["Title"] = "Page Not Found"
+	ctx.Data["PageIsNotFound"] = true
 	ctx.Handle(404, "home.NotFound", nil)
 }

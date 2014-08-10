@@ -3,15 +3,8 @@
 {{template "repo/nav" .}}
 {{template "repo/toolbar" .}}
 <div id="body" class="container">
-    <div id="user-setting-nav" class="col-md-3">
-        <ul class="list-group">
-            <li class="list-group-item active"><a href="/{{.Owner.Name}}/{{.Repository.Name}}/settings">Options</a></li>
-            <!--<li class="list-group-item"><a href="#">Collaborators</a></li>
-            <li class="list-group-item"><a href="#">Notifications</a></li>-->
-        </ul>
-    </div>
-
-    <div id="repo-setting-container" class="col-md-9">
+    {{template "repo/setting_nav" .}}
+    <div id="repo-setting-container" class="col-md-10">
         {{template "base/alert" .}}
         <div class="panel panel-default">
             <div class="panel-heading">
@@ -48,7 +41,7 @@
                         <label class="col-md-3 text-right">Default Branch</label>
                         <div class="col-md-3">
                             <select name="branch" id="repo-default-branch" class="form-control">
-                                <option value="{{.Repository.DefaultBranch}}">{{.Repository.DefaultBranch}}</option>
+                                {{if .Repository.DefaultBranch}}<option value="{{.Repository.DefaultBranch}}">{{.Repository.DefaultBranch}}</option>{{end}}
                                 {{range .Branches}}
                                 {{if eq . $.Repository.DefaultBranch}}{{else}}<option value="{{.}}">{{.}}</option>{{end}}
                                 {{end}}
@@ -95,6 +88,7 @@
                 Danger Zone
             </div>
             
+            {{if not .Repository.IsMirror}}
             <div class="panel-body">
                 <button type="button" class="btn btn-default pull-right" href="#transfer-repository-modal" data-toggle="modal">
                     Transfer ownership 
@@ -144,6 +138,8 @@
                     </div>
                 </div>
             </div>
+            {{end}}
+            
             <hr>
             <div class="panel-body">
                 <button type="button" class="btn btn-default pull-right" href="#delete-repository-modal" data-toggle="modal">

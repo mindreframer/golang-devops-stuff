@@ -11,16 +11,17 @@ import (
 	"github.com/go-martini/martini"
 
 	"github.com/gogits/gogs/modules/base"
-	"github.com/gogits/gogs/modules/log"
+	"github.com/gogits/gogs/modules/middleware/binding"
 )
 
 type AdminEditUserForm struct {
-	Email    string `form:"email" binding:"Required;Email;MaxSize(50)"`
-	Website  string `form:"website" binding:"MaxSize(50)"`
-	Location string `form:"location" binding:"MaxSize(50)"`
-	Avatar   string `form:"avatar" binding:"Required;Email;MaxSize(50)"`
-	Active   string `form:"active"`
-	Admin    string `form:"admin"`
+	Email     string `form:"email" binding:"Required;Email;MaxSize(50)"`
+	Website   string `form:"website" binding:"MaxSize(50)"`
+	Location  string `form:"location" binding:"MaxSize(50)"`
+	Avatar    string `form:"avatar" binding:"Required;Email;MaxSize(50)"`
+	Active    bool   `form:"active"`
+	Admin     bool   `form:"admin"`
+	LoginType int    `form:"login_type"`
 }
 
 func (f *AdminEditUserForm) Name(field string) string {
@@ -33,21 +34,7 @@ func (f *AdminEditUserForm) Name(field string) string {
 	return names[field]
 }
 
-func (f *AdminEditUserForm) Validate(errors *base.BindingErrors, req *http.Request, context martini.Context) {
-	if req.Method == "GET" || errors.Count() == 0 {
-		return
-	}
-
+func (f *AdminEditUserForm) Validate(errors *binding.Errors, req *http.Request, context martini.Context) {
 	data := context.Get(reflect.TypeOf(base.TmplData{})).Interface().(base.TmplData)
-	data["HasError"] = true
-	AssignForm(f, data)
-
-	if len(errors.Overall) > 0 {
-		for _, err := range errors.Overall {
-			log.Error("AdminEditUserForm.Validate: %v", err)
-		}
-		return
-	}
-
 	validate(errors, data, f)
 }
