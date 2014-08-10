@@ -19,7 +19,7 @@ import (
 
 // A log is a collection of log entries that are persisted to durable storage.
 type Log struct {
-	ApplyFunc   func(Command) (interface{}, error)
+	ApplyFunc   func(*LogEntry, Command) (interface{}, error)
 	file        *os.File
 	path        string
 	entries     []*LogEntry
@@ -27,6 +27,7 @@ type Log struct {
 	mutex       sync.RWMutex
 	startIndex  uint64 // the index before the first entry in the Log entries
 	startTerm   uint64
+	initialized bool
 }
 
 // The results of the applying a log entry.
@@ -147,7 +148,9 @@ func (l *Log) open(path string) error {
 		if os.IsNotExist(err) {
 			l.file, err = os.OpenFile(path, os.O_WRONLY|os.O_CREATE, 0600)
 			debugln("log.open.create ", path)
-
+			if err == nil {
+				l.initialized = true
+			}
 			return err
 		}
 		return err
@@ -160,7 +163,7 @@ func (l *Log) open(path string) error {
 		entry, _ := newLogEntry(l, nil, 0, 0, nil)
 		entry.Position, _ = l.file.Seek(0, os.SEEK_CUR)
 
-		n, err := entry.decode(l.file)
+		n, err := entry.Decode(l.file)
 		if err != nil {
 			if err == io.EOF {
 				debugln("open.log.append: finish ")
@@ -179,7 +182,7 @@ func (l *Log) open(path string) error {
 				if err != nil {
 					continue
 				}
-				l.ApplyFunc(command)
+				l.ApplyFunc(entry, command)
 			}
 			debugln("open.log.append log index ", entry.Index())
 		}
@@ -187,6 +190,7 @@ func (l *Log) open(path string) error {
 		readBytes += int64(n)
 	}
 	debugln("open.log.recovery number of log ", len(l.entries))
+	l.initialized = true
 	return nil
 }
 
@@ -368,12 +372,21 @@ func (l *Log) setCommitIndex(index uint64) error {
 		}
 
 		// Apply the changes to the state machine and store the error code.
-		returnValue, err := l.ApplyFunc(command)
+		returnValue, err := l.ApplyFunc(entry, command)
 
 		debugf("setCommitIndex.set.result index: %v, entries index: %v", i, entryIndex)
 		if entry.event != nil {
 			entry.event.returnValue = returnValue
 			entry.event.c <- err
+		}
+
+		_, isJoinCommand := command.(JoinCommand)
+
+		// we can only commit up to the most recent join command
+		// if there is a join in this batch of commands.
+		// after this commit, we need to recalculate the majority.
+		if isJoinCommand {
+			return nil
 		}
 	}
 	return nil
@@ -517,7 +530,7 @@ func (l *Log) appendEntry(entry *LogEntry) error {
 	entry.Position = position
 
 	// Write to storage.
-	if _, err := entry.encode(l.file); err != nil {
+	if _, err := entry.Encode(l.file); err != nil {
 		return err
 	}
 
@@ -544,7 +557,7 @@ func (l *Log) writeEntry(entry *LogEntry, w io.Writer) (int64, error) {
 	}
 
 	// Write to storage.
-	size, err := entry.encode(w)
+	size, err := entry.Encode(w)
 	if err != nil {
 		return -1, err
 	}
@@ -589,7 +602,7 @@ func (l *Log) compact(index uint64, term uint64) error {
 		position, _ := l.file.Seek(0, os.SEEK_CUR)
 		entry.Position = position
 
-		if _, err = entry.encode(file); err != nil {
+		if _, err = entry.Encode(file); err != nil {
 			file.Close()
 			os.Remove(new_file_path)
 			return err

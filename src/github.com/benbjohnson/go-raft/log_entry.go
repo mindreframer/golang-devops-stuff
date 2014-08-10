@@ -29,7 +29,9 @@ func newLogEntry(log *Log, event *ev, index uint64, term uint64, command Command
 				return nil, err
 			}
 		} else {
-			json.NewEncoder(&buf).Encode(command)
+			if err := json.NewEncoder(&buf).Encode(command); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -67,7 +69,7 @@ func (e *LogEntry) Command() []byte {
 
 // Encodes the log entry to a buffer. Returns the number of bytes
 // written and any error that may have occurred.
-func (e *LogEntry) encode(w io.Writer) (int, error) {
+func (e *LogEntry) Encode(w io.Writer) (int, error) {
 	b, err := proto.Marshal(e.pb)
 	if err != nil {
 		return -1, err
@@ -82,7 +84,7 @@ func (e *LogEntry) encode(w io.Writer) (int, error) {
 
 // Decodes the log entry from a buffer. Returns the number of bytes read and
 // any error that occurs.
-func (e *LogEntry) decode(r io.Reader) (int, error) {
+func (e *LogEntry) Decode(r io.Reader) (int, error) {
 
 	var length int
 	_, err := fmt.Fscanf(r, "%8x\n", &length)
@@ -91,7 +93,7 @@ func (e *LogEntry) decode(r io.Reader) (int, error) {
 	}
 
 	data := make([]byte, length)
-	_, err = r.Read(data)
+	_, err = io.ReadFull(r, data)
 
 	if err != nil {
 		return -1, err
