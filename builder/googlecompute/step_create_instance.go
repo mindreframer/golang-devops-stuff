@@ -6,12 +6,13 @@ import (
 	"time"
 
 	"github.com/mitchellh/multistep"
-	"github.com/mitchellh/packer/common/uuid"
 	"github.com/mitchellh/packer/packer"
 )
 
 // StepCreateInstance represents a Packer build step that creates GCE instances.
 type StepCreateInstance struct {
+	Debug bool
+
 	instanceName string
 }
 
@@ -23,10 +24,11 @@ func (s *StepCreateInstance) Run(state multistep.StateBag) multistep.StepAction 
 	ui := state.Get("ui").(packer.Ui)
 
 	ui.Say("Creating instance...")
-	name := fmt.Sprintf("packer-%s", uuid.TimeOrderedUUID())
+	name := config.InstanceName
 
 	errCh, err := driver.RunInstance(&InstanceConfig{
 		Description: "New instance created by Packer",
+		DiskSizeGb:  config.DiskSizeGb,
 		Image:       config.SourceImage,
 		MachineType: config.MachineType,
 		Metadata: map[string]string{
@@ -55,6 +57,12 @@ func (s *StepCreateInstance) Run(state multistep.StateBag) multistep.StepAction 
 	}
 
 	ui.Message("Instance has been created!")
+
+	if s.Debug {
+		if name != "" {
+			ui.Message(fmt.Sprintf("Instance: %s started in %s", name, config.Zone))
+		}
+	}
 
 	// Things succeeded, store the name so we can remove it later
 	state.Put("instance_name", name)

@@ -31,6 +31,7 @@ type ESX5Driver struct {
 
 	comm      packer.Communicator
 	outputDir string
+	vmId      string
 }
 
 func (d *ESX5Driver) Clone(dst, src string) error {
@@ -46,9 +47,8 @@ func (d *ESX5Driver) CreateDisk(diskPathLocal string, size string, typeId string
 	return d.sh("vmkfstools", "-c", size, "-d", typeId, "-a", "lsilogic", diskPath)
 }
 
-func (d *ESX5Driver) IsRunning(vmxPathLocal string) (bool, error) {
-	vmxPath := filepath.Join(d.outputDir, filepath.Base(vmxPathLocal))
-	state, err := d.run(nil, "vim-cmd", "vmsvc/power.getstate", vmxPath)
+func (d *ESX5Driver) IsRunning(string) (bool, error) {
+	state, err := d.run(nil, "vim-cmd", "vmsvc/power.getstate", d.vmId)
 	if err != nil {
 		return false, err
 	}
@@ -56,21 +56,24 @@ func (d *ESX5Driver) IsRunning(vmxPathLocal string) (bool, error) {
 }
 
 func (d *ESX5Driver) Start(vmxPathLocal string, headless bool) error {
-	vmxPath := filepath.Join(d.outputDir, filepath.Base(vmxPathLocal))
-	return d.sh("vim-cmd", "vmsvc/power.on", vmxPath)
+	return d.sh("vim-cmd", "vmsvc/power.on", d.vmId)
 }
 
 func (d *ESX5Driver) Stop(vmxPathLocal string) error {
-	vmxPath := filepath.Join(d.outputDir, filepath.Base(vmxPathLocal))
-	return d.sh("vim-cmd", "vmsvc/power.off", vmxPath)
+	return d.sh("vim-cmd", "vmsvc/power.off", d.vmId)
 }
 
 func (d *ESX5Driver) Register(vmxPathLocal string) error {
-	vmxPath := filepath.Join(d.outputDir, filepath.Base(vmxPathLocal))
+	vmxPath := filepath.ToSlash(filepath.Join(d.outputDir, filepath.Base(vmxPathLocal)))
 	if err := d.upload(vmxPath, vmxPathLocal); err != nil {
 		return err
 	}
-	return d.sh("vim-cmd", "solo/registervm", vmxPath)
+	r, err := d.run(nil, "vim-cmd", "solo/registervm", vmxPath)
+	if err != nil {
+		return err
+	}
+	d.vmId = strings.TrimRight(r, "\n")
+	return nil
 }
 
 func (d *ESX5Driver) SuppressMessages(vmxPath string) error {
@@ -78,11 +81,10 @@ func (d *ESX5Driver) SuppressMessages(vmxPath string) error {
 }
 
 func (d *ESX5Driver) Unregister(vmxPathLocal string) error {
-	vmxPath := filepath.Join(d.outputDir, filepath.Base(vmxPathLocal))
-	return d.sh("vim-cmd", "vmsvc/unregister", vmxPath)
+	return d.sh("vim-cmd", "vmsvc/unregister", d.vmId)
 }
 
-func (d *ESX5Driver) UploadISO(localPath string) (string, error) {
+func (d *ESX5Driver) UploadISO(localPath string, checksum string, checksumType string) (string, error) {
 	cacheRoot, _ := filepath.Abs(".")
 	targetFile, err := filepath.Rel(cacheRoot, localPath)
 	if err != nil {
@@ -90,8 +92,14 @@ func (d *ESX5Driver) UploadISO(localPath string) (string, error) {
 	}
 
 	finalPath := d.datastorePath(targetFile)
-	if err := d.mkdir(filepath.Dir(finalPath)); err != nil {
+	if err := d.mkdir(filepath.ToSlash(filepath.Dir(finalPath))); err != nil {
 		return "", err
+	}
+
+	log.Printf("Verifying checksum of %s", finalPath)
+	if d.verifyChecksum(checksumType, checksum, finalPath) {
+		log.Println("Initial checksum matched, no upload needed.")
+		return finalPath, nil
 	}
 
 	if err := d.upload(finalPath, localPath); err != nil {
@@ -103,6 +111,10 @@ func (d *ESX5Driver) UploadISO(localPath string) (string, error) {
 
 func (d *ESX5Driver) ToolsIsoPath(string) string {
 	return ""
+}
+
+func (d *ESX5Driver) ToolsInstall() error {
+	return d.sh("vim-cmd", "vmsvc/tools.install", d.vmId)
 }
 
 func (d *ESX5Driver) DhcpLeasesPath(string) string {
@@ -126,27 +138,14 @@ func (d *ESX5Driver) Verify() error {
 }
 
 func (d *ESX5Driver) HostIP() (string, error) {
-	ip := net.ParseIP(d.Host)
-	interfaces, err := net.Interfaces()
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", d.Host, d.Port))
+	defer conn.Close()
 	if err != nil {
 		return "", err
 	}
 
-	for _, dev := range interfaces {
-		addrs, err := dev.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok {
-				if ipnet.Contains(ip) {
-					return ipnet.IP.String(), nil
-				}
-			}
-		}
-	}
-
-	return "", errors.New("Unable to determine Host IP")
+	host, _, err := net.SplitHostPort(conn.LocalAddr().String())
+	return host, err
 }
 
 func (d *ESX5Driver) VNCAddress(portMin, portMax uint) (string, uint) {
@@ -240,7 +239,7 @@ func (d *ESX5Driver) ListFiles() ([]string, error) {
 			continue
 		}
 
-		files = append(files, filepath.Join(d.outputDir, string(line)))
+		files = append(files, filepath.ToSlash(filepath.Join(d.outputDir, string(line))))
 	}
 
 	return files, nil
@@ -267,15 +266,16 @@ func (d *ESX5Driver) String() string {
 }
 
 func (d *ESX5Driver) datastorePath(path string) string {
-	return filepath.Join("/vmfs/volumes", d.Datastore, path)
+	baseDir := filepath.Base(filepath.Dir(path))
+	return filepath.ToSlash(filepath.Join("/vmfs/volumes", d.Datastore, baseDir, filepath.Base(path)))
 }
 
 func (d *ESX5Driver) connect() error {
 	address := fmt.Sprintf("%s:%d", d.Host, d.Port)
 
-	auth := []gossh.ClientAuth{
-		gossh.ClientAuthPassword(ssh.Password(d.Password)),
-		gossh.ClientAuthKeyboardInteractive(
+	auth := []gossh.AuthMethod{
+		gossh.Password(d.Password),
+		gossh.KeyboardInteractive(
 			ssh.PasswordKeyboardInteractive(d.Password)),
 	}
 
@@ -289,7 +289,7 @@ func (d *ESX5Driver) connect() error {
 		NoPty: true,
 	}
 
-	comm, err := ssh.New(sshConfig)
+	comm, err := ssh.New(address, sshConfig)
 	if err != nil {
 		return err
 	}

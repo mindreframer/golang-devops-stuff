@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 	"unicode"
 )
@@ -60,6 +61,7 @@ type TargettedUi struct {
 type BasicUi struct {
 	Reader      io.Reader
 	Writer      io.Writer
+	ErrorWriter io.Writer
 	l           sync.Mutex
 	interrupted bool
 }
@@ -234,8 +236,13 @@ func (rw *BasicUi) Error(message string) {
 	rw.l.Lock()
 	defer rw.l.Unlock()
 
+	writer := rw.ErrorWriter
+	if writer == nil {
+		writer = rw.Writer
+	}
+
 	log.Printf("ui error: %s", message)
-	_, err := fmt.Fprint(rw.Writer, message+"\n")
+	_, err := fmt.Fprint(writer, message+"\n")
 	if err != nil {
 		log.Printf("[ERR] Failed to write to UI: %s", err)
 	}
@@ -282,6 +289,11 @@ func (u *MachineReadableUi) Machine(category string, args ...string) {
 
 	_, err := fmt.Fprintf(u.Writer, "%d,%s,%s,%s\n", now.Unix(), target, category, argsString)
 	if err != nil {
-		panic(err)
+		if err == syscall.EPIPE {
+			// Ignore epipe errors because that just means that the file
+			// is probably closed or going to /dev/null or something.
+		} else {
+			panic(err)
+		}
 	}
 }

@@ -11,7 +11,7 @@ type uploadCmdData struct {
 	BucketName      string
 	BundleDirectory string
 	ManifestPath    string
-	Region          string
+	S3Endpoint      string
 	SecretKey       string
 }
 
@@ -32,18 +32,12 @@ func (s *StepUploadBundle) Run(state multistep.StateBag) multistep.StepAction {
 		return multistep.ActionHalt
 	}
 
-	// See GH-729 and http://goo.gl/rNZiCs
-	regionName := region.Name
-	if regionName == "us-east-1" {
-		regionName = "US"
-	}
-
 	config.BundleUploadCommand, err = config.tpl.Process(config.BundleUploadCommand, uploadCmdData{
 		AccessKey:       config.AccessKey,
 		BucketName:      config.S3Bucket,
 		BundleDirectory: config.BundleDestination,
 		ManifestPath:    manifestPath,
-		Region:          regionName,
+		S3Endpoint:      region.S3Endpoint,
 		SecretKey:       config.SecretKey,
 	})
 	if err != nil {

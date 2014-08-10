@@ -1,19 +1,22 @@
 package googlecompute
 
 import (
+	"code.google.com/p/gosshold/ssh"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-
-	"code.google.com/p/go.crypto/ssh"
 	"github.com/mitchellh/multistep"
 	"github.com/mitchellh/packer/packer"
+	"os"
 )
 
 // StepCreateSSHKey represents a Packer build step that generates SSH key pairs.
-type StepCreateSSHKey int
+type StepCreateSSHKey struct {
+	Debug        bool
+	DebugKeyPath string
+}
 
 // Run executes the Packer build step that generates SSH key pairs.
 func (s *StepCreateSSHKey) Run(state multistep.StateBag) multistep.StepAction {
@@ -41,9 +44,25 @@ func (s *StepCreateSSHKey) Run(state multistep.StateBag) multistep.StepAction {
 		ui.Error(err.Error())
 		return multistep.ActionHalt
 	}
-
 	state.Put("ssh_private_key", string(pem.EncodeToMemory(&priv_blk)))
 	state.Put("ssh_public_key", string(ssh.MarshalAuthorizedKey(pub)))
+
+	if s.Debug {
+		ui.Message(fmt.Sprintf("Saving key for debug purposes: %s", s.DebugKeyPath))
+		f, err := os.Create(s.DebugKeyPath)
+		if err != nil {
+			state.Put("error", fmt.Errorf("Error saving debug key: %s", err))
+			return multistep.ActionHalt
+		}
+
+		// Write out the key
+		err = pem.Encode(f, &priv_blk)
+		f.Close()
+		if err != nil {
+			state.Put("error", fmt.Errorf("Error saving debug key: %s", err))
+			return multistep.ActionHalt
+		}
+	}
 	return multistep.ActionContinue
 }
 

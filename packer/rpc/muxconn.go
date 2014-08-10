@@ -407,13 +407,10 @@ func (m *MuxConn) loop() {
 			case streamStateFinWait2:
 				fallthrough
 			case streamStateEstablished:
-				if len(data) > 0 {
-					select {
-					case stream.writeCh <- data:
-					default:
-						panic(fmt.Sprintf(
-							"Failed to write data, buffer full for stream %d", id))
-					}
+				if len(data) > 0 && stream.writeCh != nil {
+					//log.Printf("[TRACE] %p: Stream %d (%s) WRITE-START", m, id, from)
+					stream.writeCh <- data
+					//log.Printf("[TRACE] %p: Stream %d (%s) WRITE-END", m, id, from)
 				}
 			default:
 				log.Printf("[ERR] Data received for stream in state: %d", stream.state)
@@ -506,6 +503,7 @@ func newStream(from muxPacketFrom, id uint32, m *MuxConn) *Stream {
 	go func() {
 		defer dataW.Close()
 
+		drain := false
 		for {
 			data := <-writeCh
 			if data == nil {
@@ -514,8 +512,14 @@ func newStream(from muxPacketFrom, id uint32, m *MuxConn) *Stream {
 				return
 			}
 
+			if drain {
+				// We're draining, meaning we're just waiting for the
+				// write channel to close.
+				continue
+			}
+
 			if _, err := dataW.Write(data); err != nil {
-				return
+				drain = true
 			}
 		}
 	}()
@@ -558,7 +562,10 @@ func (s *Stream) Write(p []byte) (int, error) {
 }
 
 func (s *Stream) closeWriter() {
-	s.writeCh <- nil
+	if s.writeCh != nil {
+		s.writeCh <- nil
+		s.writeCh = nil
+	}
 }
 
 func (s *Stream) setState(state streamState) {
@@ -584,6 +591,7 @@ func (s *Stream) waitState(target streamState) error {
 		delete(s.stateChange, stateCh)
 	}()
 
+	//log.Printf("[TRACE] %p: Stream %d (%s) waiting for state: %d", s.mux, s.id, s.from, target)
 	state := <-stateCh
 	if state == target {
 		return nil

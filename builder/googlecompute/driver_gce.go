@@ -8,7 +8,7 @@ import (
 
 	"code.google.com/p/goauth2/oauth"
 	"code.google.com/p/goauth2/oauth/jwt"
-	"code.google.com/p/google-api-go-client/compute/v1beta16"
+	"code.google.com/p/google-api-go-client/compute/v1"
 	"github.com/mitchellh/packer/packer"
 )
 
@@ -168,7 +168,19 @@ func (d *driverGCE) RunInstance(c *InstanceConfig) (<-chan error, error) {
 	// Create the instance information
 	instance := compute.Instance{
 		Description: c.Description,
-		Image:       image.SelfLink,
+		Disks: []*compute.AttachedDisk{
+			&compute.AttachedDisk{
+				Type:       "PERSISTENT",
+				Mode:       "READ_WRITE",
+				Kind:       "compute#attachedDisk",
+				Boot:       true,
+				AutoDelete: true,
+				InitializeParams: &compute.AttachedDiskInitializeParams{
+					SourceImage: image.SelfLink,
+					DiskSizeGb:  c.DiskSizeGb,
+				},
+			},
+		},
 		MachineType: machineType.SelfLink,
 		Metadata: &compute.Metadata{
 			Items: metadata,
@@ -218,7 +230,7 @@ func (d *driverGCE) WaitForInstance(state, zone, name string) <-chan error {
 }
 
 func (d *driverGCE) getImage(name string) (image *compute.Image, err error) {
-	projects := []string{d.projectId, "debian-cloud", "centos-cloud"}
+	projects := []string{d.projectId, "centos-cloud", "coreos-cloud", "debian-cloud", "google-containers", "opensuse-cloud", "rhel-cloud", "suse-cloud", "windows-cloud"}
 	for _, project := range projects {
 		image, err = d.service.Images.Get(project, name).Do()
 		if err == nil && image != nil && image.SelfLink != "" {
@@ -227,10 +239,7 @@ func (d *driverGCE) getImage(name string) (image *compute.Image, err error) {
 		image = nil
 	}
 
-	if err == nil {
-		err = fmt.Errorf("Image could not be found: %s", name)
-	}
-
+	err = fmt.Errorf("Image %s could not be found in any of these projects: %s", name, projects)
 	return
 }
 
