@@ -5,12 +5,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
-	"strings"
+	"os/signal"
+	"syscall"
 	"time"
 
+	"github.com/kelseyhightower/confd/backends"
 	"github.com/kelseyhightower/confd/config"
-	"github.com/kelseyhightower/confd/etcd/etcdutil"
 	"github.com/kelseyhightower/confd/log"
 	"github.com/kelseyhightower/confd/resource/template"
 )
@@ -19,11 +21,13 @@ var (
 	configFile        = ""
 	defaultConfigFile = "/etc/confd/confd.toml"
 	onetime           bool
+	printVersion      bool
 )
 
 func init() {
 	flag.StringVar(&configFile, "config-file", "", "the confd config file")
 	flag.BoolVar(&onetime, "onetime", false, "run once and exit")
+	flag.BoolVar(&printVersion, "version", false, "print the version and exit")
 }
 
 func main() {
@@ -31,6 +35,10 @@ func main() {
 	// override configuration settings from the command line. Parse the flags now
 	// to make them active.
 	flag.Parse()
+	if printVersion {
+		fmt.Printf("confd %s\n", Version)
+		os.Exit(0)
+	}
 	if configFile == "" {
 		if IsFileExist(defaultConfigFile) {
 			configFile = defaultConfigFile
@@ -47,15 +55,18 @@ func main() {
 	log.SetVerbose(config.Verbose())
 	log.SetDebug(config.Debug())
 	log.Notice("Starting confd")
-	// Create the etcd client upfront and use it for the life of the process.
-	// The etcdClient is an http.Client and designed to be reused.
-	log.Notice("etcd nodes set to " + strings.Join(config.EtcdNodes(), ", "))
-	etcdClient, err := etcdutil.NewEtcdClient(config.EtcdNodes(), config.ClientCert(), config.ClientKey(), config.ClientCaKeys())
+
+	// Create the storage client
+	log.Notice("Backend set to " + config.Backend())
+	store, err := backends.New(config.Backend())
 	if err != nil {
 		log.Fatal(err.Error())
 	}
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 	for {
-		runErrors := template.ProcessTemplateResources(etcdClient)
+		runErrors := template.ProcessTemplateResources(store)
 		// If the -onetime flag is passed on the command line we immediately exit
 		// after processing the template config files.
 		if onetime {
@@ -64,7 +75,13 @@ func main() {
 			}
 			os.Exit(0)
 		}
-		time.Sleep(time.Duration(config.Interval()) * time.Second)
+		select {
+		case c := <-signalChan:
+			log.Info(fmt.Sprintf("captured %v exiting...", c))
+			os.Exit(0)
+		case <-time.After(time.Duration(config.Interval()) * time.Second):
+			// Continue processing templates.
+		}
 	}
 }
 

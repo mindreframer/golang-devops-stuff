@@ -5,23 +5,22 @@ package template
 
 import (
 	"bytes"
-	"crypto/md5"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
-	"syscall"
+	"strings"
 	"text/template"
 
 	"github.com/BurntSushi/toml"
+	"github.com/kelseyhightower/confd/backends"
 	"github.com/kelseyhightower/confd/config"
-	"github.com/kelseyhightower/confd/etcd/etcdutil"
 	"github.com/kelseyhightower/confd/log"
+	"github.com/kelseyhightower/confd/node"
 )
 
 // TemplateResourceConfig holds the parsed template resource.
@@ -31,26 +30,28 @@ type TemplateResourceConfig struct {
 
 // TemplateResource is the representation of a parsed template resource.
 type TemplateResource struct {
-	Dest       string
-	FileMode   os.FileMode
-	Gid        int
-	Keys       []string
-	Mode       string
-	Uid        int
-	ReloadCmd  string `toml:"reload_cmd"`
-	CheckCmd   string `toml:"check_cmd"`
-	StageFile  *os.File
-	Src        string
-	Vars       map[string]interface{}
-	etcdClient etcdutil.EtcdClient
+	Dest        string
+	FileMode    os.FileMode
+	Gid         int
+	Keys        []string
+	Mode        string
+	Uid         int
+	ReloadCmd   string `toml:"reload_cmd"`
+	CheckCmd    string `toml:"check_cmd"`
+	Prefix      string
+	StageFile   *os.File
+	Src         string
+	Vars        map[string]interface{}
+	Dirs        node.Directory
+	storeClient backends.StoreClient
 }
 
 // NewTemplateResourceFromPath creates a TemplateResource using a decoded file path
-// and the supplied EtcdClient as input.
+// and the supplied StoreClient as input.
 // It returns a TemplateResource and an error if any.
-func NewTemplateResourceFromPath(path string, c etcdutil.EtcdClient) (*TemplateResource, error) {
-	if c == nil {
-		return nil, errors.New("A valid EtcdClient is required.")
+func NewTemplateResourceFromPath(path string, s backends.StoreClient) (*TemplateResource, error) {
+	if s == nil {
+		return nil, errors.New("A valid StoreClient is required.")
 	}
 	var tc *TemplateResourceConfig
 	log.Debug("Loading template resource from " + path)
@@ -58,20 +59,46 @@ func NewTemplateResourceFromPath(path string, c etcdutil.EtcdClient) (*TemplateR
 	if err != nil {
 		return nil, fmt.Errorf("Cannot process template resource %s - %s", path, err.Error())
 	}
-	tc.TemplateResource.etcdClient = c
+	tc.TemplateResource.storeClient = s
 	return &tc.TemplateResource, nil
 }
 
 // setVars sets the Vars for template resource.
 func (t *TemplateResource) setVars() error {
 	var err error
-	log.Debug("Retrieving keys from etcd")
-	log.Debug("Key prefix set to " + config.Prefix())
-	t.Vars, err = etcdutil.GetValues(t.etcdClient, config.Prefix(), t.Keys)
+	log.Debug("Retrieving keys from store")
+	log.Debug("Key prefix set to " + t.prefix())
+	vars, err := t.storeClient.GetValues(appendPrefix(t.prefix(), t.Keys))
 	if err != nil {
 		return err
 	}
+	t.setDirs(vars)
+	t.Vars = cleanKeys(vars, t.prefix())
 	return nil
+}
+
+func (t *TemplateResource) prefix() string {
+	return path.Join(config.Prefix(), t.Prefix)
+}
+
+// setDirs sets the Dirs for the template resource.
+// All keys are grouped based on their directory path names.
+// For example, /upstream/app1 and upstream/app2 will be grouped as
+//    {
+//        "upstream": []Node{
+//            {"app1": value}},
+//            {"app2": value}},
+//         }
+//    }
+//
+// Dirs are exposed to resource templated to enable iteration.
+func (t *TemplateResource) setDirs(vars map[string]interface{}) {
+	d := node.NewDirectory()
+	for k, v := range vars {
+		directory := filepath.Dir(filepath.Join("/", strings.TrimPrefix(k, config.Prefix())))
+		d.Add(pathToKey(directory, t.prefix()), node.Node{filepath.Base(k), v})
+	}
+	t.Dirs = d
 }
 
 // createStageFile stages the src configuration file by processing the src
@@ -84,14 +111,18 @@ func (t *TemplateResource) createStageFile() error {
 	if !isFileExist(t.Src) {
 		return errors.New("Missing template: " + t.Src)
 	}
-	temp, err := ioutil.TempFile("", "")
+	// create TempFile in Dest directory to avoid cross-filesystem issues
+	temp, err := ioutil.TempFile(filepath.Dir(t.Dest), "."+filepath.Base(t.Dest))
 	if err != nil {
-		os.Remove(temp.Name())
 		return err
 	}
+	defer temp.Close()
 	log.Debug("Compiling source template " + t.Src)
 	tplFuncMap := make(template.FuncMap)
 	tplFuncMap["Base"] = path.Base
+
+	tplFuncMap["GetDir"] = t.Dirs.Get
+	tplFuncMap["MapDir"] = mapNodes
 	tmpl := template.Must(template.New(path.Base(t.Src)).Funcs(tplFuncMap).ParseFiles(t.Src))
 	if err = tmpl.Execute(temp, t.Vars); err != nil {
 		return err
@@ -163,9 +194,11 @@ func (t *TemplateResource) check() error {
 	}
 	log.Debug("Running " + cmdBuffer.String())
 	c := exec.Command("/bin/sh", "-c", cmdBuffer.String())
-	if err := c.Run(); err != nil {
+	output, err := c.CombinedOutput()
+	if err != nil {
 		return err
 	}
+	log.Debug(fmt.Sprintf("%q", string(output)))
 	return nil
 }
 
@@ -174,15 +207,17 @@ func (t *TemplateResource) check() error {
 func (t *TemplateResource) reload() error {
 	log.Debug("Running " + t.ReloadCmd)
 	c := exec.Command("/bin/sh", "-c", t.ReloadCmd)
-	if err := c.Run(); err != nil {
+	output, err := c.CombinedOutput()
+	if err != nil {
 		return err
 	}
+	log.Debug(fmt.Sprintf("%q", string(output)))
 	return nil
 }
 
 // process is a convenience function that wraps calls to the three main tasks
 // required to keep local configuration files in sync. First we gather vars
-// from etcd, then we stage a candidate configuration file, and finally sync
+// from the store, then we stage a candidate configuration file, and finally sync
 // things up.
 // It returns an error if any.
 func (t *TemplateResource) process() error {
@@ -226,11 +261,11 @@ func (t *TemplateResource) setFileMode() error {
 // ProcessTemplateResources is a convenience function that loads all the
 // template resources and processes them serially. Called from main.
 // It returns a list of errors if any.
-func ProcessTemplateResources(c etcdutil.EtcdClient) []error {
+func ProcessTemplateResources(s backends.StoreClient) []error {
 	runErrors := make([]error, 0)
 	var err error
-	if c == nil {
-		runErrors = append(runErrors, errors.New("An etcd client is required"))
+	if s == nil {
+		runErrors = append(runErrors, errors.New("A StoreClient client is required"))
 		return runErrors
 	}
 	log.Debug("Loading template resources from confdir " + config.ConfDir())
@@ -245,7 +280,7 @@ func ProcessTemplateResources(c etcdutil.EtcdClient) []error {
 	}
 	for _, p := range paths {
 		log.Debug("Processing template resource " + p)
-		t, err := NewTemplateResourceFromPath(p, c)
+		t, err := NewTemplateResourceFromPath(p, s)
 		if err != nil {
 			runErrors = append(runErrors, err)
 			log.Error(err.Error())
@@ -259,67 +294,4 @@ func ProcessTemplateResources(c etcdutil.EtcdClient) []error {
 		log.Debug("Processing of template resource " + p + " complete")
 	}
 	return runErrors
-}
-
-// fileStat return a fileInfo describing the named file.
-func fileStat(name string) (fi fileInfo, err error) {
-	if isFileExist(name) {
-		f, err := os.Open(name)
-		defer f.Close()
-		if err != nil {
-			return fi, err
-		}
-		stats, _ := f.Stat()
-		fi.Uid = stats.Sys().(*syscall.Stat_t).Uid
-		fi.Gid = stats.Sys().(*syscall.Stat_t).Gid
-		fi.Mode = stats.Sys().(*syscall.Stat_t).Mode
-		h := md5.New()
-		io.Copy(h, f)
-		fi.Md5 = fmt.Sprintf("%x", h.Sum(nil))
-		return fi, nil
-	} else {
-		return fi, errors.New("File not found")
-	}
-}
-
-// sameConfig reports whether src and dest config files are equal.
-// Two config files are equal when they have the same file contents and
-// Unix permissions. The owner, group, and mode must match.
-// It return false in other cases.
-func sameConfig(src, dest string) (bool, error) {
-	if !isFileExist(dest) {
-		return false, nil
-	}
-	d, err := fileStat(dest)
-	if err != nil {
-		return false, err
-	}
-	s, err := fileStat(src)
-	if err != nil {
-		return false, err
-	}
-	if d.Uid != s.Uid {
-		log.Info(fmt.Sprintf("%s has UID %d should be %d", dest, d.Uid, s.Uid))
-	}
-	if d.Gid != s.Gid {
-		log.Info(fmt.Sprintf("%s has GID %d should be %d", dest, d.Gid, s.Gid))
-	}
-	if d.Mode != s.Mode {
-		log.Info(fmt.Sprintf("%s has mode %s should be %s", dest, os.FileMode(d.Mode), os.FileMode(s.Mode)))
-	}
-	if d.Md5 != s.Md5 {
-		log.Info(fmt.Sprintf("%s has md5sum %s should be %s", dest, d.Md5, s.Md5))
-	}
-	if d.Uid != s.Uid || d.Gid != s.Gid || d.Mode != s.Mode || d.Md5 != s.Md5 {
-		return false, nil
-	}
-	return true, nil
-}
-
-// isFileExist reports whether path exits.
-func isFileExist(fpath string) bool {
-	if _, err := os.Stat(fpath); os.IsNotExist(err) {
-		return false
-	}
-	return true
 }
