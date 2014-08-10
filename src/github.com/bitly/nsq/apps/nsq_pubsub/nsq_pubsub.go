@@ -6,16 +6,18 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"github.com/bitly/go-nsq"
-	"github.com/bitly/nsq/util"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/bitly/go-nsq"
+	"github.com/bitly/nsq/util"
 )
 
 var (
@@ -63,16 +65,16 @@ type StreamReader struct {
 	sync.RWMutex // embed a r/w mutex
 	topic        string
 	channel      string
-	reader       *nsq.Reader
+	consumer     *nsq.Consumer
 	req          *http.Request
 	conn         net.Conn
 	bufrw        *bufio.ReadWriter
 	connectTime  time.Time
 }
 
-func ConnectToNSQAndLookupd(r *nsq.Reader, nsqAddrs []string, lookupd []string) error {
+func ConnectToNSQAndLookupd(r *nsq.Consumer, nsqAddrs []string, lookupd []string) error {
 	for _, addrString := range nsqAddrs {
-		err := r.ConnectToNSQ(addrString)
+		err := r.ConnectToNSQD(addrString)
 		if err != nil {
 			return err
 		}
@@ -80,7 +82,7 @@ func ConnectToNSQAndLookupd(r *nsq.Reader, nsqAddrs []string, lookupd []string) 
 
 	for _, addrString := range lookupd {
 		log.Printf("lookupd addr %s", addrString)
-		err := r.ConnectToLookupd(addrString)
+		err := r.ConnectToNSQLookupd(addrString)
 		if err != nil {
 			return err
 		}
@@ -98,13 +100,10 @@ func StatsHandler(w http.ResponseWriter, req *http.Request) {
 		duration := now.Sub(sr.connectTime).Seconds()
 		secondsDuration := time.Duration(int64(duration)) * time.Second // turncate to the second
 
-		io.WriteString(w, fmt.Sprintf("[%s] [%s : %s] msgs: %-8d fin: %-8d re-q: %-8d connected: %s\n",
+		io.WriteString(w, fmt.Sprintf("[%s] [%s : %s] connected: %s\n",
 			sr.conn.RemoteAddr().String(),
 			sr.topic,
 			sr.channel,
-			sr.reader.MessagesReceived,
-			sr.reader.MessagesFinished,
-			sr.reader.MessagesRequeued,
 			secondsDuration))
 	}
 }
@@ -143,17 +142,20 @@ func (s *StreamServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	r, err := nsq.NewReader(topicName, channelName)
-	r.SetMaxInFlight(*maxInFlight)
+	cfg := nsq.NewConfig()
+	cfg.UserAgent = fmt.Sprintf("nsq_pubsub/%s go-nsq/%s", util.BINARY_VERSION, nsq.VERSION)
+	cfg.MaxInFlight = *maxInFlight
+	r, err := nsq.NewConsumer(topicName, channelName, cfg)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	r.SetLogger(log.New(os.Stderr, "", log.LstdFlags), nsq.LogLevelInfo)
 
 	sr := &StreamReader{
 		topic:       topicName,
 		channel:     channelName,
-		reader:      r,
+		consumer:    r,
 		req:         req,
 		conn:        conn,
 		bufrw:       bufrw, // TODO: latency writer
@@ -177,9 +179,9 @@ func (s *StreamServer) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			log.Printf("got connection err %s", err.Error())
 		} else {
-			log.Printf("unexpected data on request socket (%s); closing", b)
+			log.Printf("unexpected data on request socket (%c); closing", b)
 		}
-		sr.reader.Stop()
+		sr.consumer.Stop()
 	}(bufrw)
 
 	go sr.HeartbeatLoop()
@@ -194,7 +196,7 @@ func (sr *StreamReader) HeartbeatLoop() {
 	}()
 	for {
 		select {
-		case <-sr.reader.ExitChan:
+		case <-sr.consumer.StopChan:
 			return
 		case ts := <-heartbeatTicker.C:
 			sr.Lock()

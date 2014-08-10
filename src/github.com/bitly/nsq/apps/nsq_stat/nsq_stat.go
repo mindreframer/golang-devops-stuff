@@ -7,8 +7,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/bitly/nsq/util"
-	"github.com/bitly/nsq/util/lookupd"
 	"io/ioutil"
 	"log"
 	"os"
@@ -16,6 +14,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/bitly/nsq/util"
+	"github.com/bitly/nsq/util/lookupd"
 )
 
 var (
@@ -63,13 +64,14 @@ func statLoop(interval time.Duration, topic string, channel string,
 		}
 
 		if i%25 == 0 {
-			fmt.Printf("-----------depth------------+--------------metadata---------------\n")
-			fmt.Printf("%7s %7s %5s %5s | %7s %7s %12s %7s\n", "mem", "disk", "inflt", "def", "req", "t-o", "msgs", "clients")
+			fmt.Printf("---------------depth---------------+--------------metadata---------------\n")
+			fmt.Printf("%7s %7s %7s %5s %5s | %7s %7s %12s %7s\n", "total", "mem", "disk", "inflt", "def", "req", "t-o", "msgs", "clients")
 		}
 
 		// TODO: paused
-		fmt.Printf("%7d %7d %5d %5d | %7d %7d %12d %7d\n",
+		fmt.Printf("%7d %7d %7d %5d %5d | %7d %7d %12d %7d\n",
 			c.Depth,
+			c.MemoryDepth,
 			c.BackendDepth,
 			c.InFlightCount,
 			c.DeferredCount,

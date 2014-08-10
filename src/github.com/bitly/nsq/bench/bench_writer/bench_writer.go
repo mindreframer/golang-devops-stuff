@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"flag"
-	"github.com/bitly/go-nsq"
 	"log"
 	"net"
 	"runtime"
 	"sync"
 	"time"
+
+	"github.com/bitly/go-nsq"
 )
 
 var (
@@ -44,7 +45,7 @@ func main() {
 	duration := end.Sub(start)
 	log.Printf("duration: %s - %.03fmb/s - %.03fops/s - %.03fus/op",
 		duration,
-		float64(*num*200)/duration.Seconds()/1024/1024,
+		float64(*num*(*size))/duration.Seconds()/1024/1024,
 		float64(*num)/duration.Seconds(),
 		float64(duration/time.Microsecond)/float64(*num))
 }
@@ -60,7 +61,7 @@ func pubWorker(n int, tcpAddr string, batchSize int, batch [][]byte, topic strin
 	num := n / runtime.GOMAXPROCS(0) / batchSize
 	for i := 0; i < num; i += 1 {
 		cmd, _ := nsq.MultiPublish(topic, batch)
-		err := cmd.Write(rw)
+		_, err := cmd.WriteTo(rw)
 		if err != nil {
 			panic(err.Error())
 		}

@@ -4,15 +4,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/bitly/go-simplejson"
-	"github.com/bitly/nsq/util"
 	"html/template"
-	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/bitly/go-simplejson"
+	"github.com/bitly/nsq/util"
 )
 
 type GraphTarget interface {
@@ -79,10 +79,7 @@ func (g *GraphInterval) UrlOption() template.URL {
 func DefaultGraphTimeframes(selected string) GraphIntervals {
 	var d GraphIntervals
 	for _, t := range []string{"1h", "2h", "12h", "24h", "48h", "168h", "off"} {
-		g, err := GraphIntervalForTimeframe(t, t == selected)
-		if err != nil {
-			log.Fatalf("error parsing duration %s", err.Error())
-		}
+		g, _ := GraphIntervalForTimeframe(t, t == selected)
 		d = append(d, g)
 	}
 	return d
@@ -113,7 +110,7 @@ func GraphIntervalForTimeframe(t string, selected bool) (*GraphInterval, error) 
 }
 
 type GraphOptions struct {
-	context           *Context
+	ctx               *Context
 	Configured        bool
 	Enabled           bool
 	GraphiteUrl       string
@@ -123,7 +120,7 @@ type GraphOptions struct {
 }
 
 func NewGraphOptions(rw http.ResponseWriter, req *http.Request,
-	r *util.ReqParams, context *Context) *GraphOptions {
+	r *util.ReqParams, ctx *Context) *GraphOptions {
 	selectedTimeString, err := r.Get("t")
 	if err != nil && selectedTimeString == "" {
 		// get from cookie
@@ -150,14 +147,14 @@ func NewGraphOptions(rw http.ResponseWriter, req *http.Request,
 	if err != nil {
 		g, _ = GraphIntervalForTimeframe("2h", true)
 	}
-	base := context.nsqadmin.options.GraphiteURL
-	if context.nsqadmin.options.ProxyGraphite {
+	base := ctx.nsqadmin.opts.GraphiteURL
+	if ctx.nsqadmin.opts.ProxyGraphite {
 		base = ""
 	}
 	o := &GraphOptions{
-		context:           context,
-		Configured:        context.nsqadmin.options.GraphiteURL != "",
-		Enabled:           g.Timeframe != "off" && context.nsqadmin.options.GraphiteURL != "",
+		ctx:               ctx,
+		Configured:        ctx.nsqadmin.opts.GraphiteURL != "",
+		Enabled:           g.Timeframe != "off" && ctx.nsqadmin.opts.GraphiteURL != "",
 		GraphiteUrl:       base,
 		AllGraphIntervals: DefaultGraphTimeframes(selectedTimeString),
 		GraphInterval:     g,
@@ -168,13 +165,13 @@ func NewGraphOptions(rw http.ResponseWriter, req *http.Request,
 func (g *GraphOptions) Prefix(host string, metricType string) string {
 	prefix := ""
 	statsdHostKey := util.StatsdHostKey(host)
-	prefixWithHost := strings.Replace(g.context.nsqadmin.options.StatsdPrefix, "%s", statsdHostKey, -1)
+	prefixWithHost := strings.Replace(g.ctx.nsqadmin.opts.StatsdPrefix, "%s", statsdHostKey, -1)
 	if prefixWithHost[len(prefixWithHost)-1] != '.' {
 		prefixWithHost += "."
 	}
-	if g.context.nsqadmin.options.UseStatsdPrefixes && metricType == "counter" {
+	if g.ctx.nsqadmin.opts.UseStatsdPrefixes && metricType == "counter" {
 		prefix += "stats_counts."
-	} else if g.context.nsqadmin.options.UseStatsdPrefixes && metricType == "gauge" {
+	} else if g.ctx.nsqadmin.opts.UseStatsdPrefixes && metricType == "gauge" {
 		prefix += "stats.gauges."
 	}
 	prefix += prefixWithHost
@@ -227,7 +224,6 @@ func (g *GraphOptions) LargeGraph(gr GraphTarget, key string) template.URL {
 			scale := fmt.Sprintf("%.04f", 1/float64(*statsdInterval/time.Second))
 			target = fmt.Sprintf(`scale(%s,%s)`, target, scale)
 		}
-		log.Println("Adding target: ", target)
 		params.Add("target", target)
 	}
 	params.Add("colorList", color)
@@ -274,7 +270,6 @@ func rateQuery(target string) string {
 func parseRateResponse(body []byte) ([]byte, error) {
 	js, err := simplejson.NewJson([]byte(body))
 	if err != nil {
-		log.Printf("ERROR: failed to parse metadata - %s", err.Error())
 		return nil, err
 	}
 

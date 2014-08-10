@@ -8,19 +8,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/bitly/go-hostpool"
-	"github.com/bitly/go-nsq"
-	"github.com/bitly/nsq/util"
 	"log"
-	"math"
 	"math/rand"
 	"net/url"
 	"os"
 	"os/signal"
-	"sort"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/bitly/go-hostpool"
+	"github.com/bitly/go-nsq"
+	"github.com/bitly/nsq/util"
+	"github.com/bitly/nsq/util/timermetrics"
 )
 
 const (
@@ -52,31 +53,16 @@ var (
 	// TODO: remove, deprecated
 	roundRobin         = flag.Bool("round-robin", false, "(deprecated) use --mode=round-robin, enable round robin mode")
 	maxBackoffDuration = flag.Duration("max-backoff-duration", 120*time.Second, "(deprecated) use --reader-opt=max_backoff_duration=X, the maximum backoff duration")
-	verbose            = flag.Bool("verbose", false, "(depgrecated) use --reader-opt=verbose")
 	throttleFraction   = flag.Float64("throttle-fraction", 1.0, "(deprecated) use --sample=X, publish only a fraction of messages")
 	httpTimeoutMs      = flag.Int("http-timeout-ms", 20000, "(deprecated) use --http-timeout=X, timeout for HTTP connect/read/write (each)")
 )
 
 func init() {
-	flag.Var(&readerOpts, "reader-opt", "option to passthrough to nsq.Reader (may be given multiple times)")
+	flag.Var(&readerOpts, "reader-opt", "option to passthrough to nsq.Consumer (may be given multiple times)")
 	flag.Var(&postAddrs, "post", "HTTP address to make a POST request to.  data will be in the body (may be given multiple times)")
 	flag.Var(&getAddrs, "get", "HTTP address to make a GET request to. '%s' will be printf replaced with data (may be given multiple times)")
 	flag.Var(&nsqdTCPAddrs, "nsqd-tcp-address", "nsqd TCP address (may be given multiple times)")
 	flag.Var(&lookupdHTTPAddrs, "lookupd-http-address", "lookupd HTTP address (may be given multiple times)")
-}
-
-type Durations []time.Duration
-
-func (s Durations) Len() int {
-	return len(s)
-}
-
-func (s Durations) Swap(i, j int) {
-	s[i], s[j] = s[j], s[i]
-}
-
-func (s Durations) Less(i, j int) bool {
-	return s[i] < s[j]
 }
 
 type Publisher interface {
@@ -89,76 +75,49 @@ type PublishHandler struct {
 	counter   uint64
 	mode      int
 	hostPool  hostpool.HostPool
-	reqs      Durations
-	id        int
+
+	perAddressStatus map[string]*timermetrics.TimerMetrics
+	timermetrics     *timermetrics.TimerMetrics
 }
 
 func (ph *PublishHandler) HandleMessage(m *nsq.Message) error {
-	var startTime time.Time
-
 	if *sample < 1.0 && rand.Float64() > *sample {
 		return nil
 	}
 
-	if *statusEvery > 0 {
-		startTime = time.Now()
-	}
-
+	startTime := time.Now()
 	switch ph.mode {
 	case ModeAll:
 		for _, addr := range ph.addresses {
+			st := time.Now()
 			err := ph.Publish(addr, m.Body)
 			if err != nil {
 				return err
 			}
+			ph.perAddressStatus[addr].Status(st)
 		}
 	case ModeRoundRobin:
-		idx := ph.counter % uint64(len(ph.addresses))
-		err := ph.Publish(ph.addresses[idx], m.Body)
+		counter := atomic.AddUint64(&ph.counter, 1)
+		idx := counter % uint64(len(ph.addresses))
+		addr := ph.addresses[idx]
+		err := ph.Publish(addr, m.Body)
 		if err != nil {
 			return err
 		}
-		ph.counter++
+		ph.perAddressStatus[addr].Status(startTime)
 	case ModeHostPool:
 		hostPoolResponse := ph.hostPool.Get()
-		err := ph.Publish(hostPoolResponse.Host(), m.Body)
+		addr := hostPoolResponse.Host()
+		err := ph.Publish(addr, m.Body)
 		hostPoolResponse.Mark(err)
 		if err != nil {
 			return err
 		}
+		ph.perAddressStatus[addr].Status(startTime)
 	}
-
-	if *statusEvery > 0 {
-		duration := time.Now().Sub(startTime)
-		ph.reqs = append(ph.reqs, duration)
-	}
-
-	if *statusEvery > 0 && len(ph.reqs) >= *statusEvery {
-		var total time.Duration
-		for _, v := range ph.reqs {
-			total += v
-		}
-		avgMs := (total.Seconds() * 1000) / float64(len(ph.reqs))
-
-		sort.Sort(ph.reqs)
-		p95Ms := percentile(95.0, ph.reqs, len(ph.reqs)).Seconds() * 1000
-		p99Ms := percentile(99.0, ph.reqs, len(ph.reqs)).Seconds() * 1000
-
-		log.Printf("handler(%d): finished %d requests - 99th: %.02fms - 95th: %.02fms - avg: %.02fms",
-			ph.id, *statusEvery, p99Ms, p95Ms, avgMs)
-
-		ph.reqs = ph.reqs[:0]
-	}
+	ph.timermetrics.Status(startTime)
 
 	return nil
-}
-
-func percentile(perc float64, arr []time.Duration, length int) time.Duration {
-	indexOfPerc := int(math.Ceil(((perc / 100.0) * float64(length)) + 0.5))
-	if indexOfPerc >= length {
-		indexOfPerc = length - 1
-	}
-	return arr[indexOfPerc]
 }
 
 type PostPublisher struct{}
@@ -289,58 +248,65 @@ func main() {
 		addresses = getAddrs
 	}
 
-	r, err := nsq.NewReader(*topic, *channel)
-	if err != nil {
-		log.Fatalf(err.Error())
-	}
-	err = util.ParseReaderOpts(r, readerOpts)
-	if err != nil {
-		log.Fatalf(err.Error())
-	}
-	r.SetMaxInFlight(*maxInFlight)
+	cfg := nsq.NewConfig()
+	cfg.UserAgent = fmt.Sprintf("nsq_to_http/%s go-nsq/%s", util.BINARY_VERSION, nsq.VERSION)
 
-	// TODO: remove, deprecated
-	if hasArg("verbose") {
-		log.Printf("WARNING: --verbose is deprecated in favor of --reader-opt=verbose")
-		r.Configure("verbose", true)
+	err := util.ParseReaderOpts(cfg, readerOpts)
+	if err != nil {
+		log.Fatalf(err.Error())
 	}
+	cfg.MaxInFlight = *maxInFlight
 
 	// TODO: remove, deprecated
 	if hasArg("max-backoff-duration") {
 		log.Printf("WARNING: --max-backoff-duration is deprecated in favor of --reader-opt=max_backoff_duration=X")
-		r.Configure("max_backoff_duration", *maxBackoffDuration)
+		cfg.MaxBackoffDuration = *maxBackoffDuration
 	}
 
-	for i := 0; i < *numPublishers; i++ {
-		handler := &PublishHandler{
-			Publisher: publisher,
-			addresses: addresses,
-			mode:      selectedMode,
-			reqs:      make(Durations, 0, *statusEvery),
-			id:        i,
-			hostPool:  hostpool.New(addresses),
-		}
-		r.AddHandler(handler)
+	r, err := nsq.NewConsumer(*topic, *channel, cfg)
+	if err != nil {
+		log.Fatalf(err.Error())
 	}
+
+	perAddressStatus := make(map[string]*timermetrics.TimerMetrics)
+	if len(addresses) == 1 {
+		// disable since there is only one address
+		perAddressStatus[addresses[0]] = timermetrics.NewTimerMetrics(0, "")
+	} else {
+		for _, a := range addresses {
+			perAddressStatus[a] = timermetrics.NewTimerMetrics(*statusEvery,
+				fmt.Sprintf("[%s]:", a))
+		}
+	}
+
+	handler := &PublishHandler{
+		Publisher:        publisher,
+		addresses:        addresses,
+		mode:             selectedMode,
+		hostPool:         hostpool.New(addresses),
+		perAddressStatus: perAddressStatus,
+		timermetrics:     timermetrics.NewTimerMetrics(*statusEvery, "[aggregate]:"),
+	}
+	r.AddConcurrentHandlers(handler, *numPublishers)
 
 	for _, addrString := range nsqdTCPAddrs {
-		err := r.ConnectToNSQ(addrString)
+		err := r.ConnectToNSQD(addrString)
 		if err != nil {
-			log.Fatalf(err.Error())
+			log.Fatalf("%s", err)
 		}
 	}
 
 	for _, addrString := range lookupdHTTPAddrs {
 		log.Printf("lookupd addr %s", addrString)
-		err := r.ConnectToLookupd(addrString)
+		err := r.ConnectToNSQLookupd(addrString)
 		if err != nil {
-			log.Fatalf(err.Error())
+			log.Fatalf("%s", err)
 		}
 	}
 
 	for {
 		select {
-		case <-r.ExitChan:
+		case <-r.StopChan:
 			return
 		case <-termChan:
 			r.Stop()
