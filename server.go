@@ -1,4 +1,4 @@
-package helixdns
+package main
 
 import (
   "encoding/json"
@@ -10,12 +10,22 @@ import (
 )
 
 type HelixServer struct {
-  Port   int
-  Client Client
+  Port      int
+  Client    Client
+  DNSClient DNSClient
 }
 
-func Server(port int, etcdurl string) *HelixServer {
-  return &HelixServer{ Port: port, Client: NewEtcdClient(etcdurl) }
+func ForwardingServer(port int, etcdurl, dnsServerUrl string) HelixServer {
+  client := NewEtcdClient(etcdurl)
+  dnsClient := ForwardingDNSClient{ Address: dnsServerUrl }
+
+  return HelixServer{ Port: port, Client: client, DNSClient: dnsClient }
+}
+
+func Server(port int, etcdurl string) HelixServer {
+  client := NewEtcdClient(etcdurl)
+
+  return HelixServer{ Port: port, Client: client }
 }
 
 func (s HelixServer) Start() {
@@ -26,6 +36,8 @@ func (s HelixServer) Start() {
     ReadTimeout:  10,
     WriteTimeout: 10,
   }
+
+  go s.Client.WatchForChanges()
 
   log.Print("Starting server...")
 
@@ -53,12 +65,17 @@ func (s HelixServer) Handler(w dns.ResponseWriter, req *dns.Msg) {
   qClass := req.Question[0].Qclass
 
   header := dns.RR_Header{Name: m.Question[0].Name, Rrtype: qType, Class: qClass, Ttl: 5}
-
   resp, err := s.getResponse(req.Question[0])
 
   if err != nil {
-    log.Printf("Could not get record for %s", req.Question[0].Name)
-    w.WriteMsg(m)
+    if s.DNSClient != nil {
+      log.Printf("Could not get record for %s, forwarding to %s", req.Question[0].Name, s.DNSClient.GetAddress())
+      in, _ := s.DNSClient.Lookup(req)
+      w.WriteMsg(in)
+    } else {
+      log.Printf("Could not get record for %s", req.Question[0].Name)
+      w.WriteMsg(m)
+    }
     return
   }
 

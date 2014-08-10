@@ -1,4 +1,4 @@
-package helixdns
+package main
 
 type SrvRecord struct {
   Priority uint16

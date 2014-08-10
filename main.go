@@ -1,7 +1,6 @@
 package main
 
 import (
-  "github.com/mrwilson/helixdns"
   "os"
   "os/signal"
   "syscall"
@@ -12,17 +11,25 @@ import (
 var config struct {
   Port int
   EtcdAddress string
+  ForwardingNameServer string
 }
 
 func init() {
   flag.IntVar(&config.Port, "port", 9000, "port to run server on")
   flag.StringVar(&config.EtcdAddress, "etcd-address", "http://localhost:4001/", "address of etcd instance")
+  flag.StringVar(&config.ForwardingNameServer, "forward", "", "address of forwarding nameserver")
 }
 
 func main() {
   flag.Parse()
 
-  server := helixdns.Server(config.Port, config.EtcdAddress)
+  var server HelixServer
+
+  if config.ForwardingNameServer != "" {
+    server = ForwardingServer(config.Port, config.EtcdAddress, config.ForwardingNameServer)
+  } else {
+    server = Server(config.Port, config.EtcdAddress)
+  }
 
   go func() {
     server.Start()
