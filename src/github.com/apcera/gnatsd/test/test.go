@@ -56,10 +56,16 @@ func RunServer(opts *server.Options) *server.Server {
 	go s.Start()
 
 	// Make sure we are running and can bind before returning.
-	addr := fmt.Sprintf("%s:%d", opts.Host, opts.Port)
 	end := time.Now().Add(10 * time.Second)
 	for time.Now().Before(end) {
-		conn, err := net.Dial("tcp", addr)
+		addr := s.Addr()
+		if addr == nil {
+			time.Sleep(10 * time.Millisecond)
+			// Retry. We might take a little while to open a connection.
+			continue
+		}
+
+		conn, err := net.Dial("tcp", addr.String())
 		if err != nil {
 			time.Sleep(50 * time.Millisecond)
 			// Retry
@@ -255,14 +261,17 @@ func sendProto(t tLogger, c net.Conn, op string) {
 }
 
 var (
-	infoRe    = regexp.MustCompile(`INFO\s+([^\r\n]+)\r\n`)
-	pingRe    = regexp.MustCompile(`PING\r\n`)
-	pongRe    = regexp.MustCompile(`PONG\r\n`)
-	msgRe     = regexp.MustCompile(`(?:(?:MSG\s+([^\s]+)\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\s*\r\n([^\\r\\n]*?)\r\n)+?)`)
-	okRe      = regexp.MustCompile(`\A\+OK\r\n`)
-	errRe     = regexp.MustCompile(`\A\-ERR\s+([^\r\n]+)\r\n`)
-	subRe     = regexp.MustCompile(`SUB\s+([^\s]+)((\s+)([^\s]+))?\s+([^\s]+)\r\n`)
-	unsubRe   = regexp.MustCompile(`UNSUB\s+([^\s]+)(\s+(\d+))?\r\n`)
+	infoRe       = regexp.MustCompile(`INFO\s+([^\r\n]+)\r\n`)
+	pingRe       = regexp.MustCompile(`PING\r\n`)
+	pongRe       = regexp.MustCompile(`PONG\r\n`)
+	msgRe        = regexp.MustCompile(`(?:(?:MSG\s+([^\s]+)\s+([^\s]+)\s+(([^\s]+)[^\S\r\n]+)?(\d+)\s*\r\n([^\\r\\n]*?)\r\n)+?)`)
+	okRe         = regexp.MustCompile(`\A\+OK\r\n`)
+	errRe        = regexp.MustCompile(`\A\-ERR\s+([^\r\n]+)\r\n`)
+	subRe        = regexp.MustCompile(`SUB\s+([^\s]+)((\s+)([^\s]+))?\s+([^\s]+)\r\n`)
+	unsubRe      = regexp.MustCompile(`UNSUB\s+([^\s]+)(\s+(\d+))?\r\n`)
+	unsubmaxRe   = regexp.MustCompile(`UNSUB\s+([^\s]+)(\s+(\d+))\r\n`)
+	unsubnomaxRe = regexp.MustCompile(`UNSUB\s+([^\s]+)\r\n`)
+
 	connectRe = regexp.MustCompile(`CONNECT\s+([^\r\n]+)\r\n`)
 )
 

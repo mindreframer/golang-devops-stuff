@@ -210,10 +210,15 @@ func (s *Server) Shutdown() {
 
 	s.running = false
 
+	conns := make(map[uint64]*client)
+
 	// Copy off the clients
-	clients := make(map[uint64]*client)
 	for i, c := range s.clients {
-		clients[i] = c
+		conns[i] = c
+	}
+	// Copy off the routes
+	for i, r := range s.routes {
+		conns[i] = r
 	}
 
 	// Number of done channel responses we expect.
@@ -245,8 +250,8 @@ func (s *Server) Shutdown() {
 
 	s.mu.Unlock()
 
-	// Close client connections
-	for _, c := range clients {
+	// Close client and route connections
+	for _, c := range conns {
 		c.closeConnection()
 	}
 
@@ -273,6 +278,19 @@ func (s *Server) AcceptLoop() {
 	s.mu.Lock()
 	s.listener = l
 	s.mu.Unlock()
+
+	// Write resolved port back to options.
+	_, port, err := net.SplitHostPort(l.Addr().String())
+	if err != nil {
+		Fatalf("Error parsing server address (%s): %s", l.Addr().String(), e)
+		return
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil {
+		Fatalf("Error parsing server address (%s): %s", l.Addr().String(), e)
+		return
+	}
+	s.opts.Port = portNum
 
 	tmpDelay := ACCEPT_MIN_SLEEP
 
@@ -479,4 +497,14 @@ func (s *Server) NumSubscriptions() uint32 {
 	defer s.mu.Unlock()
 	stats := s.sl.Stats()
 	return stats.NumSubs
+}
+
+// Addr will return the net.Addr object for the current listener.
+func (s *Server) Addr() net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Addr()
 }

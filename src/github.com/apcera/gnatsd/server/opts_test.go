@@ -3,6 +3,7 @@
 package server
 
 import (
+	"net/url"
 	"reflect"
 	"testing"
 	"time"
@@ -31,6 +32,16 @@ func TestDefaultOptions(t *testing.T) {
 	}
 }
 
+func TestOptions_RandomPort(t *testing.T) {
+	opts := &Options{Port: RANDOM_PORT}
+	processOptions(opts)
+
+	if opts.Port != 0 {
+		t.Fatalf("Process of options should have resolved random port to "+
+			"zero.\nexpected: %d\ngot: %d\n", 0, opts.Port)
+	}
+}
+
 func TestConfigFile(t *testing.T) {
 	golden := &Options{
 		Host:        "apcera.me",
@@ -44,6 +55,7 @@ func TestConfigFile(t *testing.T) {
 		HTTPPort:    8222,
 		LogFile:     "/tmp/gnatsd.log",
 		PidFile:     "/tmp/gnatsd.pid",
+		ProfPort:    6543,
 	}
 
 	opts, err := ProcessConfigFile("./configs/test.conf")
@@ -70,6 +82,7 @@ func TestMergeOverrides(t *testing.T) {
 		HTTPPort:    DEFAULT_HTTP_PORT,
 		LogFile:     "/tmp/gnatsd.log",
 		PidFile:     "/tmp/gnatsd.pid",
+		ProfPort:    6789,
 	}
 	fopts, err := ProcessConfigFile("./configs/test.conf")
 	if err != nil {
@@ -82,11 +95,32 @@ func TestMergeOverrides(t *testing.T) {
 		Password: "spooky",
 		Debug:    true,
 		HTTPPort: DEFAULT_HTTP_PORT,
+		ProfPort: 6789,
 	}
 	merged := MergeOptions(fopts, opts)
 
 	if !reflect.DeepEqual(golden, merged) {
 		t.Fatalf("Options are incorrect.\nexpected: %+v\ngot: %+v",
 			golden, merged)
+	}
+}
+
+func TestRemoveSelfReference(t *testing.T) {
+	url1, _ := url.Parse("nats-route://user:password@10.4.5.6:4223")
+	url2, _ := url.Parse("nats-route://user:password@localhost:4223")
+	url3, _ := url.Parse("nats-route://user:password@127.0.0.1:4223")
+
+	opts := &Options{
+		Routes: []*url.URL{url1, url2, url3},
+	}
+
+	opts.Routes = RemoveSelfReference(opts.Routes)
+
+	if len(opts.Routes) != 1 {
+		t.Fatalf("Self reference IP address exists in Routes ")
+	}
+
+	if opts.Routes[0].String() != "nats-route://user:password@10.4.5.6:4223" {
+		t.Fatalf("Self reference IP address %s in Routes", opts.Routes[0])
 	}
 }
