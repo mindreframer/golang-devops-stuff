@@ -68,27 +68,80 @@ type xmlRequest struct {
 	Errors    []Error `xml:"Errors>Error"`
 }
 
-// Common price structure used in requests and responses
-// http://goo.gl/tE4AV
+/*
+A Price represents an amount of money in a given currency.
+
+Reference:
+http://docs.aws.amazon.com/AWSMechTurk/latest/AWSMturkAPI/ApiReference_PriceDataStructureArticle.html
+*/
 type Price struct {
-	Amount         string
-	CurrencyCode   string
+	// The amount of money, as a number. The amount is in the currency specified
+	// by the CurrencyCode. For example, if CurrencyCode is USD, the amount will
+	// be in United States dollars (e.g. 12.75 is $12.75 US).
+	Amount string
+
+	// A code that represents the country and units of the currency. Its value is
+	// Type an ISO 4217 currency code, such as USD for United States dollars.
+	//
+	// Constraints: Currently only USD is supported.
+	CurrencyCode string
+
+	// A textual representation of the price, using symbols and formatting
+	// appropriate for the currency. Symbols are represented using the Unicode
+	// character set. You do not need to specify FormattedPrice in a request.
+	// It is only provided by the service in responses, as a convenience to
+	// your application.
 	FormattedPrice string
 }
 
-// Really just a country string
-// http://goo.gl/mU4uG
+/*
+Really just a country string.
+
+Reference:
+
+- http://docs.aws.amazon.com/AWSMechTurk/latest/AWSMturkAPI/ApiReference_LocaleDataStructureArticle.html
+- http://www.iso.org/iso/country_codes/country_codes
+*/
 type Locale string
 
-// Data structure used to specify requirements for the worker
-// used in CreateHIT, for example
-// http://goo.gl/LvRo9
+/*
+A QualificationRequirement describes a Qualification a Worker must
+have before the Worker is allowed to accept a HIT. A requirement may optionally
+state that a Worker must have the Qualification to preview the HIT.
+
+Reference:
+
+http://docs.aws.amazon.com/AWSMechTurk/latest/AWSMturkAPI/ApiReference_QualificationRequirementDataStructureArticle.html
+*/
 type QualificationRequirement struct {
+	// The ID of the Qualification type for the requirement.
+	// See http://docs.aws.amazon.com/AWSMechTurk/latest/AWSMturkAPI/ApiReference_QualificationRequirementDataStructureArticle.html#ApiReference_QualificationType-IDs
 	QualificationTypeId string
-	Comparator          string
-	IntegerValue        int
-	LocaleValue         Locale
-	RequiredToPreview   string
+
+	// The kind of comparison to make against a Qualification's value.
+	// Two values can be compared to see if one value is "LessThan",
+	// "LessThanOrEqualTo", "GreaterThan", "GreaterThanOrEqualTo", "EqualTo", or
+	// "NotEqualTo" the other. A Qualification requirement can also test if a
+	// Qualification "Exists" in the user's profile, regardless of its value.
+	Comparator string
+
+	// The integer value to compare against the Qualification's value.
+	IntegerValue int
+
+	// The locale value to compare against the Qualification's value, if the
+	// Qualification being compared is the locale Qualification.
+	LocaleValue Locale
+
+	// If true, the question data for the HIT will not be shown when a Worker
+	// whose Qualifications do not meet this requirement tries to preview the HIT.
+	// That is, a Worker's Qualifications must meet all of the requirements for
+	// which RequiredToPreview is true in order to preview the HIT.
+	//
+	// If a Worker meets all of the requirements where RequiredToPreview is true
+	// (or if there are no such requirements), but does not meet all of the
+	// requirements for the HIT, the Worker will be allowed to preview the HIT's
+	// question data, but will not be allowed to accept and complete the HIT.
+	RequiredToPreview bool
 }
 
 // Data structure holding the contents of an "external"
@@ -216,11 +269,66 @@ type GetAssignmentsForHITResponse struct {
 	}
 }
 
-// Corresponds to the "CreateHIT" operation of the Mechanical Turk
-// API.  http://goo.gl/cDBRc Currently only supports "external"
-// questions (see "HIT" struct above).  If "keywords", "maxAssignments",
-// "qualificationRequirement" or "requesterAnnotation" are the zero
-// value for their types, they will not be included in the request.
+/*
+CreateHIT corresponds to the "CreateHIT" operation of the Mechanical Turk
+API.  Currently only supports "external" questions (see "HIT" struct above).
+
+Here are the detailed description for the parameters:
+
+  title         Required. A title should be short and descriptive about the
+                kind of task the HIT contains. On the Amazon Mechanical Turk
+                web site, the HIT title appears in search results, and
+                everywhere the HIT is mentioned.
+  description   Required. A description includes detailed information about the
+                kind of task the HIT contains. On the Amazon Mechanical Turk
+                web site, the HIT description appears in the expanded view of
+                search results, and in the HIT and assignment screens. A good
+                description gives the user enough information to evaluate the
+                HIT before accepting it.
+  question      Required. The data the person completing the HIT uses to produce
+                the results. Consstraints: Must be a QuestionForm data structure,
+                an ExternalQuestion data structure, or an HTMLQuestion data
+                structure. The XML question data must not be larger than 64
+                kilobytes (65,535 bytes) in size, including whitespace.
+  reward        Required. The amount of money the Requester will pay a Worker
+                for successfully completing the HIT.
+  assignmentDurationInSeconds   Required. The amount of time, in seconds, that
+                                a Worker has to complete the HIT after accepting
+                                it. If a Worker does not complete the assignment
+                                within the specified duration, the assignment is
+                                considered abandoned.  If the HIT is still
+                                active (that is, its lifetime has not elapsed),
+                                the assignment becomes available for other users
+                                to find and accept. Valid Values: any integer
+                                between 30 (30 seconds) and 31536000 (365 days).
+  lifetimeInSeconds     Required. An amount of time, in seconds, after which the
+                        HIT is no longer available for users to accept. After
+                        the lifetime of the HIT elapses, the HIT no longer
+                        appears in HIT searches, even if not all of the
+                        assignments for the HIT have been accepted. Valid Values:
+                        any integer between 30 (30 seconds) and 31536000 (365 days).
+  keywords              One or more words or phrases that describe the HIT,
+                        separated by commas. These words are used in searches to
+                        find HITs. Constraints: cannot be more than 1,000
+                        characters.
+  maxAssignments        The number of times the HIT can be accepted and completed
+                        before the HIT becomes unavailable. Valid Values: any
+                        integer between 1 and 1000000000 (1 billion). Default: 1
+  qualificationRequirement    A condition that a Worker's Qualifications must
+                              meet before the Worker is allowed to accept and
+                              complete the HIT. Constraints: no more than 10
+                              QualificationRequirement for each HIT.
+  requesterAnnotation   An arbitrary data field. The RequesterAnnotation
+                        parameter lets your application attach arbitrary data to
+                        the HIT for tracking purposes.  For example, the
+                        RequesterAnnotation parameter could be an identifier
+                        internal to the Requester's application that corresponds
+                        with the HIT. Constraints: must not be longer than 255
+                        characters in length.
+
+Reference:
+http://docs.aws.amazon.com/AWSMechTurk/latest/AWSMturkAPI/ApiReference_CreateHITOperation.html
+*/
 func (mt *MTurk) CreateHIT(
 	title, description string,
 	question interface{},

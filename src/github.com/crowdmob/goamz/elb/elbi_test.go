@@ -5,7 +5,7 @@ import (
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/ec2"
 	"github.com/crowdmob/goamz/elb"
-	"launchpad.net/gocheck"
+	"gopkg.in/check.v1"
 )
 
 var amazon = flag.Bool("amazon", false, "Enable tests against amazon server")
@@ -15,7 +15,7 @@ type AmazonServer struct {
 	auth aws.Auth
 }
 
-func (s *AmazonServer) SetUp(c *gocheck.C) {
+func (s *AmazonServer) SetUp(c *check.C) {
 	auth, err := aws.EnvAuth()
 	if err != nil {
 		c.Fatal(err)
@@ -23,7 +23,7 @@ func (s *AmazonServer) SetUp(c *gocheck.C) {
 	s.auth = auth
 }
 
-var _ = gocheck.Suite(&AmazonClientSuite{})
+var _ = check.Suite(&AmazonClientSuite{})
 
 // AmazonClientSuite tests the client against a live AWS server.
 type AmazonClientSuite struct {
@@ -39,7 +39,7 @@ type ClientTests struct {
 	ec2 *ec2.EC2
 }
 
-func (s *AmazonClientSuite) SetUpSuite(c *gocheck.C) {
+func (s *AmazonClientSuite) SetUpSuite(c *check.C) {
 	if !*amazon {
 		c.Skip("AmazonClientSuite tests not enabled")
 	}
@@ -48,7 +48,7 @@ func (s *AmazonClientSuite) SetUpSuite(c *gocheck.C) {
 	s.ec2 = ec2.New(s.srv.auth, aws.USEast)
 }
 
-func (s *ClientTests) TestCreateAndDeleteLoadBalancer(c *gocheck.C) {
+func (s *ClientTests) TestCreateAndDeleteLoadBalancer(c *check.C) {
 	createLBReq := elb.CreateLoadBalancer{
 		Name:              "testlb",
 		AvailabilityZones: []string{"us-east-1a"},
@@ -62,15 +62,15 @@ func (s *ClientTests) TestCreateAndDeleteLoadBalancer(c *gocheck.C) {
 		},
 	}
 	resp, err := s.elb.CreateLoadBalancer(&createLBReq)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer s.elb.DeleteLoadBalancer(createLBReq.Name)
-	c.Assert(resp.DNSName, gocheck.Not(gocheck.Equals), "")
+	c.Assert(resp.DNSName, check.Not(check.Equals), "")
 	deleteResp, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(deleteResp.RequestId, gocheck.Not(gocheck.Equals), "")
+	c.Assert(err, check.IsNil)
+	c.Assert(deleteResp.RequestId, check.Not(check.Equals), "")
 }
 
-func (s *ClientTests) TestCreateLoadBalancerError(c *gocheck.C) {
+func (s *ClientTests) TestCreateLoadBalancerError(c *check.C) {
 	createLBReq := elb.CreateLoadBalancer{
 		Name:              "testlb",
 		AvailabilityZones: []string{"us-east-1a"},
@@ -85,22 +85,22 @@ func (s *ClientTests) TestCreateLoadBalancerError(c *gocheck.C) {
 		},
 	}
 	resp, err := s.elb.CreateLoadBalancer(&createLBReq)
-	c.Assert(resp, gocheck.IsNil)
-	c.Assert(err, gocheck.NotNil)
+	c.Assert(resp, check.IsNil)
+	c.Assert(err, check.NotNil)
 	e, ok := err.(*elb.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(e.Message, gocheck.Matches, "Only one of .* or .* may be specified")
-	c.Assert(e.Code, gocheck.Equals, "ValidationError")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(e.Message, check.Matches, "Only one of .* or .* may be specified")
+	c.Assert(e.Code, check.Equals, "ValidationError")
 }
 
-func (s *ClientTests) createInstanceAndLB(c *gocheck.C) (*elb.CreateLoadBalancer, string) {
+func (s *ClientTests) createInstanceAndLB(c *check.C) (*elb.CreateLoadBalancer, string) {
 	options := ec2.RunInstancesOptions{
 		ImageId:          "ami-ccf405a5",
 		InstanceType:     "t1.micro",
 		AvailabilityZone: "us-east-1c",
 	}
 	resp1, err := s.ec2.RunInstances(&options)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	instId := resp1.Instances[0].InstanceId
 	createLBReq := elb.CreateLoadBalancer{
 		Name:              "testlb",
@@ -115,28 +115,28 @@ func (s *ClientTests) createInstanceAndLB(c *gocheck.C) (*elb.CreateLoadBalancer
 		},
 	}
 	_, err = s.elb.CreateLoadBalancer(&createLBReq)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	return &createLBReq, instId
 }
 
 // Cost: 0.02 USD
-func (s *ClientTests) TestCreateRegisterAndDeregisterInstanceWithLoadBalancer(c *gocheck.C) {
+func (s *ClientTests) TestCreateRegisterAndDeregisterInstanceWithLoadBalancer(c *check.C) {
 	createLBReq, instId := s.createInstanceAndLB(c)
 	defer func() {
 		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 		_, err = s.ec2.TerminateInstances([]string{instId})
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 	}()
 	resp, err := s.elb.RegisterInstancesWithLoadBalancer([]string{instId}, createLBReq.Name)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(resp.InstanceIds, gocheck.DeepEquals, []string{instId})
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.InstanceIds, check.DeepEquals, []string{instId})
 	resp2, err := s.elb.DeregisterInstancesFromLoadBalancer([]string{instId}, createLBReq.Name)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(resp2, gocheck.Not(gocheck.Equals), "")
+	c.Assert(err, check.IsNil)
+	c.Assert(resp2, check.Not(check.Equals), "")
 }
 
-func (s *ClientTests) TestDescribeLoadBalancers(c *gocheck.C) {
+func (s *ClientTests) TestDescribeLoadBalancers(c *check.C) {
 	createLBReq := elb.CreateLoadBalancer{
 		Name:              "testlb",
 		AvailabilityZones: []string{"us-east-1a"},
@@ -150,17 +150,17 @@ func (s *ClientTests) TestDescribeLoadBalancers(c *gocheck.C) {
 		},
 	}
 	_, err := s.elb.CreateLoadBalancer(&createLBReq)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer func() {
 		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 	}()
 	resp, err := s.elb.DescribeLoadBalancers()
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(len(resp.LoadBalancerDescriptions) > 0, gocheck.Equals, true)
-	c.Assert(resp.LoadBalancerDescriptions[0].AvailabilityZones, gocheck.DeepEquals, []string{"us-east-1a"})
-	c.Assert(resp.LoadBalancerDescriptions[0].LoadBalancerName, gocheck.Equals, "testlb")
-	c.Assert(resp.LoadBalancerDescriptions[0].Scheme, gocheck.Equals, "internet-facing")
+	c.Assert(err, check.IsNil)
+	c.Assert(len(resp.LoadBalancerDescriptions) > 0, check.Equals, true)
+	c.Assert(resp.LoadBalancerDescriptions[0].AvailabilityZones, check.DeepEquals, []string{"us-east-1a"})
+	c.Assert(resp.LoadBalancerDescriptions[0].LoadBalancerName, check.Equals, "testlb")
+	c.Assert(resp.LoadBalancerDescriptions[0].Scheme, check.Equals, "internet-facing")
 	hc := elb.HealthCheck{
 		HealthyThreshold:   10,
 		Interval:           30,
@@ -168,7 +168,7 @@ func (s *ClientTests) TestDescribeLoadBalancers(c *gocheck.C) {
 		Timeout:            5,
 		UnhealthyThreshold: 2,
 	}
-	c.Assert(resp.LoadBalancerDescriptions[0].HealthCheck, gocheck.DeepEquals, hc)
+	c.Assert(resp.LoadBalancerDescriptions[0].HealthCheck, check.DeepEquals, hc)
 	ld := []elb.ListenerDescription{
 		{
 			Listener: elb.Listener{
@@ -179,41 +179,41 @@ func (s *ClientTests) TestDescribeLoadBalancers(c *gocheck.C) {
 			},
 		},
 	}
-	c.Assert(resp.LoadBalancerDescriptions[0].ListenerDescriptions, gocheck.DeepEquals, ld)
+	c.Assert(resp.LoadBalancerDescriptions[0].ListenerDescriptions, check.DeepEquals, ld)
 	ssg := elb.SourceSecurityGroup{
 		GroupName:  "amazon-elb-sg",
 		OwnerAlias: "amazon-elb",
 	}
-	c.Assert(resp.LoadBalancerDescriptions[0].SourceSecurityGroup, gocheck.DeepEquals, ssg)
+	c.Assert(resp.LoadBalancerDescriptions[0].SourceSecurityGroup, check.DeepEquals, ssg)
 }
 
-func (s *ClientTests) TestDescribeLoadBalancersBadRequest(c *gocheck.C) {
+func (s *ClientTests) TestDescribeLoadBalancersBadRequest(c *check.C) {
 	resp, err := s.elb.DescribeLoadBalancers("absentlb")
-	c.Assert(err, gocheck.NotNil)
-	c.Assert(resp, gocheck.IsNil)
-	c.Assert(err, gocheck.ErrorMatches, ".*(LoadBalancerNotFound).*")
+	c.Assert(err, check.NotNil)
+	c.Assert(resp, check.IsNil)
+	c.Assert(err, check.ErrorMatches, ".*(LoadBalancerNotFound).*")
 }
 
-func (s *ClientTests) TestDescribeInstanceHealth(c *gocheck.C) {
+func (s *ClientTests) TestDescribeInstanceHealth(c *check.C) {
 	createLBReq, instId := s.createInstanceAndLB(c)
 	defer func() {
 		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 		_, err = s.ec2.TerminateInstances([]string{instId})
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 	}()
 	_, err := s.elb.RegisterInstancesWithLoadBalancer([]string{instId}, createLBReq.Name)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	resp, err := s.elb.DescribeInstanceHealth(createLBReq.Name, instId)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(len(resp.InstanceStates) > 0, gocheck.Equals, true)
-	c.Assert(resp.InstanceStates[0].Description, gocheck.Equals, "Instance is in pending state.")
-	c.Assert(resp.InstanceStates[0].InstanceId, gocheck.Equals, instId)
-	c.Assert(resp.InstanceStates[0].State, gocheck.Equals, "OutOfService")
-	c.Assert(resp.InstanceStates[0].ReasonCode, gocheck.Equals, "Instance")
+	c.Assert(err, check.IsNil)
+	c.Assert(len(resp.InstanceStates) > 0, check.Equals, true)
+	c.Assert(resp.InstanceStates[0].Description, check.Equals, "Instance is in pending state.")
+	c.Assert(resp.InstanceStates[0].InstanceId, check.Equals, instId)
+	c.Assert(resp.InstanceStates[0].State, check.Equals, "OutOfService")
+	c.Assert(resp.InstanceStates[0].ReasonCode, check.Equals, "Instance")
 }
 
-func (s *ClientTests) TestDescribeInstanceHealthBadRequest(c *gocheck.C) {
+func (s *ClientTests) TestDescribeInstanceHealthBadRequest(c *check.C) {
 	createLBReq := elb.CreateLoadBalancer{
 		Name:              "testlb",
 		AvailabilityZones: []string{"us-east-1a"},
@@ -227,18 +227,18 @@ func (s *ClientTests) TestDescribeInstanceHealthBadRequest(c *gocheck.C) {
 		},
 	}
 	_, err := s.elb.CreateLoadBalancer(&createLBReq)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer func() {
 		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 	}()
 	resp, err := s.elb.DescribeInstanceHealth(createLBReq.Name, "i-foo")
-	c.Assert(resp, gocheck.IsNil)
-	c.Assert(err, gocheck.NotNil)
-	c.Assert(err, gocheck.ErrorMatches, ".*i-foo.*(InvalidInstance).*")
+	c.Assert(resp, check.IsNil)
+	c.Assert(err, check.NotNil)
+	c.Assert(err, check.ErrorMatches, ".*i-foo.*(InvalidInstance).*")
 }
 
-func (s *ClientTests) TestConfigureHealthCheck(c *gocheck.C) {
+func (s *ClientTests) TestConfigureHealthCheck(c *check.C) {
 	createLBReq := elb.CreateLoadBalancer{
 		Name:              "testlb",
 		AvailabilityZones: []string{"us-east-1a"},
@@ -252,10 +252,10 @@ func (s *ClientTests) TestConfigureHealthCheck(c *gocheck.C) {
 		},
 	}
 	_, err := s.elb.CreateLoadBalancer(&createLBReq)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer func() {
 		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 	}()
 	hc := elb.HealthCheck{
 		HealthyThreshold:   10,
@@ -265,15 +265,15 @@ func (s *ClientTests) TestConfigureHealthCheck(c *gocheck.C) {
 		UnhealthyThreshold: 2,
 	}
 	resp, err := s.elb.ConfigureHealthCheck(createLBReq.Name, &hc)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(resp.HealthCheck.HealthyThreshold, gocheck.Equals, 10)
-	c.Assert(resp.HealthCheck.Interval, gocheck.Equals, 30)
-	c.Assert(resp.HealthCheck.Target, gocheck.Equals, "HTTP:80/")
-	c.Assert(resp.HealthCheck.Timeout, gocheck.Equals, 5)
-	c.Assert(resp.HealthCheck.UnhealthyThreshold, gocheck.Equals, 2)
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.HealthCheck.HealthyThreshold, check.Equals, 10)
+	c.Assert(resp.HealthCheck.Interval, check.Equals, 30)
+	c.Assert(resp.HealthCheck.Target, check.Equals, "HTTP:80/")
+	c.Assert(resp.HealthCheck.Timeout, check.Equals, 5)
+	c.Assert(resp.HealthCheck.UnhealthyThreshold, check.Equals, 2)
 }
 
-func (s *ClientTests) TestConfigureHealthCheckBadRequest(c *gocheck.C) {
+func (s *ClientTests) TestConfigureHealthCheckBadRequest(c *check.C) {
 	createLBReq := elb.CreateLoadBalancer{
 		Name:              "testlb",
 		AvailabilityZones: []string{"us-east-1a"},
@@ -287,10 +287,10 @@ func (s *ClientTests) TestConfigureHealthCheckBadRequest(c *gocheck.C) {
 		},
 	}
 	_, err := s.elb.CreateLoadBalancer(&createLBReq)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer func() {
 		_, err := s.elb.DeleteLoadBalancer(createLBReq.Name)
-		c.Check(err, gocheck.IsNil)
+		c.Check(err, check.IsNil)
 	}()
 	hc := elb.HealthCheck{
 		HealthyThreshold:   10,
@@ -300,8 +300,8 @@ func (s *ClientTests) TestConfigureHealthCheckBadRequest(c *gocheck.C) {
 		UnhealthyThreshold: 2,
 	}
 	resp, err := s.elb.ConfigureHealthCheck(createLBReq.Name, &hc)
-	c.Assert(resp, gocheck.IsNil)
-	c.Assert(err, gocheck.NotNil)
+	c.Assert(resp, check.IsNil)
+	c.Assert(err, check.NotNil)
 	expected := "HealthCheck HTTP Target must specify a port followed by a path that begins with a slash. e.g. HTTP:80/ping/this/path (ValidationError)"
-	c.Assert(err.Error(), gocheck.Equals, expected)
+	c.Assert(err.Error(), check.Equals, expected)
 }

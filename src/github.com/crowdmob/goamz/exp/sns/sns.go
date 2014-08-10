@@ -27,6 +27,7 @@ package sns
 import (
 	"encoding/xml"
 	"errors"
+	"fmt"
 	"github.com/crowdmob/goamz/aws"
 	"net/http"
 	"net/url"
@@ -182,6 +183,7 @@ type PublishOpt struct {
 	MessageStructure string
 	Subject          string
 	TopicArn         string
+	TargetArn        string
 }
 
 type PublishResp struct {
@@ -210,6 +212,10 @@ func (sns *SNS) Publish(options *PublishOpt) (resp *PublishResp, err error) {
 
 	if options.TopicArn != "" {
 		params["TopicArn"] = options.TopicArn
+	}
+
+	if options.TargetArn != "" {
+		params["TargetArn"] = options.TargetArn
 	}
 
 	err = sns.query(nil, nil, params, resp)
@@ -366,13 +372,268 @@ type ListSubscriptionByTopicOpt struct {
 // See http://goo.gl/LaVcC for more details.
 func (sns *SNS) ListSubscriptionByTopic(options *ListSubscriptionByTopicOpt) (resp *ListSubscriptionByTopicResponse, err error) {
 	resp = &ListSubscriptionByTopicResponse{}
-	params := makeParams("ListSbubscriptionByTopic")
+	params := makeParams("ListSubscriptionsByTopic")
 
 	if options.NextToken != "" {
 		params["NextToken"] = options.NextToken
 	}
 
 	params["TopicArn"] = options.TopicArn
+
+	err = sns.query(nil, nil, params, resp)
+	return
+}
+
+type CreatePlatformApplicationResponse struct {
+	PlatformApplicationArn string `xml:"CreatePlatformApplicationResult>PlatformApplicationArn"`
+	ResponseMetadata
+}
+
+type PlatformApplicationOpt struct {
+	Attributes []AttributeEntry
+	Name       string
+	Platform   string
+}
+
+// CreatePlatformApplication
+//
+// See http://goo.gl/Mbbl6Z for more details.
+
+func (sns *SNS) CreatePlatformApplication(options *PlatformApplicationOpt) (resp *CreatePlatformApplicationResponse, err error) {
+	resp = &CreatePlatformApplicationResponse{}
+	params := makeParams("CreatePlatformApplication")
+
+	params["Platform"] = options.Platform
+	params["Name"] = options.Name
+
+	for i, attr := range options.Attributes {
+		params[fmt.Sprintf("Attributes.entry.%s.key", strconv.Itoa(i+1))] = attr.Key
+		params[fmt.Sprintf("Attributes.entry.%s.value", strconv.Itoa(i+1))] = attr.Value
+	}
+
+	err = sns.query(nil, nil, params, resp)
+
+	return
+
+}
+
+type PlatformEndpointOpt struct {
+	Attributes             []AttributeEntry
+	PlatformApplicationArn string
+	CustomUserData         string
+	Token                  string
+}
+
+type CreatePlatformEndpointResponse struct {
+	EndpointArn string `xml:"CreatePlatformEndpointResult>EndpointArn"`
+	ResponseMetadata
+}
+
+// CreatePlatformEndpoint
+//
+// See http://goo.gl/4tnngi for more details.
+func (sns *SNS) CreatePlatformEndpoint(options *PlatformEndpointOpt) (resp *CreatePlatformEndpointResponse, err error) {
+
+	resp = &CreatePlatformEndpointResponse{}
+	params := makeParams("CreatePlatformEndpoint")
+
+	params["PlatformApplicationArn"] = options.PlatformApplicationArn
+	params["Token"] = options.Token
+
+	if options.CustomUserData != "" {
+		params["CustomUserData"] = options.CustomUserData
+	}
+
+	err = sns.query(nil, nil, params, resp)
+
+	return
+}
+
+type DeleteEndpointResponse struct {
+	ResponseMetadata
+}
+
+// DeleteEndpoint
+//
+// See http://goo.gl/9SlUD9 for more details.
+func (sns *SNS) DeleteEndpoint(endpointArn string) (resp *DeleteEndpointResponse, err error) {
+	resp = &DeleteEndpointResponse{}
+	params := makeParams("DeleteEndpoint")
+
+	params["EndpointArn"] = endpointArn
+
+	err = sns.query(nil, nil, params, resp)
+
+	return
+}
+
+type DeletePlatformApplicationResponse struct {
+	ResponseMetadata
+}
+
+// DeletePlatformApplication
+//
+// See http://goo.gl/6GB3DN for more details.
+func (sns *SNS) DeletePlatformApplication(platformApplicationArn string) (resp *DeletePlatformApplicationResponse, err error) {
+	resp = &DeletePlatformApplicationResponse{}
+
+	params := makeParams("DeletePlatformApplication")
+
+	params["PlatformApplicationArn"] = platformApplicationArn
+
+	err = sns.query(nil, nil, params, resp)
+
+	return
+}
+
+type GetEndpointAttributesResponse struct {
+	Attributes []AttributeEntry `xml:"GetEndpointAttributesResult>Attributes>entry"`
+	ResponseMetadata
+}
+
+// GetEndpointAttributes
+//
+// See http://goo.gl/c8E5X1 for more details.
+func (sns *SNS) GetEndpointAttributes(endpointArn string) (resp *GetEndpointAttributesResponse, err error) {
+	resp = &GetEndpointAttributesResponse{}
+
+	params := makeParams("GetEndpointAttributes")
+
+	params["EndpointArn"] = endpointArn
+
+	err = sns.query(nil, nil, params, resp)
+
+	return
+}
+
+type GetPlatformApplicationAttributesResponse struct {
+	Attributes []AttributeEntry `xml:"GetPlatformApplicationAttributesResult>Attributes>entry"`
+	ResponseMetadata
+}
+
+// GetPlatformApplicationAttributes
+//
+// See http://goo.gl/GswJ8I for more details.
+func (sns *SNS) GetPlatformApplicationAttributes(platformApplicationArn, nextToken string) (resp *GetPlatformApplicationAttributesResponse, err error) {
+	resp = &GetPlatformApplicationAttributesResponse{}
+
+	params := makeParams("GetPlatformApplicationAttributes")
+
+	params["PlatformApplicationArn"] = platformApplicationArn
+
+	if nextToken != "" {
+		params["NextToken"] = nextToken
+	}
+
+	err = sns.query(nil, nil, params, resp)
+
+	return
+}
+
+type PlatformEndpoints struct {
+	EndpointArn string           `xml:"EndpointArn"`
+	Attributes  []AttributeEntry `xml:"Attributes>entry"`
+}
+
+type ListEndpointsByPlatformApplicationResponse struct {
+	Endpoints []PlatformEndpoints `xml:"ListEndpointsByPlatformApplicationResult>Endpoints>member"`
+	ResponseMetadata
+}
+
+// ListEndpointsByPlatformApplication
+//
+// See http://goo.gl/L7ioyR for more detail.
+func (sns *SNS) ListEndpointsByPlatformApplication(platformApplicationArn, nextToken string) (resp *ListEndpointsByPlatformApplicationResponse, err error) {
+	resp = &ListEndpointsByPlatformApplicationResponse{}
+
+	params := makeParams("ListEndpointsByPlatformApplication")
+
+	params["PlatformApplicationArn"] = platformApplicationArn
+
+	if nextToken != "" {
+		params["NextToken"] = nextToken
+	}
+
+	err = sns.query(nil, nil, params, resp)
+	return
+
+}
+
+type PlatformApplication struct {
+	Attributes             []AttributeEntry `xml:"Attributes>entry"`
+	PlatformApplicationArn string
+}
+
+type ListPlatformApplicationsResponse struct {
+	NextToken            string
+	PlatformApplications []PlatformApplication `xml:"ListPlatformApplicationsResult>PlatformApplications>member"`
+	ResponseMetadata
+}
+
+// ListPlatformApplications
+//
+// See http://goo.gl/vQ3ooV for more detail.
+func (sns *SNS) ListPlatformApplications(nextToken string) (resp *ListPlatformApplicationsResponse, err error) {
+	resp = &ListPlatformApplicationsResponse{}
+	params := makeParams("ListPlatformApplications")
+
+	if nextToken != "" {
+		params["NextToken"] = nextToken
+	}
+
+	err = sns.query(nil, nil, params, resp)
+	return
+}
+
+type SetEndpointAttributesOpt struct {
+	Attributes  []AttributeEntry
+	EndpointArn string
+}
+
+type SetEndpointAttributesResponse struct {
+	ResponseMetadata
+}
+
+// SetEndpointAttributes
+//
+// See http://goo.gl/GTktCj for more detail.
+func (sns *SNS) SetEndpointAttributes(options *SetEndpointAttributesOpt) (resp *SetEndpointAttributesResponse, err error) {
+	resp = &SetEndpointAttributesResponse{}
+	params := makeParams("SetEndpointAttributes")
+
+	params["EndpointArn"] = options.EndpointArn
+
+	for i, attr := range options.Attributes {
+		params[fmt.Sprintf("Attributes.entry.%s.key", strconv.Itoa(i+1))] = attr.Key
+		params[fmt.Sprintf("Attributes.entry.%s.value", strconv.Itoa(i+1))] = attr.Value
+	}
+
+	err = sns.query(nil, nil, params, resp)
+	return
+}
+
+type SetPlatformApplicationAttributesOpt struct {
+	Attributes             []AttributeEntry
+	PlatformApplicationArn string
+}
+
+type SetPlatformApplicationAttributesResponse struct {
+	ResponseMetadata
+}
+
+// SetPlatformApplicationAttributes
+//
+// See http://goo.gl/RWnzzb for more detail.
+func (sns *SNS) SetPlatformApplicationAttributes(options *SetPlatformApplicationAttributesOpt) (resp *SetPlatformApplicationAttributesResponse, err error) {
+	resp = &SetPlatformApplicationAttributesResponse{}
+	params := makeParams("SetPlatformApplicationAttributes")
+
+	params["PlatformApplicationArn"] = options.PlatformApplicationArn
+
+	for i, attr := range options.Attributes {
+		params[fmt.Sprintf("Attributes.entry.%s.key", strconv.Itoa(i+1))] = attr.Key
+		params[fmt.Sprintf("Attributes.entry.%s.value", strconv.Itoa(i+1))] = attr.Value
+	}
 
 	err = sns.query(nil, nil, params, resp)
 	return

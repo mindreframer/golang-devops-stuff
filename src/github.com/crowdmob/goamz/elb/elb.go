@@ -233,8 +233,8 @@ func (elb *ELB) DescribeInstanceHealth(lbName string, instanceIds ...string) (*D
 		"Action":           "DescribeInstanceHealth",
 		"LoadBalancerName": lbName,
 	}
-	for _, iId := range instanceIds {
-		key := fmt.Sprintf("Instances.member.1.InstanceId")
+	for i, iId := range instanceIds {
+		key := fmt.Sprintf("Instances.member.%d.InstanceId", i+1)
 		params[key] = iId
 	}
 	resp := new(DescribeInstanceHealthResp)
@@ -278,8 +278,13 @@ func (elb *ELB) query(params map[string]string, resp interface{}) error {
 	if endpoint.Path == "" {
 		endpoint.Path = "/"
 	}
-	sign(elb.Auth, "GET", endpoint.Path, params, endpoint.Host)
+	signer, err := aws.NewV2Signer(elb.Auth, aws.ServiceInfo{Endpoint: elb.Region.ELBEndpoint, Signer: 2})
+	if err != nil {
+		return err
+	}
+	signer.Sign("GET", endpoint.Path, params)
 	endpoint.RawQuery = multimap(params).Encode()
+
 	r, err := http.Get(endpoint.String())
 	if err != nil {
 		return err
@@ -359,6 +364,7 @@ func makeCreateParams(createLB *CreateLoadBalancer) map[string]string {
 		params[fmt.Sprintf(key, index, "InstanceProtocol")] = l.InstanceProtocol
 		params[fmt.Sprintf(key, index, "Protocol")] = l.Protocol
 		params[fmt.Sprintf(key, index, "LoadBalancerPort")] = strconv.Itoa(l.LoadBalancerPort)
+		params[fmt.Sprintf(key, index, "SSLCertificateId")] = l.SSLCertificateId
 	}
 	for i, az := range createLB.AvailabilityZones {
 		key := fmt.Sprintf("AvailabilityZones.member.%d", i+1)

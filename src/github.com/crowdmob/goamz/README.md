@@ -17,6 +17,7 @@ github.com/crowdmob/goamz/dynamodb
 github.com/crowdmob/goamz/ec2
 github.com/crowdmob/goamz/elb
 github.com/crowdmob/goamz/iam
+github.com/crowdmob/goamz/kinesis
 github.com/crowdmob/goamz/s3
 github.com/crowdmob/goamz/sqs
 

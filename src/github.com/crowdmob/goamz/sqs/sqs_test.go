@@ -4,116 +4,153 @@ import (
 	"crypto/md5"
 	"fmt"
 	"github.com/crowdmob/goamz/aws"
+	"gopkg.in/check.v1"
 	"hash"
-	"launchpad.net/gocheck"
 )
 
-var _ = gocheck.Suite(&S{})
+var _ = check.Suite(&S{})
 
 type S struct {
 	HTTPSuite
 	sqs *SQS
 }
 
-func (s *S) SetUpSuite(c *gocheck.C) {
+func (s *S) SetUpSuite(c *check.C) {
 	s.HTTPSuite.SetUpSuite(c)
 	auth := aws.Auth{AccessKey: "abc", SecretKey: "123"}
 	s.sqs = New(auth, aws.Region{SQSEndpoint: testServer.URL})
 }
 
-func (s *S) TestCreateQueue(c *gocheck.C) {
+func (s *S) TestCreateQueue(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestCreateQueueXmlOK)
 
 	resp, err := s.sqs.CreateQueue("testQueue")
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 	fmt.Printf("%+v\n", req)
-	c.Assert(req.Form["Action"], gocheck.DeepEquals, []string{"CreateQueue"})
-	c.Assert(req.Form["Attribute.1.Name"], gocheck.DeepEquals, []string{"VisibilityTimeout"})
-	c.Assert(req.Form["Attribute.1.Value"], gocheck.DeepEquals, []string{"30"})
+	c.Assert(req.Form["Action"], check.DeepEquals, []string{"CreateQueue"})
+	c.Assert(req.Form["Attribute.1.Name"], check.DeepEquals, []string{"VisibilityTimeout"})
+	c.Assert(req.Form["Attribute.1.Value"], check.DeepEquals, []string{"30"})
 
-	c.Assert(resp.Url, gocheck.Equals, "http://sqs.us-east-1.amazonaws.com/123456789012/testQueue")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.Url, check.Equals, "http://sqs.us-east-1.amazonaws.com/123456789012/testQueue")
+	c.Assert(err, check.IsNil)
 }
 
-func (s *S) TestCreateQueueWithTimeout(c *gocheck.C) {
+func (s *S) TestCreateQueueWithTimeout(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestCreateQueueXmlOK)
 
 	s.sqs.CreateQueueWithTimeout("testQueue", 180)
 	req := testServer.WaitRequest()
 
 	// TestCreateQueue() tests the core functionality, just check the timeout in this test
-	c.Assert(req.Form["Attribute.1.Name"], gocheck.DeepEquals, []string{"VisibilityTimeout"})
-	c.Assert(req.Form["Attribute.1.Value"], gocheck.DeepEquals, []string{"180"})
+	c.Assert(req.Form["Attribute.1.Name"], check.DeepEquals, []string{"VisibilityTimeout"})
+	c.Assert(req.Form["Attribute.1.Value"], check.DeepEquals, []string{"180"})
 }
 
-func (s *S) TestCreateQueueWithAttributes(c *gocheck.C) {
+func (s *S) TestCreateQueueWithAttributes(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestCreateQueueXmlOK)
 
 	s.sqs.CreateQueueWithAttributes("testQueue", map[string]string{
 		"ReceiveMessageWaitTimeSeconds": "20",
+		"MessageRetentionPeriod":        "60",
 	})
 	req := testServer.WaitRequest()
 
 	// TestCreateQueue() tests the core functionality, just check the timeout in this test
-	c.Assert(req.Form["Attribute.1.Name"], gocheck.DeepEquals, []string{"ReceiveMessageWaitTimeSeconds"})
-	c.Assert(req.Form["Attribute.1.Value"], gocheck.DeepEquals, []string{"20"})
+	c.Assert(req.Form["Attribute.1.Name"], check.DeepEquals, []string{"ReceiveMessageWaitTimeSeconds"})
+	c.Assert(req.Form["Attribute.1.Value"], check.DeepEquals, []string{"20"})
+	c.Assert(req.Form["Attribute.2.Name"], check.DeepEquals, []string{"MessageRetentionPeriod"})
+	c.Assert(req.Form["Attribute.2.Value"], check.DeepEquals, []string{"60"})
 }
 
-func (s *S) TestListQueues(c *gocheck.C) {
+func (s *S) TestListQueues(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestListQueuesXmlOK)
 
 	resp, err := s.sqs.ListQueues("")
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 
-	c.Assert(len(resp.QueueUrl), gocheck.Not(gocheck.Equals), 0)
-	c.Assert(resp.QueueUrl[0], gocheck.Equals, "http://sqs.us-east-1.amazonaws.com/123456789012/testQueue")
-	c.Assert(resp.ResponseMetadata.RequestId, gocheck.Equals, "725275ae-0b9b-4762-b238-436d7c65a1ac")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(len(resp.QueueUrl), check.Not(check.Equals), 0)
+	c.Assert(resp.QueueUrl[0], check.Equals, "http://sqs.us-east-1.amazonaws.com/123456789012/testQueue")
+	c.Assert(resp.ResponseMetadata.RequestId, check.Equals, "725275ae-0b9b-4762-b238-436d7c65a1ac")
+	c.Assert(err, check.IsNil)
 }
 
-func (s *S) TestDeleteQueue(c *gocheck.C) {
+func (s *S) TestDeleteQueue(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestDeleteQueueXmlOK)
 
 	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
 	resp, err := q.Delete()
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/123456789012/testQueue/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 
-	c.Assert(resp.ResponseMetadata.RequestId, gocheck.Equals, "6fde8d1e-52cd-4581-8cd9-c512f4c64223")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.ResponseMetadata.RequestId, check.Equals, "6fde8d1e-52cd-4581-8cd9-c512f4c64223")
+	c.Assert(err, check.IsNil)
 }
 
-func (s *S) TestSendMessage(c *gocheck.C) {
+func (s *S) TestSendMessage(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestSendMessageXmlOK)
 
 	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
 	resp, err := q.SendMessage("This is a test message")
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/123456789012/testQueue/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 
 	msg := "This is a test message"
 	var h hash.Hash = md5.New()
 	h.Write([]byte(msg))
-	c.Assert(resp.MD5, gocheck.Equals, fmt.Sprintf("%x", h.Sum(nil)))
-	c.Assert(resp.Id, gocheck.Equals, "5fea7756-0ea4-451a-a703-a558b933e274")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.MD5, check.Equals, fmt.Sprintf("%x", h.Sum(nil)))
+	c.Assert(resp.Id, check.Equals, "5fea7756-0ea4-451a-a703-a558b933e274")
+	c.Assert(resp.AttributeMD5, check.Equals, "") // Since we sent no message attributes
+	c.Assert(err, check.IsNil)
 }
 
-func (s *S) TestSendMessageBatch(c *gocheck.C) {
+func (s *S) TestSendMessageWithMessageAttributes(c *check.C) {
+	testServer.PrepareResponse(200, nil, TestSendMessageWithAttributesXmlOK)
+
+	attributes := map[string]string{"red": "fish", "blue": "fish"}
+
+	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
+	resp, err := q.SendMessageWithAttributes("This is a test message", attributes)
+	req := testServer.WaitRequest()
+
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
+
+	msg := "This is a test message"
+	var h hash.Hash = md5.New()
+	h.Write([]byte(msg))
+	c.Assert(resp.MD5, check.Equals, fmt.Sprintf("%x", h.Sum(nil)))
+	c.Assert(resp.Id, check.Equals, "5fea7756-0ea4-451a-a703-a558b933e274")
+	c.Assert(resp.AttributeMD5, check.Equals, fmt.Sprintf("%x", calculateAttributeMD5(attributes)))
+	c.Assert(err, check.IsNil)
+}
+
+func (s *S) TestSendMessageWithMessageAttributesInvalidAttributeMD5(c *check.C) {
+	testServer.PrepareResponse(200, nil, TestSendMessageXmlInvalidAttributeMD5)
+
+	attributes := map[string]string{"red": "fish", "blue": "fish"}
+
+	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
+	_, err := q.SendMessageWithAttributes("This is a test message", attributes)
+
+	c.Assert(err.Error(), check.Equals, "Attribute MD5 mismatch, expecting `fe84d6b9875bc7a88b28014389b64ed0`, found `incorrect`")
+}
+
+func (s *S) TestSendMessageBatch(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestSendMessageBatchXmlOk)
 
 	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
@@ -122,19 +159,19 @@ func (s *S) TestSendMessageBatch(c *gocheck.C) {
 	resp, err := q.SendMessageBatchString(msgList)
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/123456789012/testQueue/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 
 	for idx, msg := range msgList {
 		var h hash.Hash = md5.New()
 		h.Write([]byte(msg))
-		c.Assert(resp.SendMessageBatchResult[idx].MD5OfMessageBody, gocheck.Equals, fmt.Sprintf("%x", h.Sum(nil)))
-		c.Assert(err, gocheck.IsNil)
+		c.Assert(resp.SendMessageBatchResult[idx].MD5OfMessageBody, check.Equals, fmt.Sprintf("%x", h.Sum(nil)))
+		c.Assert(err, check.IsNil)
 	}
 }
 
-func (s *S) TestDeleteMessageBatch(c *gocheck.C) {
+func (s *S) TestDeleteMessageBatch(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestDeleteMessageBatchXmlOK)
 
 	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
@@ -144,36 +181,37 @@ func (s *S) TestDeleteMessageBatch(c *gocheck.C) {
 	}
 
 	resp, err := q.DeleteMessageBatch(msgList)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/123456789012/testQueue/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 
 	for idx, _ := range msgList {
-		c.Assert(resp.DeleteMessageBatchResult[idx].Id, gocheck.Equals, fmt.Sprintf("msg%d", idx+1))
+		c.Assert(resp.DeleteMessageBatchResult[idx].Id, check.Equals, fmt.Sprintf("msg%d", idx+1))
 	}
 }
 
-func (s *S) TestReceiveMessage(c *gocheck.C) {
+func (s *S) TestReceiveMessage(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestReceiveMessageXmlOK)
 
 	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
 	resp, err := q.ReceiveMessage(5)
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/123456789012/testQueue/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 
-	c.Assert(len(resp.Messages), gocheck.Not(gocheck.Equals), 0)
-	c.Assert(resp.Messages[0].MessageId, gocheck.Equals, "5fea7756-0ea4-451a-a703-a558b933e274")
-	c.Assert(resp.Messages[0].MD5OfBody, gocheck.Equals, "fafb00f5732ab283681e124bf8747ed1")
-	c.Assert(resp.Messages[0].ReceiptHandle, gocheck.Equals, "MbZj6wDWli+JvwwJaBV+3dcjk2YW2vA3+STFFljTM8tJJg6HRG6PYSasuWXPJB+CwLj1FjgXUv1uSj1gUPAWV66FU/WeR4mq2OKpEGYWbnLmpRCJVAyeMjeU5ZBdtcQ+QEauMZc8ZRv37sIW2iJKq3M9MFx1YvV11A2x/KSbkJ0=")
-	c.Assert(resp.Messages[0].Body, gocheck.Equals, "This is a test message")
+	c.Assert(len(resp.Messages), check.Not(check.Equals), 0)
+	c.Assert(resp.Messages[0].MessageId, check.Equals, "5fea7756-0ea4-451a-a703-a558b933e274")
+	c.Assert(resp.Messages[0].MD5OfBody, check.Equals, "fafb00f5732ab283681e124bf8747ed1")
+	c.Assert(resp.Messages[0].ReceiptHandle, check.Equals, "MbZj6wDWli+JvwwJaBV+3dcjk2YW2vA3+STFFljTM8tJJg6HRG6PYSasuWXPJB+CwLj1FjgXUv1uSj1gUPAWV66FU/WeR4mq2OKpEGYWbnLmpRCJVAyeMjeU5ZBdtcQ+QEauMZc8ZRv37sIW2iJKq3M9MFx1YvV11A2x/KSbkJ0=")
+	c.Assert(resp.Messages[0].Body, check.Equals, "This is a test message")
 
-	c.Assert(len(resp.Messages[0].Attribute), gocheck.Not(gocheck.Equals), 0)
+	c.Assert(len(resp.Messages[0].Attribute), check.Not(check.Equals), 0)
+	c.Assert(len(resp.Messages[0].MessageAttribute), check.Equals, 0)
 
 	expectedAttributeResults := []struct {
 		Name  string
@@ -186,14 +224,66 @@ func (s *S) TestReceiveMessage(c *gocheck.C) {
 	}
 
 	for i, expected := range expectedAttributeResults {
-		c.Assert(resp.Messages[0].Attribute[i].Name, gocheck.Equals, expected.Name)
-		c.Assert(resp.Messages[0].Attribute[i].Value, gocheck.Equals, expected.Value)
+		c.Assert(resp.Messages[0].Attribute[i].Name, check.Equals, expected.Name)
+		c.Assert(resp.Messages[0].Attribute[i].Value, check.Equals, expected.Value)
 	}
 
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 }
 
-func (s *S) TestChangeMessageVisibility(c *gocheck.C) {
+func (s *S) TestReceiveMessageWithAttributes(c *check.C) {
+	testServer.PrepareResponse(200, nil, TestReceiveMessageWithAttributesXmlOK)
+
+	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
+	resp, err := q.ReceiveMessage(5)
+	req := testServer.WaitRequest()
+
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
+
+	c.Assert(len(resp.Messages), check.Not(check.Equals), 0)
+	c.Assert(resp.Messages[0].MessageId, check.Equals, "5fea7756-0ea4-451a-a703-a558b933e274")
+	c.Assert(resp.Messages[0].MD5OfBody, check.Equals, "fafb00f5732ab283681e124bf8747ed1")
+	c.Assert(resp.Messages[0].ReceiptHandle, check.Equals, "MbZj6wDWli+JvwwJaBV+3dcjk2YW2vA3+STFFljTM8tJJg6HRG6PYSasuWXPJB+CwLj1FjgXUv1uSj1gUPAWV66FU/WeR4mq2OKpEGYWbnLmpRCJVAyeMjeU5ZBdtcQ+QEauMZc8ZRv37sIW2iJKq3M9MFx1YvV11A2x/KSbkJ0=")
+	c.Assert(resp.Messages[0].Body, check.Equals, "This is a test message")
+
+	c.Assert(len(resp.Messages[0].Attribute), check.Not(check.Equals), 0)
+	c.Assert(len(resp.Messages[0].MessageAttribute), check.Not(check.Equals), 0)
+
+	expectedAttributeResults := []struct {
+		Name  string
+		Value string
+	}{
+		{Name: "SenderId", Value: "195004372649"},
+		{Name: "SentTimestamp", Value: "1238099229000"},
+		{Name: "ApproximateReceiveCount", Value: "5"},
+		{Name: "ApproximateFirstReceiveTimestamp", Value: "1250700979248"},
+	}
+
+	for i, expected := range expectedAttributeResults {
+		c.Assert(resp.Messages[0].Attribute[i].Name, check.Equals, expected.Name)
+		c.Assert(resp.Messages[0].Attribute[i].Value, check.Equals, expected.Value)
+	}
+
+	expectedMessageAttributeResults := []struct {
+		Name  string
+		Value string
+	}{
+		{Name: "Hero", Value: "James Bond"},
+		{Name: "Villian", Value: "Goldfinger"},
+	}
+
+	for i, expected := range expectedMessageAttributeResults {
+		c.Assert(resp.Messages[0].MessageAttribute[i].Name, check.Equals, expected.Name)
+		c.Assert(resp.Messages[0].MessageAttribute[i].Value.DataType, check.Equals, "String")
+		c.Assert(resp.Messages[0].MessageAttribute[i].Value.StringValue, check.Equals, expected.Value)
+	}
+
+	c.Assert(err, check.IsNil)
+}
+
+func (s *S) TestChangeMessageVisibility(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestReceiveMessageXmlOK)
 
 	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
@@ -206,15 +296,15 @@ func (s *S) TestChangeMessageVisibility(c *gocheck.C) {
 	resp, err := q.ChangeMessageVisibility(&resp1.Messages[0], 50)
 	req = testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/123456789012/testQueue/")
-	c.Assert(req.Header["Date"], gocheck.Not(gocheck.Equals), "")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Header["Date"], check.Not(check.Equals), "")
 
-	c.Assert(resp.ResponseMetadata.RequestId, gocheck.Equals, "6a7a282a-d013-4a59-aba9-335b0fa48bed")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(resp.ResponseMetadata.RequestId, check.Equals, "6a7a282a-d013-4a59-aba9-335b0fa48bed")
+	c.Assert(err, check.IsNil)
 }
 
-func (s *S) TestGetQueueAttributes(c *gocheck.C) {
+func (s *S) TestGetQueueAttributes(c *check.C) {
 	testServer.PrepareResponse(200, nil, TestGetQueueAttributesXmlOK)
 
 	q := &Queue{s.sqs, testServer.URL + "/123456789012/testQueue/"}
@@ -222,12 +312,12 @@ func (s *S) TestGetQueueAttributes(c *gocheck.C) {
 	resp, err := q.GetQueueAttributes("All")
 	req := testServer.WaitRequest()
 
-	c.Assert(req.Method, gocheck.Equals, "GET")
-	c.Assert(req.URL.Path, gocheck.Equals, "/123456789012/testQueue/")
+	c.Assert(req.Method, check.Equals, "POST")
+	c.Assert(req.URL.Path, check.Equals, "/123456789012/testQueue/")
 
-	c.Assert(resp.ResponseMetadata.RequestId, gocheck.Equals, "1ea71be5-b5a2-4f9d-b85a-945d8d08cd0b")
+	c.Assert(resp.ResponseMetadata.RequestId, check.Equals, "1ea71be5-b5a2-4f9d-b85a-945d8d08cd0b")
 
-	c.Assert(len(resp.Attributes), gocheck.Equals, 9)
+	c.Assert(len(resp.Attributes), check.Equals, 9)
 
 	expectedResults := []struct {
 		Name  string
@@ -245,9 +335,9 @@ func (s *S) TestGetQueueAttributes(c *gocheck.C) {
 	}
 
 	for i, expected := range expectedResults {
-		c.Assert(resp.Attributes[i].Name, gocheck.Equals, expected.Name)
-		c.Assert(resp.Attributes[i].Value, gocheck.Equals, expected.Value)
+		c.Assert(resp.Attributes[i].Name, check.Equals, expected.Name)
+		c.Assert(resp.Attributes[i].Value, check.Equals, expected.Value)
 	}
 
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 }

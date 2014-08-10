@@ -2,7 +2,7 @@ package elb_test
 
 import (
 	"fmt"
-	"launchpad.net/gocheck"
+	"gopkg.in/check.v1"
 	"net/http"
 	"net/url"
 	"os"
@@ -11,18 +11,18 @@ import (
 )
 
 func Test(t *testing.T) {
-	gocheck.TestingT(t)
+	check.TestingT(t)
 }
 
 type HTTPSuite struct{}
 
 var testServer = NewTestHTTPServer("http://localhost:4444", 5*time.Second)
 
-func (s *HTTPSuite) SetUpSuite(c *gocheck.C) {
+func (s *HTTPSuite) SetUpSuite(c *check.C) {
 	testServer.Start()
 }
 
-func (s *HTTPSuite) TearDownTest(c *gocheck.C) {
+func (s *HTTPSuite) TearDownTest(c *check.C) {
 	testServer.FlushRequests()
 }
 

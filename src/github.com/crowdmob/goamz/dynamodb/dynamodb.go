@@ -41,7 +41,7 @@ type Error struct {
 	Message    string // The human-oriented error message
 }
 
-func (e *Error) Error() string {
+func (e Error) Error() string {
 	return e.Code + ": " + e.Message
 }
 

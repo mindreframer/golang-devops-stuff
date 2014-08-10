@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 )
+
+const maxNumberOfRetry = 4
 
 type BatchGetItem struct {
 	Server *Server
@@ -185,7 +188,35 @@ func (t *Table) putItem(hashKey, rangeKey string, attributes, expected []Attribu
 		q.AddExpected(expected)
 	}
 
-	jsonResponse, err := t.Server.queryServer(target("PutItem"), q)
+	var jsonResponse []byte
+	var err error
+	// based on:
+	// http://docs.aws.amazon.com/amazondynamodb/latest/developerguide/ErrorHandling.html#APIRetries
+	currentRetry := uint(0)
+	for {
+		jsonResponse, err = t.Server.queryServer(target("PutItem"), q)
+		if currentRetry >= maxNumberOfRetry {
+			break
+		}
+
+		retry := false
+		if err != nil {
+			log.Printf("Error requesting from Amazon, request was: %#v\n response is:%#v\n and error is: %#v\n", q, string(jsonResponse), err)
+			if err, ok := err.(*Error); ok {
+				retry = (err.StatusCode == 500) ||
+					(err.Code == "ThrottlingException") ||
+					(err.Code == "ProvisionedThroughputExceededException")
+			}
+		}
+
+		if !retry {
+			break
+		}
+
+		log.Printf("Retrying in %v ms\n", (1<<currentRetry)*50)
+		<-time.After((1 << currentRetry) * 50 * time.Millisecond)
+		currentRetry += 1
+	}
 
 	if err != nil {
 		return false, err
