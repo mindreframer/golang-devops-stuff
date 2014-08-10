@@ -2,10 +2,9 @@ package server
 
 import (
 	"encoding/binary"
-	"os"
 
 	"github.com/coreos/etcd/log"
-	"github.com/coreos/etcd/third_party/github.com/coreos/raft"
+	"github.com/coreos/etcd/third_party/github.com/goraft/raft"
 )
 
 func init() {
@@ -24,7 +23,20 @@ func (c *RemoveCommand) CommandName() string {
 
 // Remove a server from the cluster
 func (c *RemoveCommand) Apply(context raft.Context) (interface{}, error) {
+	index, err := applyRemove(c, context)
+	if err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, 8)
+	binary.PutUvarint(b, index)
+	return b, nil
+}
+
+// applyRemove removes the given machine from the cluster.
+func applyRemove(c *RemoveCommand, context raft.Context) (uint64, error) {
 	ps, _ := context.Server().Context().(*PeerServer)
+	commitIndex := context.CommitIndex()
 
 	// Remove node from the shared registry.
 	err := ps.registry.Unregister(c.Name)
@@ -34,14 +46,13 @@ func (c *RemoveCommand) Apply(context raft.Context) (interface{}, error) {
 
 	if err != nil {
 		log.Debugf("Error while unregistering: %s (%v)", c.Name, err)
-		return []byte{0}, err
+		return 0, err
 	}
 
 	// Remove peer in raft
-	err = context.Server().RemovePeer(c.Name)
-	if err != nil {
+	if err := context.Server().RemovePeer(c.Name); err != nil {
 		log.Debugf("Unable to remove peer: %s (%v)", c.Name, err)
-		return []byte{0}, err
+		return 0, err
 	}
 
 	if c.Name == context.Server().Name() {
@@ -53,15 +64,12 @@ func (c *RemoveCommand) Apply(context raft.Context) (interface{}, error) {
 		// command and need to be removed
 		if context.CommitIndex() > ps.joinIndex && ps.joinIndex != 0 {
 			log.Debugf("server [%s] is removed", context.Server().Name())
-			os.Exit(0)
+			ps.asyncRemove()
 		} else {
 			// else ignore remove
 			log.Debugf("ignore previous remove command.")
+			ps.removedInLog = true
 		}
 	}
-
-	b := make([]byte, 8)
-	binary.PutUvarint(b, context.CommitIndex())
-
-	return b, err
+	return commitIndex, nil
 }

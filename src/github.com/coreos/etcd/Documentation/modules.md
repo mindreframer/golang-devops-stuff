@@ -1,7 +1,13 @@
 ## Modules
 
 etcd has a number of modules that are built on top of the core etcd API.
-These modules provide things like dashboards, locks and leader election.
+These modules provide things like dashboards, locks and leader election (removed).
+
+**Warning**: Modules are deprecated from v0.4 until we have a solid base we can apply them back onto.
+For now, we are choosing to focus on raft algorithm and core etcd to make sure that it works correctly and fast.
+And it is time consuming to maintain these modules in this period, given that etcd's API changes from time to time.
+Moreover, the lock module has some unfixed bugs, which may mislead users.
+But we also notice that these modules are popular and useful, and plan to add them back with full functionality as soon as possible.
 
 ### Dashboard
 
@@ -15,6 +21,7 @@ Use the `-cors='*'` flag to allow your browser to request information from the c
 The Lock module implements a fair lock that can be used when lots of clients want access to a single resource.
 A lock can be associated with a value.
 The value is unique so if a lock tries to request a value that is already queued for a lock then it will find it and watch until that value obtains the lock.
+You may supply a `timeout` which will cancel the lock request if it is not obtained within `timeout` seconds.  If `timeout` is not supplied, it is presumed to be infinite.  If `timeout` is `0`, the lock request will fail if it is not immediately acquired.
 If you lock the same value on a key from two separate curl sessions they'll both return at the same time.
 
 Here's the API:
@@ -31,13 +38,19 @@ curl -X POST http://127.0.0.1:4001/mod/v2/lock/customer1?ttl=60
 curl -X POST http://127.0.0.1:4001/mod/v2/lock/customer1?ttl=60 -d value=bar
 ```
 
+**Acquire a lock for "customer1" that is associated with the value "bar" only if it is done within 2 seconds**
+
+```sh
+curl -X POST http://127.0.0.1:4001/mod/v2/lock/customer1?ttl=60 -d value=bar -d timeout=2
+```
+
 **Renew the TTL on the "customer1" lock for index 2**
 
 ```sh
 curl -X PUT http://127.0.0.1:4001/mod/v2/lock/customer1?ttl=60 -d index=2
 ```
 
-**Renew the TTL on the "customer1" lock for value "customer1"**
+**Renew the TTL on the "customer1" lock for value "bar"**
 
 ```sh
 curl -X PUT http://127.0.0.1:4001/mod/v2/lock/customer1?ttl=60 -d value=bar
@@ -68,7 +81,7 @@ curl -X DELETE http://127.0.0.1:4001/mod/v2/lock/customer1?value=bar
 ```
 
 
-### Leader Election
+### Leader Election (Deprecated and Removed in 0.4)
 
 The Leader Election module wraps the Lock module to allow clients to come to consensus on a single value.
 This is useful when you want one server to process at a time but allow other servers to fail over.

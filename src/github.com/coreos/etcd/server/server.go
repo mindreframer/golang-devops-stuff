@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/coreos/etcd/third_party/github.com/coreos/raft"
+	"github.com/coreos/etcd/third_party/github.com/goraft/raft"
 	"github.com/coreos/etcd/third_party/github.com/gorilla/mux"
 
 	etcdErr "github.com/coreos/etcd/error"
+	ehttp "github.com/coreos/etcd/http"
 	"github.com/coreos/etcd/log"
 	"github.com/coreos/etcd/metrics"
 	"github.com/coreos/etcd/mod"
-	ehttp "github.com/coreos/etcd/http"
 	uhttp "github.com/coreos/etcd/pkg/http"
 	"github.com/coreos/etcd/server/v1"
 	"github.com/coreos/etcd/server/v2"
@@ -25,26 +25,26 @@ import (
 
 // This is the default implementation of the Server interface.
 type Server struct {
-	Name		string
-	url		string
-	handler		http.Handler
-	peerServer	*PeerServer
-	registry	*Registry
-	store		store.Store
-	metrics		*metrics.Bucket
+	Name       string
+	url        string
+	handler    http.Handler
+	peerServer *PeerServer
+	registry   *Registry
+	store      store.Store
+	metrics    *metrics.Bucket
 
-	trace	bool
+	trace bool
 }
 
 // Creates a new Server.
 func New(name, url string, peerServer *PeerServer, registry *Registry, store store.Store, mb *metrics.Bucket) *Server {
 	s := &Server{
-		Name:		name,
-		url:		url,
-		store:		store,
-		registry:	registry,
-		peerServer:	peerServer,
-		metrics:	mb,
+		Name:       name,
+		url:        url,
+		store:      store,
+		registry:   registry,
+		peerServer: peerServer,
+		metrics:    mb,
 	}
 
 	return s
@@ -79,6 +79,11 @@ func (s *Server) URL() string {
 	return s.url
 }
 
+// PeerHost retrieves the host part of Peer URL for a given node name.
+func (s *Server) PeerHost(name string) (string, bool) {
+	return s.registry.PeerHost(name)
+}
+
 // Retrives the Peer URL for a given node name.
 func (s *Server) PeerURL(name string) (string, bool) {
 	return s.registry.PeerURL(name)
@@ -94,34 +99,42 @@ func (s *Server) Store() store.Store {
 	return s.store
 }
 
+func (s *Server) SetRegistry(registry *Registry) {
+	s.registry = registry
+}
+
+func (s *Server) SetStore(store store.Store) {
+	s.store = store
+}
+
 func (s *Server) installV1(r *mux.Router) {
-	s.handleFuncV1(r, "/v1/keys/{key:.*}", v1.GetKeyHandler).Methods("GET")
+	s.handleFuncV1(r, "/v1/keys/{key:.*}", v1.GetKeyHandler).Methods("GET", "HEAD")
 	s.handleFuncV1(r, "/v1/keys/{key:.*}", v1.SetKeyHandler).Methods("POST", "PUT")
 	s.handleFuncV1(r, "/v1/keys/{key:.*}", v1.DeleteKeyHandler).Methods("DELETE")
-	s.handleFuncV1(r, "/v1/watch/{key:.*}", v1.WatchKeyHandler).Methods("GET", "POST")
-	s.handleFunc(r, "/v1/leader", s.GetLeaderHandler).Methods("GET")
-	s.handleFunc(r, "/v1/machines", s.GetPeersHandler).Methods("GET")
-	s.handleFunc(r, "/v1/peers", s.GetPeersHandler).Methods("GET")
-	s.handleFunc(r, "/v1/stats/self", s.GetStatsHandler).Methods("GET")
-	s.handleFunc(r, "/v1/stats/leader", s.GetLeaderStatsHandler).Methods("GET")
-	s.handleFunc(r, "/v1/stats/store", s.GetStoreStatsHandler).Methods("GET")
+	s.handleFuncV1(r, "/v1/watch/{key:.*}", v1.WatchKeyHandler).Methods("GET", "HEAD", "POST")
+	s.handleFunc(r, "/v1/leader", s.GetLeaderHandler).Methods("GET", "HEAD")
+	s.handleFunc(r, "/v1/machines", s.GetPeersHandler).Methods("GET", "HEAD")
+	s.handleFunc(r, "/v1/peers", s.GetPeersHandler).Methods("GET", "HEAD")
+	s.handleFunc(r, "/v1/stats/self", s.GetStatsHandler).Methods("GET", "HEAD")
+	s.handleFunc(r, "/v1/stats/leader", s.GetLeaderStatsHandler).Methods("GET", "HEAD")
+	s.handleFunc(r, "/v1/stats/store", s.GetStoreStatsHandler).Methods("GET", "HEAD")
 }
 
 func (s *Server) installV2(r *mux.Router) {
 	r2 := mux.NewRouter()
 	r.PathPrefix("/v2").Handler(ehttp.NewLowerQueryParamsHandler(r2))
 
-	s.handleFuncV2(r2, "/v2/keys/{key:.*}", v2.GetHandler).Methods("GET")
+	s.handleFuncV2(r2, "/v2/keys/{key:.*}", v2.GetHandler).Methods("GET", "HEAD")
 	s.handleFuncV2(r2, "/v2/keys/{key:.*}", v2.PostHandler).Methods("POST")
 	s.handleFuncV2(r2, "/v2/keys/{key:.*}", v2.PutHandler).Methods("PUT")
 	s.handleFuncV2(r2, "/v2/keys/{key:.*}", v2.DeleteHandler).Methods("DELETE")
-	s.handleFunc(r2, "/v2/leader", s.GetLeaderHandler).Methods("GET")
-	s.handleFunc(r2, "/v2/machines", s.GetPeersHandler).Methods("GET")
-	s.handleFunc(r2, "/v2/peers", s.GetPeersHandler).Methods("GET")
-	s.handleFunc(r2, "/v2/stats/self", s.GetStatsHandler).Methods("GET")
-	s.handleFunc(r2, "/v2/stats/leader", s.GetLeaderStatsHandler).Methods("GET")
-	s.handleFunc(r2, "/v2/stats/store", s.GetStoreStatsHandler).Methods("GET")
-	s.handleFunc(r2, "/v2/speedTest", s.SpeedTestHandler).Methods("GET")
+	s.handleFunc(r2, "/v2/leader", s.GetLeaderHandler).Methods("GET", "HEAD")
+	s.handleFunc(r2, "/v2/machines", s.GetPeersHandler).Methods("GET", "HEAD")
+	s.handleFunc(r2, "/v2/peers", s.GetPeersHandler).Methods("GET", "HEAD")
+	s.handleFunc(r2, "/v2/stats/self", s.GetStatsHandler).Methods("GET", "HEAD")
+	s.handleFunc(r2, "/v2/stats/leader", s.GetLeaderStatsHandler).Methods("GET", "HEAD")
+	s.handleFunc(r2, "/v2/stats/store", s.GetStoreStatsHandler).Methods("GET", "HEAD")
+	s.handleFunc(r2, "/v2/speedTest", s.SpeedTestHandler).Methods("GET", "HEAD")
 }
 
 func (s *Server) installMod(r *mux.Router) {
@@ -129,7 +142,7 @@ func (s *Server) installMod(r *mux.Router) {
 }
 
 func (s *Server) installDebug(r *mux.Router) {
-	s.handleFunc(r, "/debug/metrics", s.GetMetricsHandler).Methods("GET")
+	s.handleFunc(r, "/debug/metrics", s.GetMetricsHandler).Methods("GET", "HEAD")
 	r.HandleFunc("/debug/pprof", pprof.Index)
 	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
@@ -151,11 +164,23 @@ func (s *Server) handleFuncV2(r *mux.Router, path string, f func(http.ResponseWr
 	})
 }
 
+type HEADResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (w *HEADResponseWriter) Write([]byte) (int, error) {
+	return 0, nil
+}
+
 // Adds a server handler to the router.
 func (s *Server) handleFunc(r *mux.Router, path string, f func(http.ResponseWriter, *http.Request) error) *mux.Route {
 
 	// Wrap the standard HandleFunc interface to pass in the server reference.
 	return r.HandleFunc(path, func(w http.ResponseWriter, req *http.Request) {
+		if req.Method == "HEAD" {
+			w = &HEADResponseWriter{w}
+		}
+
 		// Log request.
 		log.Debugf("[recv] %s %s %s [%s]", req.Method, s.URL(), req.URL.Path, req.RemoteAddr)
 
@@ -179,7 +204,9 @@ func (s *Server) HTTPHandler() http.Handler {
 	s.handleFunc(router, "/version", s.GetVersionHandler).Methods("GET")
 	s.installV1(router)
 	s.installV2(router)
-	s.installMod(router)
+	// Mod is deprecated temporariy due to its unstable state.
+	// It would be added back later.
+	// s.installMod(router)
 
 	if s.trace {
 		s.installDebug(router)
@@ -234,25 +261,25 @@ func (s *Server) Dispatch(c raft.Command, w http.ResponseWriter, req *http.Reque
 
 		return nil
 
-	} else {
-		leader := ps.raftServer.Leader()
-
-		// No leader available.
-		if leader == "" {
-			return etcdErr.NewError(300, "", s.Store().Index())
-		}
-
-		var url string
-		switch c.(type) {
-		case *JoinCommand, *RemoveCommand:
-			url, _ = ps.registry.PeerURL(leader)
-		default:
-			url, _ = ps.registry.ClientURL(leader)
-		}
-		uhttp.Redirect(url, w, req)
-
-		return nil
 	}
+
+	leader := ps.raftServer.Leader()
+	if leader == "" {
+		return etcdErr.NewError(300, "", s.Store().Index())
+	}
+
+	var url string
+	switch c.(type) {
+	case *JoinCommand, *RemoveCommand,
+		*SetClusterConfigCommand:
+		url, _ = ps.registry.PeerURL(leader)
+	default:
+		url, _ = ps.registry.ClientURL(leader)
+	}
+
+	uhttp.Redirect(url, w, req)
+
+	return nil
 }
 
 // Handler to return the current version of etcd.
@@ -284,6 +311,7 @@ func (s *Server) GetPeersHandler(w http.ResponseWriter, req *http.Request) error
 
 // Retrieves stats on the Raft server.
 func (s *Server) GetStatsHandler(w http.ResponseWriter, req *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(s.peerServer.Stats())
 	return nil
 }
@@ -291,6 +319,7 @@ func (s *Server) GetStatsHandler(w http.ResponseWriter, req *http.Request) error
 // Retrieves stats on the leader.
 func (s *Server) GetLeaderStatsHandler(w http.ResponseWriter, req *http.Request) error {
 	if s.peerServer.RaftServer().State() == raft.Leader {
+		w.Header().Set("Content-Type", "application/json")
 		w.Write(s.peerServer.PeerStats())
 		return nil
 	}
@@ -306,6 +335,7 @@ func (s *Server) GetLeaderStatsHandler(w http.ResponseWriter, req *http.Request)
 
 // Retrieves stats on the leader.
 func (s *Server) GetStoreStatsHandler(w http.ResponseWriter, req *http.Request) error {
+	w.Header().Set("Content-Type", "application/json")
 	w.Write(s.store.JsonStats())
 	return nil
 }

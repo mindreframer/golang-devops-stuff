@@ -9,13 +9,21 @@ import (
 
 	etcdErr "github.com/coreos/etcd/error"
 	"github.com/coreos/etcd/log"
-	"github.com/coreos/etcd/third_party/github.com/coreos/raft"
+	"github.com/coreos/etcd/third_party/github.com/goraft/raft"
 	"github.com/coreos/etcd/third_party/github.com/gorilla/mux"
 )
 
 func GetHandler(w http.ResponseWriter, req *http.Request, s Server) error {
 	vars := mux.Vars(req)
 	key := "/" + vars["key"]
+
+	recursive := (req.FormValue("recursive") == "true")
+	sort := (req.FormValue("sorted") == "true")
+
+	if req.FormValue("quorum") == "true" {
+		c := s.Store().CommandFactory().CreateGetCommand(key, recursive, sort)
+		return s.Dispatch(c, w, req)
+	}
 
 	// Help client to redirect the request to the current leader
 	if req.FormValue("consistent") == "true" && s.State() != raft.Leader {
@@ -35,19 +43,17 @@ func GetHandler(w http.ResponseWriter, req *http.Request, s Server) error {
 		return nil
 	}
 
-	recursive := (req.FormValue("recursive") == "true")
-	sort := (req.FormValue("sorted") == "true")
 	waitIndex := req.FormValue("waitIndex")
 	stream := (req.FormValue("stream") == "true")
 
 	if req.FormValue("wait") == "true" {
-		return handleWatch(key, recursive, stream, waitIndex, w, s)
+		return handleWatch(key, recursive, stream, waitIndex, w, req, s)
 	}
 
-	return handleGet(key, recursive, sort, w, s)
+	return handleGet(key, recursive, sort, w, req, s)
 }
 
-func handleWatch(key string, recursive, stream bool, waitIndex string, w http.ResponseWriter, s Server) error {
+func handleWatch(key string, recursive, stream bool, waitIndex string, w http.ResponseWriter, req *http.Request, s Server) error {
 	// Create a command to watch from a given index (default 0).
 	var sinceIndex uint64 = 0
 	var err error
@@ -68,6 +74,7 @@ func handleWatch(key string, recursive, stream bool, waitIndex string, w http.Re
 	closeChan := cn.CloseNotify()
 
 	writeHeaders(w, s)
+	w.(http.Flusher).Flush()
 
 	if stream {
 		// watcher hub will not help to remove stream watcher
@@ -84,6 +91,9 @@ func handleWatch(key string, recursive, stream bool, waitIndex string, w http.Re
 					// send to the client in time. Then we simply end streaming.
 					return nil
 				}
+				if req.Method == "HEAD" {
+					continue
+				}
 
 				b, _ := json.Marshal(event)
 				_, err := w.Write(b)
@@ -99,16 +109,23 @@ func handleWatch(key string, recursive, stream bool, waitIndex string, w http.Re
 	case <-closeChan:
 		watcher.Remove()
 	case event := <-watcher.EventChan:
+		if req.Method == "HEAD" {
+			return nil
+		}
 		b, _ := json.Marshal(event)
 		w.Write(b)
 	}
 	return nil
 }
 
-func handleGet(key string, recursive, sort bool, w http.ResponseWriter, s Server) error {
+func handleGet(key string, recursive, sort bool, w http.ResponseWriter, req *http.Request, s Server) error {
 	event, err := s.Store().Get(key, recursive, sort)
 	if err != nil {
 		return err
+	}
+
+	if req.Method == "HEAD" {
+		return nil
 	}
 
 	writeHeaders(w, s)

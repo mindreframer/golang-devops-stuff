@@ -44,8 +44,8 @@ Peer Communication Options:
   -peer-ca-file=<path>    Path to the peer CA file.
   -peer-cert-file=<path>  Path to the peer cert file.
   -peer-key-file=<path>   Path to the peer key file.
-  -peer-heartbeat-timeout=<time>
-                          Time (in milliseconds) for a heartbeat to timeout.
+  -peer-heartbeat-interval=<time>
+                          Time (in milliseconds) of a heartbeat interval.
   -peer-election-timeout=<time>
                           Time (in milliseconds) for an election to timeout.
 
@@ -53,9 +53,11 @@ Other Options:
   -max-result-buffer   Max size of the result buffer.
   -max-retry-attempts  Number of times a node will try to join a cluster.
   -retry-interval      Seconds to wait between cluster join retry attempts.
-  -max-cluster-size    Maximum number of nodes in the cluster.
   -snapshot=false      Disable log snapshots
   -snapshot-count      Number of transactions before issuing a snapshot.
+  -cluster-active-size Number of active nodes in the cluster.
+  -cluster-remove-delay Seconds before one node is removed.
+  -cluster-sync-interval Seconds between synchronizations for standby mode.
 `
 
 // Usage returns the usage message for etcd.
