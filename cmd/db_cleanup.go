@@ -2,9 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
 	"github.com/smira/aptly/utils"
+	"github.com/smira/commander"
 	"sort"
 )
 
@@ -14,16 +14,15 @@ func aptlyDbCleanup(cmd *commander.Command, args []string) error {
 
 	if len(args) != 0 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	// collect information about references packages...
-	existingPackageRefs := debian.NewPackageRefList()
+	existingPackageRefs := deb.NewPackageRefList()
 
-	context.progress.Printf("Loading mirrors, local repos and snapshots...\n")
-	repoCollection := debian.NewRemoteRepoCollection(context.database)
-	err = repoCollection.ForEach(func(repo *debian.RemoteRepo) error {
-		err := repoCollection.LoadComplete(repo)
+	context.Progress().Printf("Loading mirrors, local repos and snapshots...\n")
+	err = context.CollectionFactory().RemoteRepoCollection().ForEach(func(repo *deb.RemoteRepo) error {
+		err := context.CollectionFactory().RemoteRepoCollection().LoadComplete(repo)
 		if err != nil {
 			return err
 		}
@@ -36,9 +35,8 @@ func aptlyDbCleanup(cmd *commander.Command, args []string) error {
 		return err
 	}
 
-	localRepoCollection := debian.NewLocalRepoCollection(context.database)
-	err = localRepoCollection.ForEach(func(repo *debian.LocalRepo) error {
-		err := localRepoCollection.LoadComplete(repo)
+	err = context.CollectionFactory().LocalRepoCollection().ForEach(func(repo *deb.LocalRepo) error {
+		err := context.CollectionFactory().LocalRepoCollection().LoadComplete(repo)
 		if err != nil {
 			return err
 		}
@@ -51,9 +49,8 @@ func aptlyDbCleanup(cmd *commander.Command, args []string) error {
 		return err
 	}
 
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
-	err = snapshotCollection.ForEach(func(snapshot *debian.Snapshot) error {
-		err := snapshotCollection.LoadComplete(snapshot)
+	err = context.CollectionFactory().SnapshotCollection().ForEach(func(snapshot *deb.Snapshot) error {
+		err := context.CollectionFactory().SnapshotCollection().LoadComplete(snapshot)
 		if err != nil {
 			return err
 		}
@@ -65,44 +62,45 @@ func aptlyDbCleanup(cmd *commander.Command, args []string) error {
 	}
 
 	// ... and compare it to the list of all packages
-	context.progress.Printf("Loading list of all packages...\n")
-	packageCollection := debian.NewPackageCollection(context.database)
-	allPackageRefs := packageCollection.AllPackageRefs()
+	context.Progress().Printf("Loading list of all packages...\n")
+	allPackageRefs := context.CollectionFactory().PackageCollection().AllPackageRefs()
 
 	toDelete := allPackageRefs.Substract(existingPackageRefs)
 
 	// delete packages that are no longer referenced
-	context.progress.Printf("Deleting unreferenced packages (%d)...\n", toDelete.Len())
+	context.Progress().Printf("Deleting unreferenced packages (%d)...\n", toDelete.Len())
 
-	context.database.StartBatch()
+	// database can't err as collection factory already constructed
+	db, _ := context.Database()
+	db.StartBatch()
 	err = toDelete.ForEach(func(ref []byte) error {
-		return packageCollection.DeleteByKey(ref)
+		return context.CollectionFactory().PackageCollection().DeleteByKey(ref)
 	})
 	if err != nil {
 		return err
 	}
 
-	err = context.database.FinishBatch()
+	err = db.FinishBatch()
 	if err != nil {
 		return fmt.Errorf("unable to write to DB: %s", err)
 	}
 
 	// now, build a list of files that should be present in Repository (package pool)
-	context.progress.Printf("Building list of files referenced by packages...\n")
+	context.Progress().Printf("Building list of files referenced by packages...\n")
 	referencedFiles := make([]string, 0, existingPackageRefs.Len())
-	context.progress.InitBar(int64(existingPackageRefs.Len()), false)
+	context.Progress().InitBar(int64(existingPackageRefs.Len()), false)
 
 	err = existingPackageRefs.ForEach(func(key []byte) error {
-		pkg, err := packageCollection.ByKey(key)
-		if err != nil {
-			return err
+		pkg, err2 := context.CollectionFactory().PackageCollection().ByKey(key)
+		if err2 != nil {
+			return err2
 		}
-		paths, err := pkg.FilepathList(context.packagePool)
-		if err != nil {
-			return err
+		paths, err2 := pkg.FilepathList(context.PackagePool())
+		if err2 != nil {
+			return err2
 		}
 		referencedFiles = append(referencedFiles, paths...)
-		context.progress.AddBar(1)
+		context.Progress().AddBar(1)
 
 		return nil
 	})
@@ -111,11 +109,11 @@ func aptlyDbCleanup(cmd *commander.Command, args []string) error {
 	}
 
 	sort.Strings(referencedFiles)
-	context.progress.ShutdownBar()
+	context.Progress().ShutdownBar()
 
 	// build a list of files in the package pool
-	context.progress.Printf("Building list of files in package pool...\n")
-	existingFiles, err := context.packagePool.FilepathList(context.progress)
+	context.Progress().Printf("Building list of files in package pool...\n")
+	existingFiles, err := context.PackagePool().FilepathList(context.Progress())
 	if err != nil {
 		return fmt.Errorf("unable to collect file paths: %s", err)
 	}
@@ -124,23 +122,46 @@ func aptlyDbCleanup(cmd *commander.Command, args []string) error {
 	filesToDelete := utils.StrSlicesSubstract(existingFiles, referencedFiles)
 
 	// delete files that are no longer referenced
-	context.progress.Printf("Deleting unreferenced files (%d)...\n", len(filesToDelete))
+	context.Progress().Printf("Deleting unreferenced files (%d)...\n", len(filesToDelete))
 
 	if len(filesToDelete) > 0 {
-		context.progress.InitBar(int64(len(filesToDelete)), false)
-		totalSize := int64(0)
+		context.Progress().InitBar(int64(len(filesToDelete)), false)
+
+		var size, totalSize int64
 		for _, file := range filesToDelete {
-			size, err := context.packagePool.Remove(file)
+			size, err = context.PackagePool().Remove(file)
 			if err != nil {
 				return err
 			}
 
-			context.progress.AddBar(1)
+			context.Progress().AddBar(1)
 			totalSize += size
 		}
-		context.progress.ShutdownBar()
+		context.Progress().ShutdownBar()
 
-		context.progress.Printf("Disk space freed: %.2f GiB...\n", float64(totalSize)/1024.0/1024.0/1024.0)
+		context.Progress().Printf("Disk space freed: %s...\n", utils.HumanBytes(totalSize))
 	}
+
+	context.Progress().Printf("Compacting database...\n")
+	err = db.CompactDB()
+
 	return err
+}
+
+func makeCmdDbCleanup() *commander.Command {
+	cmd := &commander.Command{
+		Run:       aptlyDbCleanup,
+		UsageLine: "cleanup",
+		Short:     "cleanup DB and package pool",
+		Long: `
+Database cleanup removes information about unreferenced packages and removes
+files in the package pool that aren't used by packages anymore
+
+Example:
+
+  $ aptly db cleanup
+`,
+	}
+
+	return cmd
 }

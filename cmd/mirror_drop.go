@@ -2,30 +2,27 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func aptlyMirrorDrop(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	name := args[0]
 
-	repoCollection := debian.NewRemoteRepoCollection(context.database)
-	repo, err := repoCollection.ByName(name)
+	repo, err := context.CollectionFactory().RemoteRepoCollection().ByName(name)
 	if err != nil {
 		return fmt.Errorf("unable to drop: %s", err)
 	}
 
-	force := cmd.Flag.Lookup("force").Value.Get().(bool)
+	force := context.flags.Lookup("force").Value.Get().(bool)
 	if !force {
-		snapshotCollection := debian.NewSnapshotCollection(context.database)
-		snapshots := snapshotCollection.ByRemoteRepoSource(repo)
+		snapshots := context.CollectionFactory().SnapshotCollection().ByRemoteRepoSource(repo)
 
 		if len(snapshots) > 0 {
 			fmt.Printf("Mirror `%s` was used to create following snapshots:\n", repo.Name)
@@ -37,7 +34,7 @@ func aptlyMirrorDrop(cmd *commander.Command, args []string) error {
 		}
 	}
 
-	err = repoCollection.Drop(repo)
+	err = context.CollectionFactory().RemoteRepoCollection().Drop(repo)
 	if err != nil {
 		return fmt.Errorf("unable to drop: %s", err)
 	}
@@ -51,12 +48,14 @@ func makeCmdMirrorDrop() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyMirrorDrop,
 		UsageLine: "drop <name>",
-		Short:     "delete remote repository mirror",
+		Short:     "delete mirror",
 		Long: `
-Drop deletes information about remote repository mirror. Package data is not deleted
-(it could be still used by other mirrors or snapshots).
+Drop deletes information about remote repository mirror <name>. Package data is not deleted
+(since it could still be used by other mirrors or snapshots).  If mirror is used as source
+to create a snapshot, aptly would refuse to delete such mirror, use flag -force to override.
 
-ex:
+Example:
+
   $ aptly mirror drop wheezy-main
 `,
 		Flag: *flag.NewFlagSet("aptly-mirror-drop", flag.ExitOnError),

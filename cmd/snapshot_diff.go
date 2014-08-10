@@ -2,56 +2,51 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
-	"github.com/wsxiaoys/terminal/color"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func aptlySnapshotDiff(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 2 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
-	onlyMatching := cmd.Flag.Lookup("only-matching").Value.Get().(bool)
-
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
-	packageCollection := debian.NewPackageCollection(context.database)
+	onlyMatching := context.flags.Lookup("only-matching").Value.Get().(bool)
 
 	// Load <name-a> snapshot
-	snapshotA, err := snapshotCollection.ByName(args[0])
+	snapshotA, err := context.CollectionFactory().SnapshotCollection().ByName(args[0])
 	if err != nil {
 		return fmt.Errorf("unable to load snapshot A: %s", err)
 	}
 
-	err = snapshotCollection.LoadComplete(snapshotA)
+	err = context.CollectionFactory().SnapshotCollection().LoadComplete(snapshotA)
 	if err != nil {
 		return fmt.Errorf("unable to load snapshot A: %s", err)
 	}
 
 	// Load <name-b> snapshot
-	snapshotB, err := snapshotCollection.ByName(args[1])
+	snapshotB, err := context.CollectionFactory().SnapshotCollection().ByName(args[1])
 	if err != nil {
 		return fmt.Errorf("unable to load snapshot B: %s", err)
 	}
 
-	err = snapshotCollection.LoadComplete(snapshotB)
+	err = context.CollectionFactory().SnapshotCollection().LoadComplete(snapshotB)
 	if err != nil {
 		return fmt.Errorf("unable to load snapshot B: %s", err)
 	}
 
 	// Calculate diff
-	diff, err := snapshotA.RefList().Diff(snapshotB.RefList(), packageCollection)
+	diff, err := snapshotA.RefList().Diff(snapshotB.RefList(), context.CollectionFactory().PackageCollection())
 	if err != nil {
 		return fmt.Errorf("unable to calculate diff: %s", err)
 	}
 
 	if len(diff) == 0 {
-		fmt.Printf("Snapshots are identical.\n")
+		context.Progress().Printf("Snapshots are identical.\n")
 	} else {
-		fmt.Printf("  Arch   | Package                                  | Version in A                             | Version in B\n")
+		context.Progress().Printf("  Arch   | Package                                  | Version in A                             | Version in B\n")
 		for _, pdiff := range diff {
 			if onlyMatching && (pdiff.Left == nil || pdiff.Right == nil) {
 				continue
@@ -85,7 +80,7 @@ func aptlySnapshotDiff(cmd *commander.Command, args []string) error {
 				}
 			}
 
-			color.Printf(code+" %-6s | %-40s | %-40s | %-40s\n", arch, pkg, verA, verB)
+			context.Progress().ColoredPrintf(code+" %-6s | %-40s | %-40s | %-40s", arch, pkg, verA, verB)
 		}
 	}
 
@@ -96,11 +91,15 @@ func makeCmdSnapshotDiff() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlySnapshotDiff,
 		UsageLine: "diff <name-a> <name-b>",
-		Short:     "calculates difference in packages between two snapshots",
+		Short:     "difference between two snapshots",
 		Long: `
-Command diff shows list of missing and new packages, difference in package versions between two snapshots.
+Displays difference in packages between two snapshots. Snapshot is a list
+of packages, so difference between snapshots is a difference between package
+lists. Package could be either completely missing in one snapshot, or package
+is present in both snapshots with different versions.
 
-ex.
+Example:
+
     $ aptly snapshot diff -only-matching wheezy-main wheezy-backports
 `,
 		Flag: *flag.NewFlagSet("aptly-snapshot-diff", flag.ExitOnError),

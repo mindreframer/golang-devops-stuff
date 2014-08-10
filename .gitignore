@@ -27,5 +27,8 @@ coverage*.out
 
 *.pyc
 
-vendor/
-bin/
+_vendor/
+
+gen
+man/aptly.1.html
+man/aptly.1.ronn

@@ -2,56 +2,64 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/aptly/query"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func aptlyMirrorUpdate(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	name := args[0]
 
-	repoCollection := debian.NewRemoteRepoCollection(context.database)
-	repo, err := repoCollection.ByName(name)
+	repo, err := context.CollectionFactory().RemoteRepoCollection().ByName(name)
 	if err != nil {
 		return fmt.Errorf("unable to update: %s", err)
 	}
 
-	err = repoCollection.LoadComplete(repo)
+	err = context.CollectionFactory().RemoteRepoCollection().LoadComplete(repo)
 	if err != nil {
 		return fmt.Errorf("unable to update: %s", err)
 	}
 
-	ignoreMismatch := cmd.Flag.Lookup("ignore-checksums").Value.Get().(bool)
+	ignoreMismatch := context.flags.Lookup("ignore-checksums").Value.Get().(bool)
 
-	verifier, err := getVerifier(cmd)
+	verifier, err := getVerifier(context.flags)
 	if err != nil {
 		return fmt.Errorf("unable to initialize GPG verifier: %s", err)
 	}
 
-	err = repo.Fetch(context.downloader, verifier)
+	err = repo.Fetch(context.Downloader(), verifier)
 	if err != nil {
 		return fmt.Errorf("unable to update: %s", err)
 	}
 
-	packageCollection := debian.NewPackageCollection(context.database)
+	var filterQuery deb.PackageQuery
 
-	err = repo.Download(context.progress, context.downloader, packageCollection, context.packagePool, ignoreMismatch)
+	if repo.Filter != "" {
+		filterQuery, err = query.Parse(repo.Filter)
+		if err != nil {
+			return fmt.Errorf("unable to update: %s", err)
+		}
+	}
+
+	err = repo.Download(context.Progress(), context.Downloader(), context.CollectionFactory(), context.PackagePool(), ignoreMismatch,
+		context.DependencyOptions(), filterQuery)
 	if err != nil {
 		return fmt.Errorf("unable to update: %s", err)
 	}
 
-	err = repoCollection.Update(repo)
+	err = context.CollectionFactory().RemoteRepoCollection().Update(repo)
 	if err != nil {
 		return fmt.Errorf("unable to update: %s", err)
 	}
 
-	context.progress.Printf("\nMirror `%s` has been successfully updated.\n", repo.Name)
+	context.Progress().Printf("\nMirror `%s` has been successfully updated.\n", repo.Name)
 	return err
 }
 
@@ -59,11 +67,14 @@ func makeCmdMirrorUpdate() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyMirrorUpdate,
 		UsageLine: "update <name>",
-		Short:     "update packages from remote mirror",
+		Short:     "update mirror",
 		Long: `
-Update downloads list of packages and package files.
+Updates remote mirror (downloads package files and meta information). When mirror is created,
+this command should be run for the first time to fetch mirror contents. This command can be
+run multiple times to get updated repository contents. If interrupted, command can be safely restarted.
 
-ex:
+Example:
+
   $ aptly mirror update wheezy-main
 `,
 		Flag: *flag.NewFlagSet("aptly-mirror-update", flag.ExitOnError),
@@ -71,7 +82,8 @@ ex:
 
 	cmd.Flag.Bool("ignore-checksums", false, "ignore checksum mismatches while downloading package files and metadata")
 	cmd.Flag.Bool("ignore-signatures", false, "disable verification of Release file signatures")
-	cmd.Flag.Var(&keyRings, "keyring", "gpg keyring to use when verifying Release file (could be specified multiple times)")
+	cmd.Flag.Int64("download-limit", 0, "limit download speed (kbytes/sec)")
+	cmd.Flag.Var(&keyRingsFlag{}, "keyring", "gpg keyring to use when verifying Release file (could be specified multiple times)")
 
 	return cmd
 }

@@ -10,7 +10,7 @@ class AddRepo1Test(BaseTest):
     add package to local repo: .deb file
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo1 repo1",
+        "aptly repo create -comment=Repo1 -distribution=squeeze repo1",
     ]
     runCmd = "aptly repo add repo1 ${files}/libboost-program-options-dev_1.49.0.1_i386.deb"
 
@@ -27,7 +27,7 @@ class AddRepo2Test(BaseTest):
     add package to local repo: .dsc file
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo2 repo2",
+        "aptly repo create -comment=Repo2 -distribution=squeeze repo2",
     ]
     runCmd = "aptly repo add repo2 ${files}/pyspi_0.6.1-1.3.dsc ${files}/pyspi-0.6.1-1.3.stripped.dsc"
 
@@ -47,7 +47,7 @@ class AddRepo3Test(BaseTest):
     add package to local repo: directory
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo3 repo3",
+        "aptly repo create -comment=Repo3 -distribution=squeeze repo3",
     ]
     runCmd = "aptly repo add repo3 ${files}"
 
@@ -68,7 +68,7 @@ class AddRepo4Test(BaseTest):
     add package to local repo: complex directory + remove
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo4 repo4",
+        "aptly repo create -comment=Repo4 -distribution=squeeze repo4",
     ]
     runCmd = "aptly repo add -remove-files repo4 "
 
@@ -121,10 +121,11 @@ class AddRepo5Test(BaseTest):
     add package to local repo: some source files missing
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo5 repo5",
+        "aptly repo create -comment=Repo5 -distribution=squeeze repo5",
     ]
     runCmd = "aptly repo add repo5 "
     outputMatchPrepare = lambda self, s: s.replace(self.tempSrcDir, "")
+    expectedCode = 1
 
     def prepare(self):
         super(AddRepo5Test, self).prepare()
@@ -151,9 +152,10 @@ class AddRepo6Test(BaseTest):
     add package to local repo: missing file
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo6 repo6",
+        "aptly repo create -comment=Repo6 -distribution=squeeze repo6",
     ]
     runCmd = "aptly repo add repo6 no-such-file"
+    expectedCode = 1
 
 
 class AddRepo7Test(BaseTest):
@@ -169,10 +171,12 @@ class AddRepo8Test(BaseTest):
     add package to local repo: conflict in packages
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo8 repo8",
+        "aptly repo create -comment=Repo8 -distribution=squeeze repo8",
         "aptly repo add repo8 ${files}/pyspi_0.6.1-1.3.dsc",
     ]
     runCmd = "aptly repo add repo8 ${testfiles}/pyspi_0.6.1-1.3.conflict.dsc"
+    outputMatchPrepare = lambda self, s: s.replace(os.path.join(os.path.dirname(inspect.getsourcefile(self.__class__)), self.__class__.__name__), "").replace(os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files"), "")
+    expectedCode = 1
 
     def check(self):
         self.check_output()
@@ -184,11 +188,12 @@ class AddRepo9Test(BaseTest):
     add package to local repo: conflict in files
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo9 repo9",
+        "aptly repo create -comment=Repo9 -distribution=squeeze repo9",
     ]
     runCmd = "aptly repo add repo9 ${files}/pyspi_0.6.1-1.3.dsc"
-    outputMatchPrepare = lambda self, s: s.replace(os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files"), "")
     gold_processor = BaseTest.expand_environ
+    outputMatchPrepare = lambda self, s: s.replace(os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files"), "")
+    expectedCode = 1
 
     def prepare(self):
         super(AddRepo9Test, self).prepare()
@@ -203,7 +208,7 @@ class AddRepo10Test(BaseTest):
     add package to local repo: double import
     """
     fixtureCmds = [
-        "aptly repo create -comment=Repo10 repo10",
+        "aptly repo create -comment=Repo10 -distribution=squeeze repo10",
         "aptly repo add repo10 ${files}",
     ]
     runCmd = "aptly repo add repo10 ${files}/pyspi_0.6.1-1.3.dsc"

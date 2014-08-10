@@ -2,9 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/commander"
 	"sort"
 )
 
@@ -12,38 +11,38 @@ func aptlySnapshotVerify(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) < 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
-	packageCollection := debian.NewPackageCollection(context.database)
-
-	snapshots := make([]*debian.Snapshot, len(args))
+	snapshots := make([]*deb.Snapshot, len(args))
 	for i := range snapshots {
-		snapshots[i], err = snapshotCollection.ByName(args[i])
+		snapshots[i], err = context.CollectionFactory().SnapshotCollection().ByName(args[i])
 		if err != nil {
 			return fmt.Errorf("unable to verify: %s", err)
 		}
 
-		err = snapshotCollection.LoadComplete(snapshots[i])
+		err = context.CollectionFactory().SnapshotCollection().LoadComplete(snapshots[i])
 		if err != nil {
 			return fmt.Errorf("unable to verify: %s", err)
 		}
 	}
 
-	packageList, err := debian.NewPackageListFromRefList(snapshots[0].RefList(), packageCollection)
+	context.Progress().Printf("Loading packages...\n")
+
+	packageList, err := deb.NewPackageListFromRefList(snapshots[0].RefList(), context.CollectionFactory().PackageCollection(), context.Progress())
 	if err != nil {
 		fmt.Errorf("unable to load packages: %s", err)
 	}
 
-	sourcePackageList := debian.NewPackageList()
+	sourcePackageList := deb.NewPackageList()
 	err = sourcePackageList.Append(packageList)
 	if err != nil {
 		fmt.Errorf("unable to merge sources: %s", err)
 	}
 
+	var pL *deb.PackageList
 	for i := 1; i < len(snapshots); i++ {
-		pL, err := debian.NewPackageListFromRefList(snapshots[i].RefList(), packageCollection)
+		pL, err = deb.NewPackageListFromRefList(snapshots[i].RefList(), context.CollectionFactory().PackageCollection(), context.Progress())
 		if err != nil {
 			fmt.Errorf("unable to load packages: %s", err)
 		}
@@ -58,8 +57,8 @@ func aptlySnapshotVerify(cmd *commander.Command, args []string) error {
 
 	var architecturesList []string
 
-	if len(context.architecturesList) > 0 {
-		architecturesList = context.architecturesList
+	if len(context.ArchitecturesList()) > 0 {
+		architecturesList = context.ArchitecturesList()
 	} else {
 		architecturesList = packageList.Architectures(true)
 	}
@@ -68,15 +67,17 @@ func aptlySnapshotVerify(cmd *commander.Command, args []string) error {
 		return fmt.Errorf("unable to determine list of architectures, please specify explicitly")
 	}
 
-	missing, err := packageList.VerifyDependencies(context.dependencyOptions, architecturesList, sourcePackageList)
+	context.Progress().Printf("Verifying...\n")
+
+	missing, err := packageList.VerifyDependencies(context.DependencyOptions(), architecturesList, sourcePackageList, context.Progress())
 	if err != nil {
 		return fmt.Errorf("unable to verify dependencies: %s", err)
 	}
 
 	if len(missing) == 0 {
-		fmt.Printf("All dependencies are satisfied.\n")
+		context.Progress().Printf("All dependencies are satisfied.\n")
 	} else {
-		fmt.Printf("Missing dependencies (%d):\n", len(missing))
+		context.Progress().Printf("Missing dependencies (%d):\n", len(missing))
 		deps := make([]string, len(missing))
 		i := 0
 		for _, dep := range missing {
@@ -87,7 +88,7 @@ func aptlySnapshotVerify(cmd *commander.Command, args []string) error {
 		sort.Strings(deps)
 
 		for _, dep := range deps {
-			fmt.Printf("  %s\n", dep)
+			context.Progress().Printf("  %s\n", dep)
 		}
 	}
 
@@ -98,15 +99,16 @@ func makeCmdSnapshotVerify() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlySnapshotVerify,
 		UsageLine: "verify <name> [<source> ...]",
-		Short:     "verifies that dependencies are satisfied in snapshot",
+		Short:     "verify dependencies in snapshot",
 		Long: `
-Verify does depenency resolution in snapshot, possibly using additional snapshots as dependency sources.
-All unsatisfied dependencies are returned.
+Verify does dependency resolution in snapshot <name>, possibly using additional
+snapshots <source> as dependency sources. All unsatisfied dependencies are
+printed.
 
-ex.
+Example:
+
     $ aptly snapshot verify wheezy-main wheezy-contrib wheezy-non-free
 `,
-		Flag: *flag.NewFlagSet("aptly-snapshot-verify", flag.ExitOnError),
 	}
 
 	return cmd

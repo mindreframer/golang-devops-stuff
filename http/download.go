@@ -1,6 +1,7 @@
 package http
 
 import (
+	"code.google.com/p/mxk/go1/flowcontrol"
 	"compress/bzip2"
 	"compress/gzip"
 	"fmt"
@@ -21,13 +22,15 @@ var (
 
 // downloaderImpl is implementation of Downloader interface
 type downloaderImpl struct {
-	queue    chan *downloadTask
-	stop     chan bool
-	stopped  chan bool
-	pause    chan bool
-	unpause  chan bool
-	progress aptly.Progress
-	threads  int
+	queue     chan *downloadTask
+	stop      chan struct{}
+	stopped   chan struct{}
+	pause     chan struct{}
+	unpause   chan struct{}
+	progress  aptly.Progress
+	aggWriter io.Writer
+	threads   int
+	client    *http.Client
 }
 
 // downloadTask represents single item in queue
@@ -40,16 +43,28 @@ type downloadTask struct {
 }
 
 // NewDownloader creates new instance of Downloader which specified number
-// of threads
-func NewDownloader(threads int, progress aptly.Progress) aptly.Downloader {
+// of threads and download limit in bytes/sec
+func NewDownloader(threads int, downLimit int64, progress aptly.Progress) aptly.Downloader {
+	transport := *http.DefaultTransport.(*http.Transport)
+	transport.DisableCompression = true
+
 	downloader := &downloaderImpl{
 		queue:    make(chan *downloadTask, 1000),
-		stop:     make(chan bool),
-		stopped:  make(chan bool),
-		pause:    make(chan bool),
-		unpause:  make(chan bool),
+		stop:     make(chan struct{}),
+		stopped:  make(chan struct{}),
+		pause:    make(chan struct{}),
+		unpause:  make(chan struct{}),
 		threads:  threads,
 		progress: progress,
+		client: &http.Client{
+			Transport: &transport,
+		},
+	}
+
+	if downLimit > 0 {
+		downloader.aggWriter = flowcontrol.NewWriter(progress, downLimit)
+	} else {
+		downloader.aggWriter = progress
 	}
 
 	for i := 0; i < downloader.threads; i++ {
@@ -63,7 +78,7 @@ func NewDownloader(threads int, progress aptly.Progress) aptly.Downloader {
 // but doesn't process rest of queue
 func (downloader *downloaderImpl) Shutdown() {
 	for i := 0; i < downloader.threads; i++ {
-		downloader.stop <- true
+		downloader.stop <- struct{}{}
 	}
 
 	for i := 0; i < downloader.threads; i++ {
@@ -74,15 +89,20 @@ func (downloader *downloaderImpl) Shutdown() {
 // Pause pauses task processing
 func (downloader *downloaderImpl) Pause() {
 	for i := 0; i < downloader.threads; i++ {
-		downloader.pause <- true
+		downloader.pause <- struct{}{}
 	}
 }
 
 // Resume resumes task processing
 func (downloader *downloaderImpl) Resume() {
 	for i := 0; i < downloader.threads; i++ {
-		downloader.unpause <- true
+		downloader.unpause <- struct{}{}
 	}
+}
+
+// GetProgress returns Progress object
+func (downloader *downloaderImpl) GetProgress() aptly.Progress {
+	return downloader.progress
 }
 
 // Download starts new download task
@@ -100,7 +120,7 @@ func (downloader *downloaderImpl) DownloadWithChecksum(url string, destination s
 func (downloader *downloaderImpl) handleTask(task *downloadTask) {
 	downloader.progress.Printf("Downloading %s...\n", task.url)
 
-	resp, err := http.Get(task.url)
+	resp, err := downloader.client.Get(task.url)
 	if err != nil {
 		task.result <- err
 		return
@@ -128,7 +148,7 @@ func (downloader *downloaderImpl) handleTask(task *downloadTask) {
 	defer outfile.Close()
 
 	checksummer := utils.NewChecksumWriter()
-	writers := []io.Writer{outfile, downloader.progress}
+	writers := []io.Writer{outfile, downloader.aggWriter}
 
 	if task.expected.Size != -1 {
 		writers = append(writers, checksummer)
@@ -182,7 +202,7 @@ func (downloader *downloaderImpl) process() {
 	for {
 		select {
 		case <-downloader.stop:
-			downloader.stopped <- true
+			downloader.stopped <- struct{}{}
 			return
 		case <-downloader.pause:
 			<-downloader.unpause
@@ -211,10 +231,16 @@ func DownloadTempWithChecksum(downloader aptly.Downloader, url string, expected 
 
 	tempfile := filepath.Join(tempdir, "buffer")
 
+	if expected.Size != -1 && downloader.GetProgress() != nil {
+		downloader.GetProgress().InitBar(expected.Size, true)
+		defer downloader.GetProgress().ShutdownBar()
+	}
+
 	ch := make(chan error, 1)
 	downloader.DownloadWithChecksum(url, tempfile, ch, expected, ignoreMismatch)
 
 	err = <-ch
+
 	if err != nil {
 		return nil, err
 	}

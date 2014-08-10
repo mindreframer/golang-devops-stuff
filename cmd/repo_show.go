@@ -2,36 +2,36 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func aptlyRepoShow(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	name := args[0]
 
-	localRepoCollection := debian.NewLocalRepoCollection(context.database)
-	repo, err := localRepoCollection.ByName(name)
+	repo, err := context.CollectionFactory().LocalRepoCollection().ByName(name)
 	if err != nil {
 		return fmt.Errorf("unable to show: %s", err)
 	}
 
-	err = localRepoCollection.LoadComplete(repo)
+	err = context.CollectionFactory().LocalRepoCollection().LoadComplete(repo)
 	if err != nil {
 		return fmt.Errorf("unable to show: %s", err)
 	}
 
 	fmt.Printf("Name: %s\n", repo.Name)
 	fmt.Printf("Comment: %s\n", repo.Comment)
+	fmt.Printf("Default Distribution: %s\n", repo.DefaultDistribution)
+	fmt.Printf("Default Component: %s\n", repo.DefaultComponent)
 	fmt.Printf("Number of packages: %d\n", repo.NumPackages())
 
-	withPackages := cmd.Flag.Lookup("with-packages").Value.Get().(bool)
+	withPackages := context.flags.Lookup("with-packages").Value.Get().(bool)
 	if withPackages {
 		ListPackagesRefList(repo.RefList())
 	}
@@ -45,7 +45,7 @@ func makeCmdRepoShow() *commander.Command {
 		UsageLine: "show <name>",
 		Short:     "show details about local repository",
 		Long: `
-Show shows full information about local package repository.
+Show command shows full information about local package repository.
 
 ex:
   $ aptly repo show testing

@@ -2,28 +2,32 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/aptly"
+	"github.com/smira/aptly/deb"
 	"github.com/smira/aptly/utils"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 	"net"
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 )
 
 func aptlyServe(cmd *commander.Command, args []string) error {
 	var err error
 
-	publishedCollection := debian.NewPublishedRepoCollection(context.database)
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
+	if len(args) != 0 {
+		cmd.Usage()
+		return commander.ErrCommandError
+	}
 
-	if publishedCollection.Len() == 0 {
+	if context.CollectionFactory().PublishedRepoCollection().Len() == 0 {
 		fmt.Printf("No published repositories, unable to serve.\n")
 		return nil
 	}
 
-	listen := cmd.Flag.Lookup("listen").Value.String()
+	listen := context.flags.Lookup("listen").Value.String()
 
 	listenHost, listenPort, err := net.SplitHostPort(listen)
 
@@ -40,11 +44,11 @@ func aptlyServe(cmd *commander.Command, args []string) error {
 
 	fmt.Printf("Serving published repositories, recommended apt sources list:\n\n")
 
-	sources := make(sort.StringSlice, 0, publishedCollection.Len())
-	published := make(map[string]*debian.PublishedRepo, publishedCollection.Len())
+	sources := make(sort.StringSlice, 0, context.CollectionFactory().PublishedRepoCollection().Len())
+	published := make(map[string]*deb.PublishedRepo, context.CollectionFactory().PublishedRepoCollection().Len())
 
-	err = publishedCollection.ForEach(func(repo *debian.PublishedRepo) error {
-		err := publishedCollection.LoadComplete(repo, snapshotCollection)
+	err = context.CollectionFactory().PublishedRepoCollection().ForEach(func(repo *deb.PublishedRepo) error {
+		err := context.CollectionFactory().PublishedRepoCollection().LoadComplete(repo, context.CollectionFactory())
 		if err != nil {
 			return err
 		}
@@ -72,19 +76,20 @@ func aptlyServe(cmd *commander.Command, args []string) error {
 		}
 
 		fmt.Printf("# %s\ndeb http://%s:%s/%s %s %s\n",
-			repo, listenHost, listenPort, prefix, repo.Distribution, repo.Component)
+			repo, listenHost, listenPort, prefix, repo.Distribution, strings.Join(repo.Components(), " "))
 
 		if utils.StrSliceHasItem(repo.Architectures, "source") {
 			fmt.Printf("deb-src http://%s:%s/%s %s %s\n",
-				listenHost, listenPort, prefix, repo.Distribution, repo.Component)
+				listenHost, listenPort, prefix, repo.Distribution, strings.Join(repo.Components(), " "))
 		}
 	}
 
-	context.database.Close()
+	publicPath := context.GetPublishedStorage("").(aptly.LocalPublishedStorage).PublicPath()
+	ShutdownContext()
 
 	fmt.Printf("\nStarting web server at: %s (press Ctrl+C to quit)...\n", listen)
 
-	err = http.ListenAndServe(listen, http.FileServer(http.Dir(context.publishedStorage.PublicPath())))
+	err = http.ListenAndServe(listen, http.FileServer(http.Dir(publicPath)))
 	if err != nil {
 		return fmt.Errorf("unable to serve: %s", err)
 	}
@@ -95,12 +100,13 @@ func makeCmdServe() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyServe,
 		UsageLine: "serve",
-		Short:     "start embedded HTTP server to serve published repositories",
+		Short:     "HTTP serve published repositories",
 		Long: `
 Command serve starts embedded HTTP server (not suitable for real production usage) to serve
 contents of public/ subdirectory of aptly's root that contains published repositories.
 
-ex:
+Example:
+
   $ aptly serve -listen=:8080
 `,
 		Flag: *flag.NewFlagSet("aptly-serve", flag.ExitOnError),

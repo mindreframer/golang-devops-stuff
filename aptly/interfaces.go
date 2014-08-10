@@ -5,7 +5,6 @@ package aptly
 import (
 	"github.com/smira/aptly/utils"
 	"io"
-	"os"
 )
 
 // PackagePool is asbtraction of package pool storage.
@@ -26,18 +25,32 @@ type PackagePool interface {
 
 // PublishedStorage is abstraction of filesystem storing all published repositories
 type PublishedStorage interface {
-	// PublicPath returns root of public part
-	PublicPath() string
 	// MkDir creates directory recursively under public path
 	MkDir(path string) error
-	// CreateFile creates file for writing under public path
-	CreateFile(path string) (*os.File, error)
+	// PutFile puts file into published storage at specified path
+	PutFile(path string, sourceFilename string) error
 	// RemoveDirs removes directory structure under public path
-	RemoveDirs(path string) error
+	RemoveDirs(path string, progress Progress) error
+	// Remove removes single file under public path
+	Remove(path string) error
 	// LinkFromPool links package file from pool to dist's pool location
-	LinkFromPool(prefix string, component string, poolDirectory string, sourcePool PackagePool, sourcePath string) (string, error)
-	// ChecksumsForFile proxies requests to utils.ChecksumsForFile, joining public path
-	ChecksumsForFile(path string) (utils.ChecksumInfo, error)
+	LinkFromPool(publishedDirectory string, sourcePool PackagePool, sourcePath, sourceMD5 string, force bool) error
+	// Filelist returns list of files under prefix
+	Filelist(prefix string) ([]string, error)
+	// RenameFile renames (moves) file
+	RenameFile(oldName, newName string) error
+}
+
+// LocalPublishedStorage is published storage on local filesystem
+type LocalPublishedStorage interface {
+	// PublicPath returns root of public part
+	PublicPath() string
+}
+
+// PublishedStorageProvider is a thing that returns PublishedStorage by name
+type PublishedStorageProvider interface {
+	// GetPublishedStorage returns PublishedStorage by name
+	GetPublishedStorage(name string) PublishedStorage
 }
 
 // Progress is a progress displaying entity, it allows progress bars & simple prints
@@ -48,12 +61,16 @@ type Progress interface {
 	Start()
 	// Shutdown shuts down progress display
 	Shutdown()
+	// Flush returns when all queued messages are sent
+	Flush()
 	// InitBar starts progressbar for count bytes or count items
 	InitBar(count int64, isBytes bool)
 	// ShutdownBar stops progress bar and hides it
 	ShutdownBar()
 	// AddBar increments progress for progress bar
 	AddBar(count int)
+	// SetBar sets current position for progress bar
+	SetBar(count int)
 	// Printf does printf but in safe manner: not overwriting progress bar
 	Printf(msg string, a ...interface{})
 	// ColoredPrintf does printf in colored way + newline
@@ -73,4 +90,6 @@ type Downloader interface {
 	// Shutdown stops downloader after current tasks are finished,
 	// but doesn't process rest of queue
 	Shutdown()
+	// GetProgress returns Progress object
+	GetProgress() Progress
 }

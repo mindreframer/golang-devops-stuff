@@ -1,20 +1,21 @@
 package cmd
 
 import (
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func makeCmdRepoImport() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyRepoMoveCopyImport,
-		UsageLine: "import <src-mirror> <dst-repo> <package-spec> ...",
-		Short:     "import package from mirror and put it into local repo",
+		UsageLine: "import <src-mirror> <dst-repo> <package-query> ...",
+		Short:     "import packages from mirror to local repository",
 		Long: `
-Command import looks up packages matching <package-spec> in mirror <src-mirror>
+Command import looks up packages matching <package-query> in mirror <src-mirror>
 and copies them to local repo <dst-repo>.
 
-ex:
+Example:
+
   $ aptly repo import wheezy-main testing nginx
 `,
 		Flag: *flag.NewFlagSet("aptly-repo-import", flag.ExitOnError),

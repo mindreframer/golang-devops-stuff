@@ -32,15 +32,47 @@ func (s *PublishedStorageSuite) TestMkDir(c *C) {
 	c.Assert(err, IsNil)
 }
 
-func (s *PublishedStorageSuite) TestCreateFile(c *C) {
+func (s *PublishedStorageSuite) TesPutFile(c *C) {
 	err := s.storage.MkDir("ppa/dists/squeeze/")
 	c.Assert(err, IsNil)
 
-	file, err := s.storage.CreateFile("ppa/dists/squeeze/Release")
+	err = s.storage.PutFile("ppa/dists/squeeze/Release", "/dev/null")
 	c.Assert(err, IsNil)
-	defer file.Close()
 
 	_, err = os.Stat(filepath.Join(s.storage.rootPath, "ppa/dists/squeeze/Release"))
+	c.Assert(err, IsNil)
+}
+
+func (s *PublishedStorageSuite) TestFilelist(c *C) {
+	err := s.storage.MkDir("ppa/pool/main/a/ab/")
+	c.Assert(err, IsNil)
+
+	err = s.storage.PutFile("ppa/pool/main/a/ab/a.deb", "/dev/null")
+	c.Assert(err, IsNil)
+
+	err = s.storage.PutFile("ppa/pool/main/a/ab/b.deb", "/dev/null")
+	c.Assert(err, IsNil)
+
+	list, err := s.storage.Filelist("ppa/pool/main/")
+	c.Check(err, IsNil)
+	c.Check(list, DeepEquals, []string{"a/ab/a.deb", "a/ab/b.deb"})
+
+	list, err = s.storage.Filelist("ppa/pool/doenstexist/")
+	c.Check(err, IsNil)
+	c.Check(list, DeepEquals, []string{})
+}
+
+func (s *PublishedStorageSuite) TestRenameFile(c *C) {
+	err := s.storage.MkDir("ppa/dists/squeeze/")
+	c.Assert(err, IsNil)
+
+	err = s.storage.PutFile("ppa/dists/squeeze/Release", "/dev/null")
+	c.Assert(err, IsNil)
+
+	err = s.storage.RenameFile("ppa/dists/squeeze/Release", "ppa/dists/squeeze/InRelease")
+	c.Check(err, IsNil)
+
+	_, err = os.Stat(filepath.Join(s.storage.rootPath, "ppa/dists/squeeze/InRelease"))
 	c.Assert(err, IsNil)
 }
 
@@ -48,11 +80,24 @@ func (s *PublishedStorageSuite) TestRemoveDirs(c *C) {
 	err := s.storage.MkDir("ppa/dists/squeeze/")
 	c.Assert(err, IsNil)
 
-	file, err := s.storage.CreateFile("ppa/dists/squeeze/Release")
+	err = s.storage.PutFile("ppa/dists/squeeze/Release", "/dev/null")
 	c.Assert(err, IsNil)
-	defer file.Close()
 
-	err = s.storage.RemoveDirs("ppa/dists/")
+	err = s.storage.RemoveDirs("ppa/dists/", nil)
+
+	_, err = os.Stat(filepath.Join(s.storage.rootPath, "ppa/dists/squeeze/Release"))
+	c.Assert(err, NotNil)
+	c.Assert(os.IsNotExist(err), Equals, true)
+}
+
+func (s *PublishedStorageSuite) TestRemove(c *C) {
+	err := s.storage.MkDir("ppa/dists/squeeze/")
+	c.Assert(err, IsNil)
+
+	err = s.storage.PutFile("ppa/dists/squeeze/Release", "/dev/null")
+	c.Assert(err, IsNil)
+
+	err = s.storage.Remove("ppa/dists/squeeze/Release")
 
 	_, err = os.Stat(filepath.Join(s.storage.rootPath, "ppa/dists/squeeze/Release"))
 	c.Assert(err, NotNil)
@@ -108,9 +153,8 @@ func (s *PublishedStorageSuite) TestLinkFromPool(c *C) {
 		err = ioutil.WriteFile(t.sourcePath, []byte("Contents"), 0644)
 		c.Assert(err, IsNil)
 
-		path, err := s.storage.LinkFromPool(t.prefix, t.component, t.poolDirectory, pool, t.sourcePath)
+		err = s.storage.LinkFromPool(filepath.Join(t.prefix, "pool", t.component, t.poolDirectory), pool, t.sourcePath, "", false)
 		c.Assert(err, IsNil)
-		c.Assert(path, Equals, t.expectedFilename)
 
 		st, err := os.Stat(filepath.Join(s.storage.rootPath, t.prefix, t.expectedFilename))
 		c.Assert(err, IsNil)
@@ -118,4 +162,31 @@ func (s *PublishedStorageSuite) TestLinkFromPool(c *C) {
 		info := st.Sys().(*syscall.Stat_t)
 		c.Check(int(info.Nlink), Equals, 2)
 	}
+
+	// test linking files to duplicate final name
+	sourcePath := filepath.Join(s.root, "pool/02/bc/mars-invaders_1.03.deb")
+	err := os.MkdirAll(filepath.Dir(sourcePath), 0755)
+	c.Assert(err, IsNil)
+
+	err = ioutil.WriteFile(sourcePath, []byte("Contents"), 0644)
+	c.Assert(err, IsNil)
+
+	err = s.storage.LinkFromPool(filepath.Join("", "pool", "main", "m/mars-invaders"), pool, sourcePath, "", false)
+	c.Check(err, ErrorMatches, ".*file already exists and is different")
+
+	st, err := os.Stat(sourcePath)
+	c.Assert(err, IsNil)
+
+	info := st.Sys().(*syscall.Stat_t)
+	c.Check(int(info.Nlink), Equals, 1)
+
+	// linking with force
+	err = s.storage.LinkFromPool(filepath.Join("", "pool", "main", "m/mars-invaders"), pool, sourcePath, "", true)
+	c.Check(err, IsNil)
+
+	st, err = os.Stat(sourcePath)
+	c.Assert(err, IsNil)
+
+	info = st.Sys().(*syscall.Stat_t)
+	c.Check(int(info.Nlink), Equals, 2)
 }

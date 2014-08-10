@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
+	"github.com/smira/commander"
 )
 
 func makeCmdSnapshot() *commander.Command {
@@ -18,7 +17,7 @@ func makeCmdSnapshot() *commander.Command {
 			makeCmdSnapshotDiff(),
 			makeCmdSnapshotMerge(),
 			makeCmdSnapshotDrop(),
+			makeCmdSnapshotRename(),
 		},
-		Flag: *flag.NewFlagSet("aptly-snapshot", flag.ExitOnError),
 	}
 }

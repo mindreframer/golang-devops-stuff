@@ -29,6 +29,9 @@ func (s *ConfigSuite) TestSaveConfig(c *C) {
 
 	s.config.RootDir = "/tmp/aptly"
 	s.config.DownloadConcurrency = 5
+	s.config.S3PublishRoots = map[string]S3PublishRoot{"test": S3PublishRoot{
+		Region: "us-east-1",
+		Bucket: "repo"}}
 
 	err := SaveConfig(configname, &s.config)
 	c.Assert(err, IsNil)
@@ -44,6 +47,7 @@ func (s *ConfigSuite) TestSaveConfig(c *C) {
 		"{\n"+
 		"  \"rootDir\": \"/tmp/aptly\",\n"+
 		"  \"downloadConcurrency\": 5,\n"+
+		"  \"downloadSpeedLimit\": 0,\n"+
 		"  \"architectures\": null,\n"+
 		"  \"dependencyFollowSuggests\": false,\n"+
 		"  \"dependencyFollowRecommends\": false,\n"+
@@ -51,7 +55,19 @@ func (s *ConfigSuite) TestSaveConfig(c *C) {
 		"  \"dependencyFollowSource\": false,\n"+
 		"  \"gpgDisableSign\": false,\n"+
 		"  \"gpgDisableVerify\": false,\n"+
-		"  \"downloadSourcePackages\": false\n"+
+		"  \"downloadSourcePackages\": false,\n"+
+		"  \"ppaDistributorID\": \"\",\n"+
+		"  \"ppaCodename\": \"\",\n"+
+		"  \"S3PublishEndpoints\": {\n"+
+		"    \"test\": {\n"+
+		"      \"region\": \"us-east-1\",\n"+
+		"      \"bucket\": \"repo\",\n"+
+		"      \"awsAccessKeyID\": \"\",\n"+
+		"      \"awsSecretAccessKey\": \"\",\n"+
+		"      \"prefix\": \"\",\n"+
+		"      \"acl\": \"\"\n"+
+		"    }\n"+
+		"  }\n"+
 		"}")
 }
 
