@@ -19,6 +19,10 @@ import (
   "time"
 )
 
+// Support for newer SSL signature algorithms
+import _ "crypto/sha256"
+import _ "crypto/sha512"
+
 var hostname string
 var hostport_re, _ = regexp.Compile("^(.+):([0-9]+)$")
 
@@ -180,7 +184,14 @@ func connect(config *NetworkConfig) (socket *tls.Conn) {
     }
 
     address := addresses[rand.Int()%len(addresses)]
-    addressport := fmt.Sprintf("%s:%s", address, port)
+    var addressport string
+
+    ip := net.ParseIP(address)
+    if len(ip) == net.IPv4len {
+        addressport = fmt.Sprintf("%s:%s", address, port)
+    } else if len(ip) == net.IPv6len {
+        addressport = fmt.Sprintf("[%s]:%s", address, port)
+    }
 
     log.Printf("Connecting to %s (%s) \n", addressport, host)
 
@@ -190,6 +201,8 @@ func connect(config *NetworkConfig) (socket *tls.Conn) {
       time.Sleep(1 * time.Second)
       continue
     }
+
+    tlsconfig.ServerName = host
 
     socket = tls.Client(tcpsocket, &tlsconfig)
     socket.SetDeadline(time.Now().Add(config.timeout))
