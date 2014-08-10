@@ -1,12 +1,7 @@
 package main
 
 import (
-	"github.com/dotcloud/docker/sysinit"
-)
-
-var (
-	GITCOMMIT string
-	VERSION   string
+	"github.com/docker/docker/sysinit"
 )
 
 func main() {

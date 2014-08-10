@@ -82,13 +82,18 @@ func StdCopy(dstout, dsterr io.Writer, src io.Reader) (written int64, err error)
 		for nr < StdWriterPrefixLen {
 			var nr2 int
 			nr2, er = src.Read(buf[nr:])
+			nr += nr2
 			if er == io.EOF {
-				return written, nil
+				if nr < StdWriterPrefixLen {
+					Debugf("Corrupted prefix: %v", buf[:nr])
+					return written, nil
+				}
+				break
 			}
 			if er != nil {
+				Debugf("Error reading header: %s", er)
 				return 0, er
 			}
-			nr += nr2
 		}
 
 		// Check the first byte to know where to write
@@ -108,12 +113,13 @@ func StdCopy(dstout, dsterr io.Writer, src io.Reader) (written int64, err error)
 
 		// Retrieve the size of the frame
 		frameSize = int(binary.BigEndian.Uint32(buf[StdWriterSizeIndex : StdWriterSizeIndex+4]))
+		Debugf("framesize: %d", frameSize)
 
 		// Check if the buffer is big enough to read the frame.
 		// Extend it if necessary.
 		if frameSize+StdWriterPrefixLen > bufLen {
-			Debugf("Extending buffer cap.")
-			buf = append(buf, make([]byte, frameSize-len(buf)+1)...)
+			Debugf("Extending buffer cap by %d (was %d)", frameSize+StdWriterPrefixLen-bufLen+1, len(buf))
+			buf = append(buf, make([]byte, frameSize+StdWriterPrefixLen-bufLen+1)...)
 			bufLen = len(buf)
 		}
 
@@ -121,21 +127,22 @@ func StdCopy(dstout, dsterr io.Writer, src io.Reader) (written int64, err error)
 		for nr < frameSize+StdWriterPrefixLen {
 			var nr2 int
 			nr2, er = src.Read(buf[nr:])
+			nr += nr2
 			if er == io.EOF {
-				return written, nil
+				if nr < frameSize+StdWriterPrefixLen {
+					Debugf("Corrupted frame: %v", buf[StdWriterPrefixLen:nr])
+					return written, nil
+				}
+				break
 			}
 			if er != nil {
 				Debugf("Error reading frame: %s", er)
 				return 0, er
 			}
-			nr += nr2
 		}
 
 		// Write the retrieved frame (without header)
 		nw, ew = out.Write(buf[StdWriterPrefixLen : frameSize+StdWriterPrefixLen])
-		if nw > 0 {
-			written += int64(nw)
-		}
 		if ew != nil {
 			Debugf("Error writing frame: %s", ew)
 			return 0, ew
@@ -145,6 +152,7 @@ func StdCopy(dstout, dsterr io.Writer, src io.Reader) (written int64, err error)
 			Debugf("Error Short Write: (%d on %d)", nw, frameSize)
 			return 0, io.ErrShortWrite
 		}
+		written += int64(nw)
 
 		// Move the rest of the buffer to the beginning
 		copy(buf, buf[frameSize+StdWriterPrefixLen:])

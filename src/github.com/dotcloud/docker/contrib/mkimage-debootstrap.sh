@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+echo >&2
+echo >&2 'warning: this script is deprecated - see mkimage.sh and mkimage/debootstrap'
+echo >&2
+
 variant='minbase'
 include='iproute,iputils-ping'
 arch='amd64' # intentionally undocumented for now
@@ -43,7 +47,9 @@ usage() {
 debianStable=wheezy
 debianUnstable=sid
 # this should match the name found at http://releases.ubuntu.com/
-ubuntuLatestLTS=precise
+ubuntuLatestLTS=trusty
+# this should match the name found at http://releases.tanglu.org/
+tangluLatest=aequorea
 
 while getopts v:i:a:p:dst name; do
 	case "$name" in
@@ -112,7 +118,7 @@ fi
 # will be filled in later, if [ -z "$skipDetection" ]
 lsbDist=''
 
-target="/tmp/docker-rootfs-debootstrap-$suite-$$-$RANDOM"
+target="${TMPDIR:-/var/tmp}/docker-rootfs-debootstrap-$suite-$$-$RANDOM"
 
 cd "$(dirname "$(readlink -f "$BASH_SOURCE")")"
 returnTo="$(pwd -P)"
@@ -138,7 +144,7 @@ if [ -z "$strictDebootstrap" ]; then
 	#  initctl (for some pesky upstart scripts)
 	sudo chroot . dpkg-divert --local --rename --add /sbin/initctl
 	sudo ln -sf /bin/true sbin/initctl
-	# see https://github.com/dotcloud/docker/issues/446#issuecomment-16953173
+	# see https://github.com/docker/docker/issues/446#issuecomment-16953173
 	
 	# shrink the image, since apt makes us fat (wheezy: ~157.5MB vs ~120MB)
 	sudo chroot . apt-get clean
@@ -201,11 +207,23 @@ if [ -z "$strictDebootstrap" ]; then
 					s/ $suite-updates main/ ${suite}-security main/
 				" etc/apt/sources.list
 				;;
+			Tanglu)
+				# add the updates repository
+				if [ "$suite" = "$tangluLatest" ]; then
+					# ${suite}-updates only applies to stable Tanglu versions
+					sudo sed -i "p; s/ $suite main$/ ${suite}-updates main/" etc/apt/sources.list
+				fi
+				;;
+			SteamOS)
+				# add contrib and non-free
+				sudo sed -i "s/ $suite main$/ $suite main contrib non-free/" etc/apt/sources.list
+				;;
 		esac
 	fi
 	
 	# make sure our packages lists are as up to date as we can get them
 	sudo chroot . apt-get update
+	sudo chroot . apt-get dist-upgrade -y
 fi
 
 if [ "$justTar" ]; then
@@ -244,6 +262,28 @@ else
 					lsbRelease="$(. etc/lsb-release && echo "$DISTRIB_RELEASE")"
 					if [ "$lsbRelease" ]; then
 						# tag specific Ubuntu version number, if available (12.04, etc.)
+						$docker tag $repo:$suite $repo:$lsbRelease
+					fi
+				fi
+				;;
+			Tanglu)
+				if [ "$suite" = "$tangluLatest" ]; then
+					# tag latest
+					$docker tag $repo:$suite $repo:latest
+				fi
+				if [ -r etc/lsb-release ]; then
+					lsbRelease="$(. etc/lsb-release && echo "$DISTRIB_RELEASE")"
+					if [ "$lsbRelease" ]; then
+						# tag specific Tanglu version number, if available (1.0, 2.0, etc.)
+						$docker tag $repo:$suite $repo:$lsbRelease
+					fi
+				fi
+				;;
+			SteamOS)
+				if [ -r etc/lsb-release ]; then
+					lsbRelease="$(. etc/lsb-release && echo "$DISTRIB_RELEASE")"
+					if [ "$lsbRelease" ]; then
+						# tag specific SteamOS version number, if available (1.0, 2.0, etc.)
 						$docker tag $repo:$suite $repo:$lsbRelease
 					fi
 				fi

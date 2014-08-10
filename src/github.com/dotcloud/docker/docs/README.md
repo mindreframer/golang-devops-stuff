@@ -1,145 +1,99 @@
-Docker Documentation
-====================
+# Docker Documentation
 
-Overview
---------
+The source for Docker documentation is here under `sources/` and uses extended
+Markdown, as implemented by [MkDocs](http://mkdocs.org).
 
-The source for Docker documentation is here under ``sources/`` in the
-form of .rst files. These files use
-[reStructuredText](http://docutils.sourceforge.net/rst.html)
-formatting with [Sphinx](http://sphinx-doc.org/) extensions for
-structure, cross-linking and indexing.
+The HTML files are built and hosted on `https://docs.docker.com`, and update
+automatically after each change to the master or release branch of [Docker on
+GitHub](https://github.com/docker/docker) thanks to post-commit hooks. The
+`docs` branch maps to the "latest" documentation and the `master` (unreleased
+development) branch maps to the "master" documentation.
 
-The HTML files are built and hosted on
-[readthedocs.org](https://readthedocs.org/projects/docker/), appearing
-via proxy on https://docs.docker.io. The HTML files update
-automatically after each change to the master or release branch of the
-[docker files on GitHub](https://github.com/dotcloud/docker) thanks to
-post-commit hooks. The "release" branch maps to the "latest"
-documentation and the "master" branch maps to the "master"
-documentation. 
+## Branches
 
-**Warning**: The "master" documentation may include features not yet
-part of any official docker release. "Master" docs should be used only
-for understanding bleeding-edge development and "latest" should be
-used for the latest official release.
+**There are two branches related to editing docs**: `master` and a `docs`
+branch. You should always edit documentation on a local branch of the `master`
+branch, and send a PR against `master`.
 
-If you need to manually trigger a build of an existing branch, then
-you can do that through the [readthedocs
-interface](https://readthedocs.org/builds/docker/). If you would like
-to add new build targets, including new branches or tags, then you
-must contact one of the existing maintainers and get your
-readthedocs.org account added to the maintainers list, or just file an
-issue on GitHub describing the branch/tag and why it needs to be added
-to the docs, and one of the maintainers will add it for you.
+That way your fixes will automatically get included in later releases, and docs
+maintainers can easily cherry-pick your changes into the `docs` release branch.
+In the rare case where your change is not forward-compatible, you may need to
+base your changes on the `docs` branch.
 
-Getting Started
----------------
+Also, now that we have a `docs` branch, we can keep the
+[http://docs.docker.com](http://docs.docker.com) docs up to date with any bugs
+found between Docker code releases.
 
-To edit and test the docs, you'll need to install the Sphinx tool and
-its dependencies. There are two main ways to install this tool:
+**Warning**: When *reading* the docs, the
+[http://docs-stage.docker.com](http://docs-stage.docker.com) documentation may
+include features not yet part of any official Docker release. The `beta-docs`
+site should be used only for understanding bleeding-edge development and
+`docs.docker.com` (which points to the `docs` branch`) should be used for the
+latest official release.
 
-###Native Installation
+## Contributing
 
-Install dependencies from `requirements.txt` file in your `docker/docs`
-directory:
+- Follow the contribution guidelines ([see
+  `../CONTRIBUTING.md`](../CONTRIBUTING.md)).
+- [Remember to sign your work!](../CONTRIBUTING.md#sign-your-work)
 
-* Linux: `pip install -r docs/requirements.txt`
+## Getting Started
 
-* Mac OS X: `[sudo] pip-2.7 install -r docs/requirements.txt`
+Docker documentation builds are done in a Docker container, which installs all
+the required tools, adds the local `docs/` directory and builds the HTML docs.
+It then starts a HTTP server on port 8000 so that you can connect and see your
+changes.
 
-###Alternative Installation: Docker Container
+In the root of the `docker` source directory:
 
-If you're running ``docker`` on your development machine then you may
-find it easier and cleaner to use the docs Dockerfile. This installs Sphinx
-in a container, adds the local ``docs/`` directory and builds the HTML
-docs inside the container, even starting a simple HTTP server on port
-8000 so that you can connect and see your changes.
+    make docs
 
-In the ``docker`` source directory, run:
-    ```make docs```
+If you have any issues you need to debug, you can use `make docs-shell` and then
+run `mkdocs serve`
 
-This is the equivalent to ``make clean server`` since each container starts clean.
+## Style guide
 
-Usage
------
-* Follow the contribution guidelines (``../CONTRIBUTING.md``)
-* Work in your own fork of the code, we accept pull requests.
-* Change the ``.rst`` files with your favorite editor -- try to keep the
-  lines short and respect RST and Sphinx conventions. 
-* Run ``make clean docs`` to clean up old files and generate new ones,
-  or just ``make docs`` to update after small changes.
-* Your static website can now be found in the ``_build`` directory.
-* To preview what you have generated run ``make server`` and open
-  http://localhost:8000/ in your favorite browser.
+The documentation is written with paragraphs wrapped at 80 column lines to make
+it easier for terminal use.
 
-``make clean docs`` must complete without any warnings or errors.
+### Examples
 
-Working using GitHub's file editor
-----------------------------------
+When writing examples, give the user hints by making them resemble what they see
+in their shell:
 
-Alternatively, for small changes and typos you might want to use
-GitHub's built in file editor. It allows you to preview your changes
-right online (though there can be some differences between GitHub
-markdown and Sphinx RST). Just be careful not to create many commits.
+- Indent shell examples by 4 spaces so they get rendered as code.
+- Start typed commands with `$ ` (dollar space), so that they are easily
+  differentiated from program output.
+- Program output has no prefix.
+- Comments begin with `# ` (hash space).
+- In-container shell commands begin with `$$ ` (dollar dollar space).
 
-Images
-------
+### Images
 
-When you need to add images, try to make them as small as possible
-(e.g. as gif). Usually images should go in the same directory as the
-.rst file which references them, or in a subdirectory if one already
-exists.
+When you need to add images, try to make them as small as possible (e.g., as
+gifs). Usually images should go in the same directory as the `.md` file which
+references them, or in a subdirectory if one already exists.
 
-Notes
------
-* For the template the css is compiled from less. When changes are needed they can be compiled using
-lessc ``lessc main.less`` or watched using watch-lessc ``watch-lessc -i main.less -o main.css``
+## Working using GitHub's file editor
 
-Guides on using sphinx
-----------------------
-* To make links to certain sections create a link target like so:
+Alternatively, for small changes and typos you might want to use GitHub's built-
+in file editor. It allows you to preview your changes right on-line (though
+there can be some differences between GitHub Markdown and [MkDocs
+Markdown](http://www.mkdocs.org/user-guide/writing-your-docs/)).  Just be
+careful not to create many commits. And you must still [sign your
+work!](../CONTRIBUTING.md#sign-your-work)
 
-  ```
-    .. _hello_world:
+## Publishing Documentation
 
-    Hello world
-    ===========
+To publish a copy of the documentation you need a `docs/awsconfig`
+file containing AWS settings to deploy to. The release script will
+create an s3 if needed, and will then push the files to it.
 
-    This is.. (etc.)
-  ```
+    [profile dowideit-docs] aws_access_key_id = IHOIUAHSIDH234rwf....
+    aws_secret_access_key = OIUYSADJHLKUHQWIUHE......  region = ap-southeast-2
 
-  The ``_hello_world:`` will make it possible to link to this position
-  (page and section heading) from all other pages. See the [Sphinx
-  docs](http://sphinx-doc.org/markup/inline.html#role-ref) for more
-  information and examples.
+The `profile` name must be the same as the name of the bucket you are deploying
+to - which you call from the `docker` directory:
 
-* Notes, warnings and alarms
-
-  ```
-    # a note (use when something is important)
-    .. note::
-
-    # a warning (orange)
-    .. warning::
-
-    # danger (red, use sparsely)
-    .. danger::
-
-* Code examples
-
-  * Start typed commands with ``$ `` (dollar space) so that they 
-    are easily differentiated from program output.
-  * Use "sudo" with docker to ensure that your command is runnable
-    even if they haven't [used the *docker*
-    group](http://docs.docker.io/en/latest/use/basics/#why-sudo).
-
-Manpages
---------
-
-* To make the manpages, run ``make man``. Please note there is a bug
-  in Sphinx 1.1.3 which makes this fail.  Upgrade to the latest version
-  of Sphinx.
-* Then preview the manpage by running ``man _build/man/docker.1``,
-  where ``_build/man/docker.1`` is the path to the generated manfile
+    make AWS_S3_BUCKET=dowideit-docs docs-release
 

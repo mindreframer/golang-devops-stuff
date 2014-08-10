@@ -10,7 +10,7 @@
 	Define flags using flag.String(), Bool(), Int(), etc.
 
 	This declares an integer flag, -f or --flagname, stored in the pointer ip, with type *int.
-		import "flag"
+		import "flag /github.com/docker/docker/pkg/mflag"
 		var ip = flag.Int([]string{"f", "-flagname"}, 1234, "help message for flagname")
 	If you like, you can bind the flag to a variable using the Var() functions.
 		var flagvar int
@@ -22,6 +22,18 @@
 	pointer receivers) and couple them to flag parsing by
 		flag.Var(&flagVal, []string{"name"}, "help message for flagname")
 	For such flags, the default value is just the initial value of the variable.
+
+	You can also add "deprecated" flags, they are still usable, bur are not shown
+	in the usage and will display a warning when you try to use them:
+		var ip = flag.Int([]string{"f", "#flagname", "-flagname"}, 1234, "help message for flagname")
+	this will display: `Warning: '-flagname' is deprecated, it will be replaced by '--flagname' soon. See usage.` and
+		var ip = flag.Int([]string{"f", "#flagname"}, 1234, "help message for flagname")
+	will display: `Warning: '-t' is deprecated, it will be removed soon. See usage.`
+
+	You can also group one letter flags, bif you declare
+		var v = flag.Bool([]string{"v", "-verbose"}, false, "help message for verbose")
+		var s = flag.Bool([]string{"s", "-slow"}, false, "help message for slow")
+	you will be able to use the -vs or -sv
 
 	After all flags are defined, call
 		flag.Parse()
@@ -39,6 +51,8 @@
 	Command line flag syntax:
 		-flag
 		-flag=x
+		-flag="x"
+		-flag='x'
 		-flag x  // non-boolean flags only
 	One or two minus signs may be used; they are equivalent.
 	The last form is not permitted for boolean flags because the
@@ -71,11 +85,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 )
 
 // ErrHelp is the error returned if the flag -help is invoked but no such flag is defined.
 var ErrHelp = errors.New("flag: help requested")
+
+// ErrRetry is the error returned if you need to try letter by letter
+var ErrRetry = errors.New("flag: retry")
 
 // -- bool Value
 type boolValue bool
@@ -283,17 +301,30 @@ type Flag struct {
 	DefValue string   // default value (as text); for usage message
 }
 
+type flagSlice []string
+
+func (p flagSlice) Len() int { return len(p) }
+func (p flagSlice) Less(i, j int) bool {
+	pi, pj := strings.TrimPrefix(p[i], "-"), strings.TrimPrefix(p[j], "-")
+	lpi, lpj := strings.ToLower(pi), strings.ToLower(pj)
+	if lpi != lpj {
+		return lpi < lpj
+	}
+	return pi < pj
+}
+func (p flagSlice) Swap(i, j int) { p[i], p[j] = p[j], p[i] }
+
 // sortFlags returns the flags as a slice in lexicographical sorted order.
 func sortFlags(flags map[string]*Flag) []*Flag {
-	var list sort.StringSlice
+	var list flagSlice
 	for _, f := range flags {
+		fName := strings.TrimPrefix(f.Names[0], "#")
 		if len(f.Names) == 1 {
-			list = append(list, f.Names[0])
+			list = append(list, fName)
 			continue
 		}
 
 		found := false
-		fName := strings.TrimPrefix(strings.TrimPrefix(f.Names[0], "#"), "-")
 		for _, name := range list {
 			if name == fName {
 				found = true
@@ -304,7 +335,7 @@ func sortFlags(flags map[string]*Flag) []*Flag {
 			list = append(list, fName)
 		}
 	}
-	list.Sort()
+	sort.Sort(list)
 	result := make([]*Flag, len(list))
 	for i, name := range list {
 		result[i] = flags[name]
@@ -389,11 +420,12 @@ func Set(name, value string) error {
 // PrintDefaults prints, to standard error unless configured
 // otherwise, the default values of all defined flags in the set.
 func (f *FlagSet) PrintDefaults() {
+	writer := tabwriter.NewWriter(f.out(), 20, 1, 3, ' ', 0)
 	f.VisitAll(func(flag *Flag) {
-		format := "  -%s=%s: %s\n"
+		format := "  -%s=%s"
 		if _, ok := flag.Value.(*stringValue); ok {
 			// put quotes on the value
-			format = "  -%s=%q: %s\n"
+			format = "  -%s=%q"
 		}
 		names := []string{}
 		for _, name := range flag.Names {
@@ -401,8 +433,17 @@ func (f *FlagSet) PrintDefaults() {
 				names = append(names, name)
 			}
 		}
-		fmt.Fprintf(f.out(), format, strings.Join(names, ", -"), flag.DefValue, flag.Usage)
+		if len(names) > 0 {
+			fmt.Fprintf(writer, format, strings.Join(names, ", -"), flag.DefValue)
+			for i, line := range strings.Split(flag.Usage, "\n") {
+				if i != 0 {
+					line = "  " + line
+				}
+				fmt.Fprintln(writer, "\t", line)
+			}
+		}
 	})
+	writer.Flush()
 }
 
 // PrintDefaults prints to standard error the default values of all defined command-line flags.
@@ -732,49 +773,84 @@ func (f *FlagSet) usage() {
 	}
 }
 
+func trimQuotes(str string) string {
+	if len(str) == 0 {
+		return str
+	}
+	type quote struct {
+		start, end byte
+	}
+
+	// All valid quote types.
+	quotes := []quote{
+		// Double quotes
+		{
+			start: '"',
+			end:   '"',
+		},
+
+		// Single quotes
+		{
+			start: '\'',
+			end:   '\'',
+		},
+	}
+
+	for _, quote := range quotes {
+		// Only strip if outermost match.
+		if str[0] == quote.start && str[len(str)-1] == quote.end {
+			str = str[1 : len(str)-1]
+			break
+		}
+	}
+
+	return str
+}
+
 // parseOne parses one flag. It reports whether a flag was seen.
-func (f *FlagSet) parseOne() (bool, error) {
+func (f *FlagSet) parseOne() (bool, string, error) {
 	if len(f.args) == 0 {
-		return false, nil
+		return false, "", nil
 	}
 	s := f.args[0]
 	if len(s) == 0 || s[0] != '-' || len(s) == 1 {
-		return false, nil
+		return false, "", nil
 	}
 	if s[1] == '-' && len(s) == 2 { // "--" terminates the flags
 		f.args = f.args[1:]
-		return false, nil
+		return false, "", nil
 	}
 	name := s[1:]
 	if len(name) == 0 || name[0] == '=' {
-		return false, f.failf("bad flag syntax: %s", s)
+		return false, "", f.failf("bad flag syntax: %s", s)
 	}
 
 	// it's a flag. does it have an argument?
 	f.args = f.args[1:]
 	has_value := false
 	value := ""
-	for i := 1; i < len(name); i++ { // equals cannot be first
-		if name[i] == '=' {
-			value = name[i+1:]
-			has_value = true
-			name = name[0:i]
-			break
-		}
+	if i := strings.Index(name, "="); i != -1 {
+		value = trimQuotes(name[i+1:])
+		has_value = true
+		name = name[:i]
 	}
+
 	m := f.formal
 	flag, alreadythere := m[name] // BUG
 	if !alreadythere {
 		if name == "-help" || name == "help" || name == "h" { // special case for nice help message.
 			f.usage()
-			return false, ErrHelp
+			return false, "", ErrHelp
 		}
-		return false, f.failf("flag provided but not defined: -%s", name)
+		if len(name) > 0 && name[0] == '-' {
+			return false, "", f.failf("flag provided but not defined: -%s", name)
+		}
+		return false, name, ErrRetry
 	}
 	if fv, ok := flag.Value.(boolFlag); ok && fv.IsBoolFlag() { // special case: doesn't need an arg
 		if has_value {
 			if err := fv.Set(value); err != nil {
-				return false, f.failf("invalid boolean value %q for  -%s: %v", value, name, err)
+				return false, "", f.failf("invalid boolean value %q for  -%s: %v", value, name, err)
 			}
 		} else {
 			fv.Set("true")
@@ -787,17 +863,33 @@ func (f *FlagSet) parseOne() (bool, error) {
 			value, f.args = f.args[0], f.args[1:]
 		}
 		if !has_value {
-			return false, f.failf("flag needs an argument: -%s", name)
+			return false, "", f.failf("flag needs an argument: -%s", name)
 		}
 		if err := flag.Value.Set(value); err != nil {
-			return false, f.failf("invalid value %q for flag -%s: %v", value, name, err)
+			return false, "", f.failf("invalid value %q for flag -%s: %v", value, name, err)
 		}
 	}
 	if f.actual == nil {
 		f.actual = make(map[string]*Flag)
 	}
 	f.actual[name] = flag
-	return true, nil
+	for i, n := range flag.Names {
+		if n == fmt.Sprintf("#%s", name) {
+			replacement := ""
+			for j := i; j < len(flag.Names); j++ {
+				if flag.Names[j][0] != '#' {
+					replacement = flag.Names[j]
+					break
+				}
+			}
+			if replacement != "" {
+				fmt.Fprintf(f.out(), "Warning: '-%s' is deprecated, it will be replaced by '-%s' soon. See usage.\n", name, replacement)
+			} else {
+				fmt.Fprintf(f.out(), "Warning: '-%s' is deprecated, it will be removed soon. See usage.\n", name)
+			}
+		}
+	}
+	return true, "", nil
 }
 
 // Parse parses flag definitions from the argument list, which should not
@@ -808,12 +900,33 @@ func (f *FlagSet) Parse(arguments []string) error {
 	f.parsed = true
 	f.args = arguments
 	for {
-		seen, err := f.parseOne()
+		seen, name, err := f.parseOne()
 		if seen {
 			continue
 		}
 		if err == nil {
 			break
+		}
+		if err == ErrRetry {
+			if len(name) > 1 {
+				err = nil
+				for _, letter := range strings.Split(name, "") {
+					f.args = append([]string{"-" + letter}, f.args...)
+					seen2, _, err2 := f.parseOne()
+					if seen2 {
+						continue
+					}
+					if err2 != nil {
+						err = f.failf("flag provided but not defined: -%s", name)
+						break
+					}
+				}
+				if err == nil {
+					continue
+				}
+			} else {
+				err = f.failf("flag provided but not defined: -%s", name)
+			}
 		}
 		switch f.errorHandling {
 		case ContinueOnError:
