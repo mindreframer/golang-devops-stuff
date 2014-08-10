@@ -1,14 +1,17 @@
 language: go
 
 go:
-  - 1.1
+  - 1.3
 
 install:
-  - go get github.com/goraft/raft
-  - go get github.com/gorilla/mux
+  - go get github.com/coreos/etcd
+  - go get github.com/coreos/go-etcd/etcd
+  - go get github.com/coreos/go-log/log
   - go get github.com/miekg/dns
-  - go get github.com/skynetservices/skydns/msg
   - go get github.com/rcrowley/go-metrics
-  - go get github.com/stathat/go
-  - go get github.com/codegangsta/cli
-  - go get github.com/influxdb/influxdb-go
+  - go get github.com/rcrowley/go-metrics/influxdb
+  - go get github.com/rcrowley/go-metrics/stathat
+
+before_script:
+  - go build -o $HOME/gopath/src/github.com/coreos/etcd/etcd.run github.com/coreos/etcd
+  - $HOME/gopath/src/github.com/coreos/etcd/etcd.run &
