@@ -1,34 +1,72 @@
 package abkhttpd
 
 import (
-  "net/http"
-  "html/template"
+	"html/template"
+	"net/http"
 )
 
-func F1(w http.ResponseWriter, req *http.Request) {
-  w.Header().Set("Content-Type", "text/html")
+func Index(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
 
-  t, _ := template.ParseFiles("httpd/public/help.html")
-  t.Execute(w, nil)
+	t, err := template.ParseFiles("httpd/public/index.html")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	t.Execute(w, nil)
+}
+
+func QuickStart(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+
+	t, err := template.ParseFiles("httpd/public/quickstart.html")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	t.Execute(w, nil)
 }
 
 func HelpHTTP(w http.ResponseWriter, req *http.Request) {
-  w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html")
 
-  t, _ := template.ParseFiles("httpd/public/help-http.html")
-  t.Execute(w, nil)
+	t, err := template.ParseFiles("httpd/public/help-http.html")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	t.Execute(w, nil)
 }
 
 func HelpZMQ(w http.ResponseWriter, req *http.Request) {
-  w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html")
 
-  t, _ := template.ParseFiles("httpd/public/help-zmq.html")
-  t.Execute(w, nil)
+	t, err := template.ParseFiles("httpd/public/help-zmq.html")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	t.Execute(w, nil)
+}
+
+func Concept(w http.ResponseWriter, req *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+
+	t, err := template.ParseFiles("httpd/public/concept.html")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	t.Execute(w, nil)
 }
 
 func Status(w http.ResponseWriter, req *http.Request) {
-  w.Header().Set("Content-Type", "text/html")
+	w.Header().Set("Content-Type", "text/html")
 
-  t, _ := template.ParseFiles("httpd/public/status.html")
-  t.Execute(w, nil)
+	t, err := template.ParseFiles("httpd/public/status.html")
+	if err != nil {
+		w.Write([]byte(err.Error()))
+		return
+	}
+	t.Execute(w, nil)
 }

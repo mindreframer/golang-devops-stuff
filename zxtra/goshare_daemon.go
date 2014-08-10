@@ -1,7 +1,12 @@
 package main
 
-import "github.com/abhishekkr/goshare"
+import (
+	"github.com/abhishekkr/gol/golservice"
+	"github.com/abhishekkr/goshare"
+)
 
-func main(){
-  goshare.GoShare()
+func main() {
+	var goshare_service golservice.Funk
+	goshare_service = func() { goshare.GoShare() }
+	golservice.Daemon(goshare_service)
 }

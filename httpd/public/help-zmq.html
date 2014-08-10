@@ -1,11 +1,10 @@
+<!doctype html>
 <html>
 <head>
-  <title>GoShare F1</title>
+  <title>GoShare ZeroMQ</title>
 </head>
 <body>
-<section>
-  <h2>
-    <a name="go-share" class="anchor" href="http://abhishekkr.github.io/goshare/">Go Share</a></h2>
+    <h2><a name="go-share" class="anchor" href="http://abhishekkr.github.io/goshare/">GoShare ~ persistent (TimeSeries/Namespace/Simple) KeyVal storage</a></h2>
 
   <pre lang="ASCII"><code>
                         __                    _____ _    _   __
@@ -17,11 +16,74 @@
 
   </code></pre>
 
-  <h4>Go Share any data among the nodes. Over HTTP or ZeroMQ.</h4>
+  <h3>Go Share any data among the nodes. Over ZeroMQ.</h3>
+  <a href="/">Home</a> | <a href="/quickstart">QuickStart</a> | <a href="/concept">User Concepts</a> | <a href="/help-http">over HTTP</a> | <a href="/status">Status</a>
+  <br/>
+  <br/>
+  <div id="preview" style="width: 90%; border: solid; outline: none; margin: 0; padding: 10px;">By Word Stream
 
-  <h1> W.I.P. </h1>
+<code>
+[DB-Action] [Task-Type] ([Time-Dot]) ([Parent-NameSpace]) {[Key ([Val...])] OR [DB-Data...]}
+</code>
 
-  <a href="/">HOME</a>
+<p>the specifics for these components have been explained under User Concepts before</p>
+
+<blockquote>
+ <ul>
+ <li>if you are coding in Golang, you can directly utilize ZmqRequest from "<a href="http://github.com/abhishekkr/gol/golzmq">golzmq</a>" *</li>
+ <li>otherwise, just prepare the word-stream and pass it as bytes in your favorite ZeroMQ Request library *</li>
+ </ul>
+</blockquote>
+
+<hr>
+
+Word Stream for major usable scenarios
+
+<blockquote>
+ <p>simple Key Values</p>
+</blockquote>
+
+<ul>
+<li><p>Push a simple Key Value <code>push default kernel linux</code></p></li>
+<li><p>Push multiple Key Value as CSV <code>push default-csv kernel,linux</code></p></li>
+<li><p>Push multiple Key Value as JSON <code>push default-json {"kernel":"linux"}</code></p></li>
+<li><p>Read a simple key, default response into CSV <code>read default kernel</code></p></li>
+<li><p>Read a simple key into JSON response <code>read default-json ["kernel"]</code></p></li>
+<li><p>Read multiple keys from JSON into JSON response <code>read default-json ["kernel","os"]</code></p></li>
+<li><p>Delete a simple key <code>delete default kernel</code></p></li>
+<li><p>Delete multiple keys from CSV <code>delete default-csv kernel,os</code></p></li>
+</ul>
+
+<blockquote>
+ <p>Namespaced Key Values</p>
+</blockquote>
+
+<ul>
+<li><p>Push a namespace key <code>push ns software:internet:browser chrome</code></p></li>
+<li><p>Push multiple namespace keys from CSV <code>push ns-csv software:internet:browser,chrome\nsoftware:internet:downloader,wget</code></p></li>
+<li><p>Push a namespace key with parent-namespace <code>push ns-default-parentNS software internet:browser chrome</code></p></li>
+<li><p>Push multiple namespace keys from JSON with parent-namespace <code>push ns-json-parentNS {"software:internet:browser":"chrome","software:internet:downloader":"wget"}</code></p></li>
+<li><p>Read all namespace value under given key, default as csv <code>read ns "software:internet"</code></p></li>
+<li><p>Read all namespace value under given key, fixed as csv <code>read ns-csv "software:internet"</code></p></li>
+<li><p>Read all namespace value under given key, response as JSON <code>read ns-json-parentNS software ["internet"]</code></p></li>
+<li><p>Delete all namespace value under given key <code>delete ns software:internet</code></p></li>
+</ul>
+
+<blockquote>
+ <p>TimeSeries Key Values</p>
+</blockquote>
+
+<ul>
+<li><p>Push a tsds key val <code>push tsds 2014 5 25 11 53 10 node:mymachine:memfree 4</code></p></li>
+<li><p>Push multiple tsds keys from CSV <code>push tsds-csv 2014 5 25 11 53 10 node:mymachine:memfree,4\nnode:mymachine:diskfree,20</code></p></li>
+<li><p>Push multiple NOW timeseries keys from JSON at TimeDot of getting stored <code>push now-json {"node:mymachine:memfree":"4","node:mymachine:diskfree":"20"}</code></p></li>
+<li><p>Push multiple tsds keys from JSON with parent-namespace <code>push tsds-json-parentNS 2014 5 25 11 53 10 node:mymachine {"memfree":"4","diskfree":"20"}</code></p></li>
+<li><p>Read all tsds values under given key, response as JSON <code>read tsds-json ["node:mymachine"]</code></p></li>
+<li><p>Read all tsds value under given key, response as JSON <code>read tsds-json-parentNS node ["mymachine","othermachine"]</code></p></li>
+<li><p>Delete all tsds value under given key <code>delete tsds node</code></p></li>
+</ul>
+
+<hr></div>
 
 <body>
 <html>

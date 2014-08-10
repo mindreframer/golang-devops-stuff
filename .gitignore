@@ -4,3 +4,4 @@
 *.tmp
 temp/*
 .goenv
+bin/*

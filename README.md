@@ -12,6 +12,8 @@
 
 [Tasks in Queue at Trello Board](https://trello.com/b/ZjDMRGQN/goshare)
 
+distributed under [MIT License](http://opensource.org/licenses/MIT)
+
 #### Go Share any data among the nodes. Over HTTP or ZeroMQ.
 
 * GOShare eases up communication over HTTP GET param based interaction.
@@ -22,6 +24,25 @@ it's "go get"-able
 ``` go get "github.com/abhishekkr/goshare" ```
 
 ***
+
+#### Make Distributable Binary
+
+```bash
+./go-tasks.sh bin
+```
+
+This will create two distributable binaries *./bin/goshare_service* & *./bin/goshare_daemon*. Here *./bin/goshare_service* works as shown in README's 'Tryout' section.
+
+Whereas *./bin/goshare_daemon* can be used as a system service daemon, with following command line flags (along with flags mentioned in 'Tryout' section for ports and db-path)
+>
+> * start: ``` ./bin/goshare_daemon -daemon=start ```
+> * stop: ``` ./bin/goshare_daemon -daemon=stop ```
+> * status: ``` ./bin/goshare_daemon -daemon=status ```
+>
+> *this dumps daemon's current status to /tmp/goshare_daemon.status and pid to /tmp/goshare_daemon.pid*
+> *the status and pid file path can be changed with flags '-daemon-log=<path>' & '-daemon-pid=<path>' respectively*
+>
+
 
 #### Tryout:
 
@@ -84,5 +105,6 @@ Now visit the the link asked by it and get the help page.
 * [gozmq](https://github.com/alecthomas/gozmq) GoLang ZeroMQ Bindings used here
 * [levigoNS](https://github.com/abhishekkr/levigoNS) NameSpace KeyVal capabilities around leveldb via levigo
 * [levigoTSDS](https://github.com/abhishekkr/levigoTSDS) TimeSeries KeyVal capabilties around leveldb via levigoNS
+* [gol](https://github.com/abhishekkr/gol) Set of common utility functionalities
 
 [![baby-gopher](https://raw2.github.com/drnic/babygopher-site/gh-pages/images/babygopher-badge.png)](http://www.babygopher.org)

@@ -1,0 +1,161 @@
+<!doctype html>
+<html>
+<head>
+<title>GoShare Quickstart</title>
+</head>
+<body>
+    <h2><a name="go-share" class="anchor" href="http://abhishekkr.github.io/goshare/">GoShare ~ persistent (TimeSeries/Namespace/Simple) KeyVal storage</a></h2>
+
+  <pre lang="ASCII"><code>
+                        __
+   ____  ____     _____/ /_  ____  ____,,__    ___          _____   __     .   __  _____    _     __   _____
+  / __ `/ __ \   / ___/ __ \/ __ `/ ___/ _ \  |   |  |   |    |    |    | /   /      |     / \   |  /    |
+ / /_/ / /_/ /  (__  ) / / / /_/ / /  /  __/  |   |  |   |    |    |    |=    --,    |    |---|  |-.'    |
+ \__, /\____/  /____/_/ /_/\__,_/_/   \___/   |__\\_ |___|, __|__  |__  | \.  __/    |    |   |  |  \    |
+/____/
+
+  </code></pre>
+
+<h3>Go Share : QuickStart</h3>
+<a href="/">Home</a> | <a href="/concept">User Concepts</a> | <a href="/help-http">over HTTP</a> | <a href="/help-zmq">over ZeroMQ</a> | <a href="/status">Status</a>
+<br/>
+<br/>
+
+<div id="preview" style="width: 90%; border: solid; outline: none; margin: 0; padding: 10px;">
+
+  Get the freakin' code
+
+  <ul>
+    <li><p>have git client, awesome it's easy <code>git clone https://github.com/abhishekkr/goshare</code></p></li>
+    <li><p>have svn client, it's fine <code>svn co https://github.com/abhishekkr/goshare</code></p></li>
+    <li><p>have internet, ahhh... download and uncompress <code>https://github.com/abhishekkr/goshare/archive/v0.8.4.tar.gz</code></p></li>
+  </ul>
+
+  <hr>
+
+  Build your binaries
+
+  <p>Make cloned/checkout/downloaded 'goshare' code directory as your current directory.</p>
+
+  <ul>
+    <li><p>have bash/zsh shell, cool <code>./go-tasks.sh bin</code></p></li>
+    <li><p>have golang at least
+
+
+    </p><blockquote>
+      <p></p><p></p>
+    </blockquote>
+
+    <blockquote>
+      <ul><li>fetch all dependencies mentioned in 'go-get-pkg.txt'</li>
+        <li>run at cli <code>mkdir ./bin ; cd ./bin ; go build ../zxtra/goshare_service.go</code></li></ul>
+    </blockquote></li>
+  </ul>
+
+  <hr>
+
+  Start it up
+
+  <ul>
+    <li><p>if you have a '/tmp' location with write access for current user</p>
+
+    <blockquote>
+      <ul><li>run <code>./bin/goshare_server</code></li></ul>
+    </blockquote></li>
+    <li><p>otherwise</p>
+
+    <blockquote>
+      <ul><li>run <code>./bin/goshare_server -dbpath=$ANY_LOCATION_FORDB_CREATION</code></li></ul>
+    </blockquote></li>
+  </ul>
+
+  <blockquote>
+    <ul>
+      <li>HTTP listener at 0.0.0.0:9999</li>
+      <li>ZeroMQ Request/Reply listener at 9898, 9797</li>
+    </ul>
+
+    <p>when started in non-daemon mode, these details get printed on command line as well</p>
+  </blockquote>
+
+  <p>Now you can just run <code>go run zxtra/gohttp_client.go</code> to fire some read, push and delete calls to GoShare. Or make some of your own.</p>
+
+  <blockquote>
+    <p>You'll notice in a particular requirement -dbpath flag has been used to provide location of DB to be passed to GoShare. There are similar other flags available, which are:</p>
+
+    <ul>
+      <li>dbpath     : path to create database at; Default: "/tmp/GO.DB"</li>
+      <li>http-uri   : IP to connect while opening http port, Default: "0.0.0.0"</li>
+      <li>http-port  : Port to open http server connection for GoShare, Default: "9999"</li>
+      <li>req-port   : First port to bind ZeroMQ Request/Reply socket server, Default: "9797"</li>
+      <li>rep-port   : Second port to bind ZeroMQ Request/Reply socket server, Default: "9898"</li>
+      <li>cpuprofile : file to log cpu profile data</li>
+      <li>config     : json config file to provide all other flag value to override</li>
+    </ul>
+  </blockquote>
+
+  <blockquote>
+    <p>The same set of configuration changes (or a portion of it) can be applied by a configuration file in JSON format, written like
+    <code>JSON
+      {"http-port": "8080"}
+    </code></p>
+  </blockquote>
+
+  <p>So, here configuration applied by JSON file will override configuration applied by flags. If flags are not provided then the default value for them will be assigned to them.</p>
+
+  <hr>
+
+  Ceate, Read, Delete
+
+  <p>These actions have been covered in detail at:
+  * Create : [wiki]<em>to-be-written</em>
+  * Read   : [wiki]<em>to-be-written</em>
+  * Delete : [wiki]<em>to-be-written</em></p>
+
+  <p>For this QuickStart section, let's try (assumption you have curl, else visit same URLs in your this Browser you spoilt kid ):</p>
+
+  <p>#
+  curl <a href="/get?type=default&amp;key=name">http://127.0.0.1:9999/get?type=default&amp;key=name</a></p>
+
+  <p>#
+  curl <a href="/put?type=default&amp;key=name&amp;val=ledzep">http://127.0.0.1:9999/put?type=default&amp;key=name&amp;val=ledzep</a></p>
+
+  <p>#
+  curl <a href="/get?type=default&amp;key=name">http://127.0.0.1:9999/get?type=default&amp;key=name</a></p>
+
+  <p>#
+  curl <a href="/put?type=ns&amp;key=name%3afull&amp;val=LedZep">http://127.0.0.1:9999/put?type=ns&amp;key=name:full&amp;val=LedZep</a></p>
+
+  <p>#
+  curl <a href='/put?type=ns-json&amp;dbdata={\"name:first\":\"Led\",\"name:last\":\"Zep\"}'>http://127.0.0.1:9999/put?type=ns-json&amp;dbdata={\"name:first\":\"Led\",\"name:last\":\"Zep\"}</a></p>
+
+  <p>#
+  curl <a href="/get?type=ns&amp;key=name">http://127.0.0.1:9999/get?type=ns&amp;key=name</a></p>
+
+  <p>#
+  curl <a href="/del?type=ns&amp;key=name">http://127.0.0.1:9999/del?type=ns&amp;key=name</a></p>
+
+  <p>#
+  curl <a href="/get?type=ns&amp;key=name">http://127.0.0.1:9999/get?type=ns&amp;key=name</a></p>
+
+  <p>#
+  curl <a href='/put?type=now-json&amp;dbdata={\"node01:webservice:state\":\"up\",\"node01:memfree\":\"4256783\"}'>http://127.0.0.1:9999/put?type=now-json&amp;dbdata={\"node01:webservice:state\":\"up\",\"node01:memfree\":\"4256783\"}</a></p>
+
+  <p>#
+  curl <a href="/get?type=ns&amp;key=node01%3awebservice">http://127.0.0.1:9999/get?type=ns&amp;key=node01:webservice</a></p>
+
+  <p>#
+  curl <a href="/get?type=ns&amp;key=node01">http://127.0.0.1:9999/get?type=ns&amp;key=node01</a></p>
+
+  <p>#
+  curl <a href="/del?type=ns&amp;key=node01">http://127.0.0.1:9999/del?type=ns&amp;key=node01</a></p>
+
+  <p>#
+  curl <a href="/get?type=ns&amp;key=node01">http://127.0.0.1:9999/get?type=ns&amp;key=node01</a></p>
+
+  <p>GoShare's HTTP link also allows using POST/PUT for Create and DELETE for Delete tasks as method rather than route based approach. So, to each their own satisfaction.</p>
+
+  <hr></div>
+
+</body>
+</html>

@@ -1,11 +1,10 @@
+<!doctype html>
 <html>
 <head>
-  <title>GoShare F1</title>
+  <title>GoShare HTTP</title>
 </head>
 <body>
-<section>
-  <h2>
-    <a name="go-share" class="anchor" href="http://abhishekkr.github.io/goshare/">Go Share</a></h2>
+    <h2><a name="go-share" class="anchor" href="http://abhishekkr.github.io/goshare/">GoShare ~ persistent (TimeSeries/Namespace/Simple) KeyVal storage</a></h2>
 
   <pre lang="ASCII"><code>
                         __                         _____ _____ ___
@@ -17,11 +16,65 @@
 
   </code></pre>
 
-  <h4>Go Share any data among the nodes. Over HTTP or ZeroMQ.</h4>
+  <h3>Go Share any data among the nodes. Over HTTP.</h3>
+  <a href="/">Home</a> | <a href="/quickstart">QuickStart</a> | <a href="/concept">User Concepts</a> | <a href="/help-zmq">over ZeroMQ</a> | <a href="/status">Status</a>
+  <br/>
+  <br/>
+  <div id="preview" style="width: 90%; border: solid; outline: none; margin: 0; padding: 10px;"><p>By HTTP Method, send HTTP Request to "/db" as</p>
 
-  <h1> W.I.P. </h1>
+<ul>
+<li>POST/PUT method for "push" db-action</li>
+<li>GET method for "read" db-action</li>
+<li>DELETE method for "delete" db-action</li>
+</ul>
 
-  <a href="/">HOME</a>
+<hr>
+
+By Route, send GET method HTTP Requests to
+
+<ul>
+<li>"/put" for "push" db-action</li>
+<li>"/get" for "read" db-action</li>
+<li>"/del" for "delete" db-action</li>
+</ul>
+
+<hr>
+
+<p>URL form fields can be added for</p>
+
+<ul>
+<li>"type":     task-type {default,ns.tsds,now}-{,default,csv,json}-{,parentNS}; like ns-json or tsds-csv-parentNS</li>
+<li>"key":      for key to be used in "default" key-type</li>
+<li>"val":      for value to be used in "default" key-type on "push" db-action</li>
+<li>"dbdata" :  to specify data-string for val-types like csv, json</li>
+<li>"parentNS": to specify ParentNamespace for all/any keys to specified in request</li>
+<li>"year", "month", "day", "hour", "min", "sec" to specify all values of a timedot for key-type "tsds"</li>
+</ul>
+
+<p>&gt;</p>
+
+<blockquote>
+ <p>for POST/PUT HTTP Method on /db, the field values can be provided via POST Body or URL fields</p>
+</blockquote>
+
+<hr>
+
+Examples
+
+<p>all '%s' seen in URLs demand a suitable value for that field there</p>
+
+<ul>
+<li><p>read value for a key 'anything' <code>http://&lt;IP&gt;:&lt;PORT&gt;/get?type=default&amp;key=anything</code></p></li>
+<li><p>push with full namespace of 'any:thing" value 'huh' <code>http://&lt;IP&gt;:&lt;PORT&gt;/put?type=ns&amp;key=any:thing&amp;val=huh</code></p></li>
+<li><p>delete all self and child namespace for 'any' and 'all' <code>http://&lt;IP&gt;:&lt;PORT&gt;/del?type=ns-csv&amp;dbdata=any,all</code></p></li>
+<li><p>push 'up' for 'state' as timeseries for given time point <code>http://&lt;IP&gt;:&lt;PORT&gt;/put?key=state&amp;val=up&amp;type=tsds&amp;year=%s&amp;month=%s&amp;day=%s&amp;hour=%s&amp;min=%s&amp;sec=%s</code></p></li>
+<li><p>push namespaced-key "name:first" with value "bob" <code>http://&lt;IP&gt;:&lt;PORT&gt;/put?dbdata={\"name:first\":\"bob\"}&amp;type=ns-json</code></p></li>
+<li><p>push timeseries value for timedot of being stored of key 'a' value 'A', key 'b' value 'B'  <code>http://&lt;IP&gt;:&lt;PORT&gt;/put?dbdata=a,A%0D%0Ab,B&amp;type=now-csv</code></p></li>
+<li><p>to use a parent-namespace helper (prepend all keys with it) for keys <code>&lt;ANY-OTHER-URL&gt;&amp;parentNS=%s</code></p></li>
+</ul>
+
+<hr>
+</div>
 
 <body>
 <html>
