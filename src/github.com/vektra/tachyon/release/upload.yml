@@ -1,0 +1,46 @@
+---
+- vars:
+    main: ../cmd/tachyon.go
+    tmp: tmp/$release
+    opts: -ldflags "-X main.Release $release"
+
+  tasks:
+  - name: Make tempdir
+    shell: mkdir -p $tmp
+
+  - name: Build tachyon-{{item.os}}-{{item.arch}}
+    shell: GOOS={{item.os}} GOARCH={{item.arch}} go build $opts -o $tmp/tachyon-{{item.os}}-{{item.arch}} $main
+    with_items:
+      - { os: linux, arch: amd64 }
+      - { os: linux, arch: 386 }
+      - { os: darwin, arch: amd64 }
+      - { os: darwin, arch: 386 }
+
+  - name: Make sums
+    shell: cd $tmp && shasum tachyon* > sums
+
+  - name: GPG sign sums
+    shell: cd $tmp && gpg --yes -b -u A408199F -a sums
+
+  - name: Upload tachyons
+    s3:
+      bucket: tachyon.vektra.io
+      put_file: $tmp/$item
+      at: $release/$item
+      public: yes
+      gzip: yes
+    with_items:
+      - tachyon-linux-amd64
+      - tachyon-linux-386
+      - tachyon-darwin-amd64
+      - tachyon-darwin-386
+
+  - name: Upload sums
+    s3:
+      bucket: tachyon.vektra.io
+      put_file: $tmp/$item
+      at: $release/$item
+      public: yes
+    with_items:
+      - sums
+      - sums.asc

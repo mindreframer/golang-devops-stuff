@@ -1,0 +1,8 @@
+---
+- roles:
+  - role8
+  tasks:
+    - name: Use test
+      test:
+        name: from module
+

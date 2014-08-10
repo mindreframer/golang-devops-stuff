@@ -1,0 +1,3 @@
+---
+- name: role handler
+  shell: echo in role handler

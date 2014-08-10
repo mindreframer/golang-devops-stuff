@@ -2,11 +2,20 @@ package lisp
 
 import (
 	"fmt"
+	"strings"
 )
 
 type Value struct {
 	typ valueType
 	val interface{}
+}
+
+type Map interface {
+	Get(key string) (Value, bool)
+}
+
+func (v Value) Interface() interface{} {
+	return v.val
 }
 
 var Nil = Value{nilValue, nil}
@@ -23,23 +32,50 @@ const (
 	vectorValue
 	procValue
 	consValue
+	mapValue
 )
 
 func NumberValue(n int64) Value {
-  return Value { typ: numberValue, val: n }
+	return Value{typ: numberValue, val: n}
 }
 
 func StringValue(s string) Value {
-  return Value { typ: stringValue, val: s }
+	return Value{typ: stringValue, val: s}
 }
 
-func (v Value) Eval(scope *Scope) (Value, error) {
+func MapValue(m Map) Value {
+	return Value{typ: mapValue, val: m}
+}
+
+func (v Value) Eval(scope ScopedVars) (Value, error) {
 	switch v.typ {
 	case consValue:
 		return v.Cons().Execute(scope)
 	case symbolValue:
 		sym := v.String()
-		if v, ok := scope.Get(sym); ok {
+
+		parts := strings.Split(sym, ".")
+
+		var (
+			v  Value
+			ok bool
+		)
+
+		if len(parts) == 1 {
+			v, ok = scope.Get(sym)
+		} else {
+			v, ok = scope.Get(parts[0])
+
+			for _, sub := range parts[1:] {
+				if v.typ != mapValue {
+					return Nil, fmt.Errorf("Variable '%s' is not a map (%v)", parts[0], v)
+				}
+
+				v, ok = v.Interface().(Map).Get(sub)
+			}
+		}
+
+		if ok {
 			return v, nil
 		} else if sym == "true" || sym == "false" {
 			return Value{symbolValue, sym}, nil

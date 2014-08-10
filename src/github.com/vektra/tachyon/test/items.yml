@@ -1,0 +1,9 @@
+---
+- hosts: all
+  tasks:
+    - name: just say it
+      shell: echo $item
+      with_items:
+        - a
+        - b
+        - c

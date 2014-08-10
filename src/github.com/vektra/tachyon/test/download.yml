@@ -1,0 +1,8 @@
+---
+- hosts: all
+  tasks:
+    - name: download a file
+      download: url=http://www.google.com
+      register: goog
+    - name: show
+      shell: echo "{{ goog.path }}"

@@ -1,0 +1,3 @@
+---
+- name: announce
+  shell: echo "in special"

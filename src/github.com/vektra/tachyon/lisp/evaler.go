@@ -1,6 +1,6 @@
 package lisp
 
-func EvalString(line string, scope *Scope) (Value, error) {
+func EvalString(line string, scope ScopedVars) (Value, error) {
 	expanded, err := NewTokens(line).Expand()
 	if err != nil {
 		return Nil, err
@@ -13,6 +13,5 @@ func EvalString(line string, scope *Scope) (Value, error) {
 	if err != nil {
 		return Nil, err
 	}
-	scope.Create("_", evaled)
 	return evaled, nil
 }

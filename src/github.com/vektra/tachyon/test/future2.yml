@@ -1,0 +1,10 @@
+---
+- hosts: all
+  tasks:
+  - name: sleep 1
+    shell: sleep 1 && echo "hello"
+    future: greeting
+  - name: depend
+    shell: echo $(read greeting.stdout)
+  - name: depend2
+    shell: echo {{greeting.stdout}}

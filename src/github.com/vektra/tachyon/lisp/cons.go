@@ -11,7 +11,7 @@ type Cons struct {
 	cdr *Value
 }
 
-func (c Cons) Eval(scope *Scope) (val Value, err error) {
+func (c Cons) Eval(scope ScopedVars) (val Value, err error) {
 	if c.List() {
 		if v, err := c.car.Eval(scope); err != nil {
 			return Nil, err
@@ -25,15 +25,19 @@ func (c Cons) Eval(scope *Scope) (val Value, err error) {
 	}
 }
 
-func (cons Cons) Execute(scope *Scope) (Value, error) {
+func (cons Cons) Execute(scope ScopedVars) (Value, error) {
 	if !cons.List() {
 		return Nil, fmt.Errorf("Combination must be a proper list: %v", cons)
 	}
 	switch cons.car.String() {
 	case "quote":
 		return cons.quoteForm(scope)
+	case "read":
+		return cons.readForm(scope)
 	case "if":
 		return cons.ifForm(scope)
+	case "or":
+		return cons.orForm(scope)
 	case "set!":
 		return cons.setForm(scope)
 	case "define":
@@ -108,7 +112,7 @@ func (c Cons) Stringify() []string {
 	return result
 }
 
-func (cons Cons) procForm(scope *Scope) (val Value, err error) {
+func (cons Cons) procForm(scope ScopedVars) (val Value, err error) {
 	if val, err = cons.car.Eval(scope); err == nil {
 		if val.typ == procValue {
 			var args Vector
@@ -126,11 +130,11 @@ func (cons Cons) procForm(scope *Scope) (val Value, err error) {
 	return
 }
 
-func (cons Cons) beginForm(scope *Scope) (val Value, err error) {
+func (cons Cons) beginForm(scope ScopedVars) (val Value, err error) {
 	return cons.cdr.Cons().Eval(scope)
 }
 
-func (cons Cons) setForm(scope *Scope) (val Value, err error) {
+func (cons Cons) setForm(scope ScopedVars) (val Value, err error) {
 	expr := cons.Vector()
 	if len(expr) == 3 {
 		key := expr[1].String()
@@ -148,7 +152,7 @@ func (cons Cons) setForm(scope *Scope) (val Value, err error) {
 	return
 }
 
-func (cons Cons) ifForm(scope *Scope) (val Value, err error) {
+func (cons Cons) ifForm(scope ScopedVars) (val Value, err error) {
 	expr := cons.Vector()
 	val = Nil
 	if len(expr) < 3 || len(expr) > 4 {
@@ -166,12 +170,44 @@ func (cons Cons) ifForm(scope *Scope) (val Value, err error) {
 	return
 }
 
-func (cons Cons) lambdaForm(scope *Scope) (val Value, err error) {
+func (cons Cons) orForm(scope ScopedVars) (val Value, err error) {
+	expr := cons.Vector()
+	val = Nil
+	if len(expr) < 1 {
+		err = fmt.Errorf("Ill-formed special form: %v", expr)
+	} else {
+		var r Value
+
+		for i := 1; i < len(expr); i++ {
+			r, err = expr[i].Eval(scope)
+			if err != nil {
+				return
+			}
+
+			if r.typ == symbolValue {
+				var ok bool
+
+				val, ok = scope.Get(r.String())
+
+				if ok {
+					return
+				}
+			} else {
+				val = r
+				return
+			}
+		}
+	}
+
+	return
+}
+
+func (cons Cons) lambdaForm(scope ScopedVars) (val Value, err error) {
 	if cons.cdr.typ == consValue {
 		lambda := cons.cdr.Cons()
 		if (lambda.car.typ == consValue || lambda.car.typ == nilValue) && lambda.cdr.typ == consValue {
 			params := lambda.car.Cons().Vector()
-			val = Value{procValue, Proc{params, lambda.cdr.Cons(), scope.Dup()}}
+			val = Value{procValue, Proc{params, lambda.cdr.Cons(), scope}}
 		} else {
 			err = fmt.Errorf("Ill-formed special form: %v", cons)
 		}
@@ -181,7 +217,7 @@ func (cons Cons) lambdaForm(scope *Scope) (val Value, err error) {
 	return
 }
 
-func (cons Cons) quoteForm(scope *Scope) (val Value, err error) {
+func (cons Cons) quoteForm(scope ScopedVars) (val Value, err error) {
 	if cons.cdr != nil {
 		if *cons.cdr.Cons().cdr == Nil {
 			val = *cons.cdr.Cons().car
@@ -194,7 +230,12 @@ func (cons Cons) quoteForm(scope *Scope) (val Value, err error) {
 	return
 }
 
-func (cons Cons) defineForm(scope *Scope) (val Value, err error) {
+func (cons Cons) readForm(scope ScopedVars) (val Value, err error) {
+	val, err = cons.cdr.Cons().car.Eval(scope)
+	return val, err
+}
+
+func (cons Cons) defineForm(scope ScopedVars) (val Value, err error) {
 	expr := cons.Vector()
 	if len(expr) >= 2 && len(expr) <= 3 {
 		if expr[1].typ == symbolValue {
@@ -221,15 +262,15 @@ func (cons Cons) isBuiltin() bool {
 	return false
 }
 
-func (cons Cons) runBuiltin(scope *Scope) (val Value, err error) {
+func (cons Cons) runBuiltin(scope ScopedVars) (val Value, err error) {
 	cmd := builtin_commands[cons.car.String()]
 	vars, err := cons.cdr.Cons().Map(func(v Value) (Value, error) {
 		return v.Eval(scope)
 	})
 
-  if err != nil {
-    return Nil, err
-  }
+	if err != nil {
+		return Nil, err
+	}
 
 	values := []reflect.Value{}
 	for _, v := range vars {

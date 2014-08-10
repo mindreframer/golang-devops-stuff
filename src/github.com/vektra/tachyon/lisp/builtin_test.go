@@ -2,7 +2,7 @@ package lisp
 
 import "testing"
 
-func num(i float64) Value {
+func num(i int64) Value {
 	return Value{numberValue, i}
 }
 

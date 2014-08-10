@@ -1,0 +1,24 @@
+---
+
+- name: Install git
+  apt: pkg=git state=present
+
+- name: Install mercurial
+  apt: pkg=mercurial state=present
+
+- name: Install bzr
+  apt: pkg=bzr state=present
+
+- name: Download go
+  download:
+    url: https://go.googlecode.com/files/go1.2.1.linux-amd64.tar.gz
+    dest: /tmp/go.tar.gz
+    once: true
+
+- name: Untar go
+  shell:
+    command: cd /usr/local && tar xzf /tmp/go.tar.gz
+    creates: /usr/local/go
+
+- name: Copy profile
+  copy: src=go.sh dest=/etc/profile.d/go.sh

@@ -21,7 +21,7 @@ type Pattern struct {
 }
 
 // func (t Token) String() string {
-	// return fmt.Sprintf("%v", t.val)
+// return fmt.Sprintf("%v", t.val)
 // }
 
 func (t *Token) String() string {
@@ -39,22 +39,22 @@ const (
 )
 
 func (t *Token) Type() string {
-  switch t.typ {
-  case commentToken:
-    return "comment"
-  case stringToken:
-    return "string"
-  case numberToken:
-    return "number"
-  case openToken:
-    return "open"
-  case closeToken:
-    return "close"
-  case symbolToken:
-    return "symbol"
-  default:
-    return "unknown"
-  }
+	switch t.typ {
+	case commentToken:
+		return "comment"
+	case stringToken:
+		return "string"
+	case numberToken:
+		return "number"
+	case openToken:
+		return "open"
+	case closeToken:
+		return "close"
+	case symbolToken:
+		return "symbol"
+	default:
+		return "unknown"
+	}
 }
 
 func patterns() []Pattern {
@@ -65,7 +65,7 @@ func patterns() []Pattern {
 		{numberToken, regexp.MustCompile(`^((([0-9]+)?\.)?[0-9]+)`)},
 		{openToken, regexp.MustCompile(`^(\()`)},
 		{closeToken, regexp.MustCompile(`^(\))`)},
-		{symbolToken, regexp.MustCompile(`^('|[^\s();]+)`)},
+		{symbolToken, regexp.MustCompile(`^(:|[^\s();]+)`)},
 	}
 }
 
@@ -89,7 +89,7 @@ func (tokens Tokens) Expand() (result Tokens, err error) {
 	var updated bool
 	for i := 0; i < len(tokens); i++ {
 		var start int
-		quote := Token{symbolToken, "'"}
+		quote := Token{symbolToken, ":"}
 		if *tokens[i] != quote {
 			result = append(result, tokens[i])
 		} else {

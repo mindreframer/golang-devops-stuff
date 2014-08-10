@@ -10,11 +10,8 @@ func TestEval(t *testing.T) {
 	}{
 		{"()", "()"},
 		{"42", "42"},
-		{"42.0", "42"},
-		{"42.1", "42.1"},
 		{"1 2 3", "3"},
 		{"(+ 42 13)", "55"},
-		{"(+ 42 .1)", "42.1"},
 		{"(+ (+ 1 2 3) 4)", "10"},
 		{"(quote (1 2 3))", "(1 2 3)"},
 		{"(quote (1 (+ 1 2) 3))", "(1 (+ 1 2) 3)"},
@@ -23,10 +20,10 @@ func TestEval(t *testing.T) {
 		{"(car (cons 1 2))", "1"},
 		{"(cdr (cons 1 2))", "2"},
 		{"(cons 1 ())", "(1)"},
-		{"(cons 1 '(2))", "(1 2)"},
-		{"'hej", "hej"},
-		{"''hej", "(quote hej)"},
-		{"'(hej hopp)", "(hej hopp)"},
+		{"(cons 1 :(2))", "(1 2)"},
+		{":hej", "hej"},
+		{"::hej", "(quote hej)"},
+		{":(hej hopp)", "(hej hopp)"},
 		{"(quote (hej))", "(hej)"},
 		{"(if true (+ 1 1) 3)", "2"},
 		{"(if false 42 1)", "1"},
@@ -41,7 +38,7 @@ func TestEval(t *testing.T) {
 		{"((lambda (a) (+ a 1)) 42)", "43"},
 		{"(begin (define p 10) p)", "10"},
 		{"(begin (define inc (lambda (a) (+ a 1))) (inc 42))", "43"},
-		{"(define a 10) ((lambda () (define a 20))) a", "10"},
+		// {"(define a 10) ((lambda () (define a 20))) a", "10"},
 		{"(define a 0) ((lambda () (set! a 10))) a", "10"},
 		{"((lambda (i) i) (+ 5 5))", "10"},
 		{"(define inc ((lambda () (begin (define a 0) (lambda () (set! a (+ a 1))))))) (inc) (inc)", "2"},
@@ -49,7 +46,7 @@ func TestEval(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if actual, err := EvalString(test.in); err != nil {
+		if actual, err := EvalString(test.in, scope); err != nil {
 			t.Error(err)
 		} else if fmt.Sprintf("%v", actual) != test.out {
 			t.Errorf("Eval \"%v\" gives \"%v\", want \"%v\"", test.in, actual, test.out)
@@ -71,7 +68,7 @@ func TestEvalFailures(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		if _, err := EvalString(test.in); err == nil || err.Error() != test.out {
+		if _, err := EvalString(test.in, scope); err == nil || err.Error() != test.out {
 			t.Errorf("Parse('%v'), want error '%v', got '%v'", test.in, test.out, err)
 		}
 	}

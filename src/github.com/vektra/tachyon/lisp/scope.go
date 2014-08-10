@@ -7,14 +7,28 @@ func init() {
 	scope.AddEnv()
 }
 
+type ScopedVars interface {
+	Get(key string) (Value, bool)
+	Set(key string, val Value) Value
+	Create(key string, val Value) Value
+}
+
 type Env map[string]Value
 
 type Scope struct {
-	envs []*Env
+	parent *Scope
+	envs   []*Env
 }
 
 func NewScope() *Scope {
 	scope := &Scope{}
+	scope.envs = make([]*Env, 0)
+	return scope
+}
+
+func NewNestedScope(parent *Scope) *Scope {
+	scope := &Scope{}
+	scope.parent = parent
 	scope.envs = make([]*Env, 0)
 	return scope
 }
@@ -52,22 +66,36 @@ func (s *Scope) Create(key string, value Value) Value {
 }
 
 func (s *Scope) Set(key string, value Value) Value {
-	for i := len(s.envs) - 1; i >= 0; i-- {
-		env := *s.envs[i]
-		if _, ok := env[key]; ok {
-			env[key] = value
-			return value
+	t := s
+
+	for t != nil {
+		for i := len(s.envs) - 1; i >= 0; i-- {
+			env := *s.envs[i]
+			if _, ok := env[key]; ok {
+				env[key] = value
+				return value
+			}
 		}
+
+		t = t.parent
 	}
+
 	return s.Create(key, value)
 }
 
 func (s *Scope) Get(key string) (val Value, ok bool) {
-	for i := len(s.envs) - 1; i >= 0; i-- {
-		env := *s.envs[i]
-		if val, ok = env[key]; ok {
-			break
+	t := s
+
+	for t != nil {
+		for i := len(s.envs) - 1; i >= 0; i-- {
+			env := *s.envs[i]
+			if val, ok = env[key]; ok {
+				return
+			}
 		}
+
+		t = t.parent
 	}
+
 	return
 }

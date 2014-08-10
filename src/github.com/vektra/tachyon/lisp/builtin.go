@@ -10,7 +10,7 @@ var builtin_commands = map[string]string{
 	"+":       "Add",
 	"-":       "Sub",
 	"*":       "Mul",
-  "==":      "Eq",
+	"==":      "Eq",
 	">":       "Gt",
 	"<":       "Lt",
 	">=":      "Gte",
@@ -104,23 +104,22 @@ func (Builtin) Eq(vars ...Value) (Value, error) {
 		v1 := vars[i-1]
 		v2 := vars[i]
 
-    if v1.typ != v2.typ {
+		if v1.typ != v2.typ {
 			return Nil, fmt.Errorf("Badly formatted arguments: %v", vars)
 		} else if v1.typ == numberValue {
-      if v1.Number() != v2.Number() {
-			  return False, nil
-      }
+			if v1.Number() != v2.Number() {
+				return False, nil
+			}
 		} else if v1.typ == stringValue {
-      if v1.String() != v2.String() {
-			  return False, nil
-      }
-    } else {
-      return Nil, fmt.Errorf("Unsupported argument type: %v", vars)
-    }
+			if v1.String() != v2.String() {
+				return False, nil
+			}
+		} else {
+			return Nil, fmt.Errorf("Unsupported argument type: %v", vars)
+		}
 	}
 	return True, nil
 }
-
 
 func (Builtin) Gt(vars ...Value) (Value, error) {
 	for i := 1; i < len(vars); i++ {

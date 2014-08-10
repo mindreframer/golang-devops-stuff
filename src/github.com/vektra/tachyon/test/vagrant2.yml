@@ -1,0 +1,8 @@
+---
+
+- tasks:
+  - name: Run on vagrant
+    tachyon:
+      target: :vagrant
+      playbook: on_vagrant2.yml
+      dev: true

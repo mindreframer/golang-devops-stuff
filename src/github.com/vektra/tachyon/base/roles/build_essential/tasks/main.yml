@@ -1,0 +1,12 @@
+---
+- name: Update apt-get cache
+  apt: update_cache=yes cache_time=60m
+
+- name: Install build packages
+  apt: pkg=$item state=present
+  with_items:
+    - autoconf
+    - binutils-doc
+    - bison
+    - build-essential
+    - flex

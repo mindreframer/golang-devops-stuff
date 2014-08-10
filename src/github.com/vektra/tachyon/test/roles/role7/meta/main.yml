@@ -1,0 +1,4 @@
+---
+dependencies:
+  - role: role3
+    name: role7
