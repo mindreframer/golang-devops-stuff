@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/user"
+	"path/filepath"
 )
 
 const jaegerJSONGPGDBExtension = ".jgrdb"
@@ -42,14 +43,14 @@ func main() {
 	// Define flags
 	// TODO: View individual property and unencrypted value. 'get'
 	var (
-		addKey       = flag.String("a", "", "Add property")
-		changeKey    = flag.String("c", "", "Change property")
-		debugFlag    = flag.Bool("d", false, "Enable Debug")
-		deleteKey    = flag.String("delete", "", "Delete property")
-		inializeFlag = flag.Bool("init", false, "Create an initial blank JSON GPG database file")
-		jsonGPGDB    = flag.String("j", "", "JSON GPG database file. eg. file.txt.jgrdb")
-		keyringFile  = flag.String("k", "", "Keyring file. Public key in ASCII armored format. eg. pubring.asc")
-		value        = flag.String("v", "", "Value for property to use")
+		addKey         = flag.String("a", "", "Add property")
+		changeKey      = flag.String("c", "", "Change property")
+		debugFlag      = flag.Bool("d", false, "Enable Debug")
+		deleteKey      = flag.String("delete", "", "Delete property")
+		initializeFlag = flag.Bool("init", false, "Create an initial blank JSON GPG database file")
+		jsonGPGDB      = flag.String("j", "", "JSON GPG database file. eg. file.txt.jgrdb")
+		keyringFile    = flag.String("k", "", "Keyring file. Public key in ASCII armored format. eg. pubring.asc")
+		value          = flag.String("v", "", "Value for property to use")
 	)
 
 	flag.Usage = func() {
@@ -65,17 +66,22 @@ func main() {
 	}
 
 	if *jsonGPGDB == "" {
-		flag.Usage()
-		log.Fatalf("\n\nError: No JSON GPG database file specified")
-		return
+		assumedJaegerDB, err := checkExistsJaegerDB()
+		if err != nil {
+			flag.Usage()
+			log.Fatalf("\n\nError: %s", err)
+			return
+		}
+		*jsonGPGDB = assumedJaegerDB
 	}
 
-	if *inializeFlag {
+	if *initializeFlag {
 		err := initializeJSONGPGDB(jsonGPGDB)
 		if err != nil {
 			log.Fatal(err)
 		} else {
-			log.Fatalln("Initialized JSON GPG database and wrote to file:", *jsonGPGDB)
+			fmt.Println("Initialized JSON GPG database and wrote to file:", *jsonGPGDB)
+			os.Exit(0)
 		}
 	}
 
@@ -84,7 +90,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		} else {
-			log.Fatalln("Deleted property and wrote to file:", *jsonGPGDB)
+			fmt.Println("Deleted property and wrote to file:", *jsonGPGDB)
+			os.Exit(0)
 		}
 	}
 
@@ -105,7 +112,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		} else {
-			log.Fatalln("Added property and wrote to file:", *jsonGPGDB)
+			fmt.Println("Added property and wrote to file:", *jsonGPGDB)
+			os.Exit(0)
 		}
 	}
 
@@ -118,7 +126,8 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		} else {
-			log.Fatalln("Changed property and wrote to file:", *jsonGPGDB)
+			fmt.Println("Changed property and wrote to file:", *jsonGPGDB)
+			os.Exit(0)
 		}
 	}
 
@@ -126,6 +135,19 @@ func main() {
 		log.Fatalf("\n\nError: No JSON GPG database operations specified")
 	}
 
+}
+
+func checkExistsJaegerDB() (string, error) {
+	// If no JSON GPG database file is explicitly specified, check that one JSON GPG database file is in the
+	// current directory and use that file
+	files, err := filepath.Glob("*.jgrdb")
+	if err != nil {
+		return "", err
+	}
+	if len(files) == 1 {
+		return files[0], nil
+	}
+	return "", fmt.Errorf("Please specify a JSON GPG database file")
 }
 
 func initializeJSONGPGDB(jsonGPGDB *string) error {
