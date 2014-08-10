@@ -47,8 +47,9 @@ func (t *Throttler) Bucket(key string, rate int64) *Bucket {
 	t.mu.RUnlock()
 
 	if !ok {
-		b = NewBucket(rate, 0)
+		b = NewBucket(rate, -1)
 		b.inc = int64(math.Floor(.5 + (float64(b.capacity) * t.freq.Seconds())))
+		b.freq = t.freq
 		t.mu.Lock()
 		t.buckets[key] = b
 		t.mu.Unlock()
@@ -57,32 +58,18 @@ func (t *Throttler) Bucket(key string, rate int64) *Bucket {
 	return b
 }
 
-// Wait waits for n amount of tokens to be available, sleeping freq between each
-// take. It returns the wait duration and whether it had to wait or not.
+// Wait waits for n amount of tokens to be available.
+// If n tokens are immediatelly available it doesn't sleep. Otherwise, it sleeps
+// the minimum amount of time required for the remaining tokens to be available.
+// It returns the wait duration.
 //
 // If a Bucket (key, rate) doesn't exist yet, it is created.
 // If freq < 1/rate seconds, the effective wait rate won't be correct.
 //
 // You must call Close when you're done with the Throttler in order to not leak
 // a go-routine and a system-timer.
-func (t *Throttler) Wait(key string, n, rate int64) (time.Duration, bool) {
-	var (
-		got   int64
-		began = time.Now()
-	)
-
-	b := t.Bucket(key, rate)
-
-	if got = b.Take(n); got == n {
-		return time.Since(began), false
-	}
-
-	for got < n {
-		got += b.Take(n - got)
-		time.Sleep(t.freq)
-	}
-
-	return time.Since(began), true
+func (t *Throttler) Wait(key string, n, rate int64) time.Duration {
+	return t.Bucket(key, rate).Wait(n)
 }
 
 // Halt returns a bool indicating if the Bucket identified by key and rate has

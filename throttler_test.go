@@ -56,16 +56,12 @@ func TestThrottler_Wait(t *testing.T) {
 	th := NewThrottler(1 * time.Millisecond)
 	defer th.Close()
 
-	if _, waited := th.Wait("a", 1000, 1000); waited {
+	if wait := th.Wait("a", 1000, 1000); wait > 0 {
 		t.Fatal("Didn't expect wait")
 	}
 
-	if took, waited := th.Wait("a", 1000, 1000); !waited || int(took.Seconds()) != 1 {
-		t.Fatalf("Expected wait of 1s. Got: %s", took)
-	}
-
-	if _, waited := th.Wait("b", 1000, 1000); waited {
-		t.Fatal("Didn't expect wait")
+	if wait := th.Wait("a", 2000, 1000); int(wait.Seconds()) != 2 {
+		t.Fatalf("Expected wait of 2s. Got: %s", wait)
 	}
 }
 

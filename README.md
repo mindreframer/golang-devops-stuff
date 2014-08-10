@@ -1,4 +1,4 @@
-# Token Bucket (tb) [![Build Status](https://drone.io/github.com/tsenart/tb/status.png)](https://drone.io/github.com/tsenart/tb/latest) [![GoDoc](https://godoc.org/github.com/tsenart/tb?status.png)](https://godoc.org/github.com/tsenart/tb)
+# Token Bucket (tb) [![Build Status](https://secure.travis-ci.org/tsenart/tb.png)](http://travis-ci.org/tsenart/tb) [![GoDoc](https://godoc.org/github.com/tsenart/tb?status.png)](https://godoc.org/github.com/tsenart/tb)
 
 This package provides a generic lock-free implementation of the "Token bucket"
 algorithm where handling of non-conformity is left to the user.
