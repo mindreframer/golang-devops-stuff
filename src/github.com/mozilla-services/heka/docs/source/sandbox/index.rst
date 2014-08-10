@@ -24,7 +24,12 @@ Features
 - stateful - ability to resume where it left off after a restart/reboot
 - isolated - failures are contained and malfunctioning sandboxes are terminated
 
-.. include:: decoder.rst
-.. include:: filter.rst
-.. include:: manager.rst
 .. include:: lua.rst
+.. include:: manager.rst
+.. include:: decoder.rst
+.. include:: module.rst
+.. include:: lpeg.rst
+.. include:: filter.rst
+.. include:: encoder.rst
+.. include:: development.rst
+.. include:: cookbook.rst

@@ -72,6 +72,30 @@ define(
       },
 
       /**
+      * Process message average duration formatted with commas.
+      *
+      * @method ProcessMessageAvgDurationFormatted
+      * @return {String} comma delimited number
+      */
+      ProcessMessageAvgDurationFormatted: function() {
+        if (this.ProcessMessageAvgDuration) {
+          return numeral(this.ProcessMessageAvgDuration.value).format("0,0");
+        }
+      },
+
+      /**
+      * Process message failures formatted with commas.
+      *
+      * @method ProcessMessageFailuresFormatted
+      * @return {String} comma delimited number
+      */
+      ProcessMessageFailuresFormatted: function() {
+        if (this.ProcessMessageFailures) {
+          return numeral(this.ProcessMessageFailures.value).format("0,0");
+        }
+      },
+
+      /**
       * Processed message count formatted with commas.
       *
       * @method ProcessMessageCountFormatted
@@ -110,7 +134,6 @@ define(
           case "Input":
             cssClass += "log-in";
             break;
-          case "DecoderPool":
           case "Decoder":
             cssClass += "import";
             break;
@@ -119,6 +142,9 @@ define(
             break;
           case "Output":
             cssClass += "log-out";
+            break;
+          case "Encoder":
+            cssClass += "export";
             break;
           default:
             cssClass = "no-icon";
@@ -168,7 +194,12 @@ define(
 
         _.each(this.plugin.attributes, function(value, key) {
           if (key != "Name" && key != "id" && key != "Outputs" && key != "Type") {
-            var formattedValue = numeral(value.value).format("0,0");
+            var formattedValue;
+            if (value.representation != "") {
+              formattedValue = numeral(value.value).format("0,0");
+            } else {
+              formattedValue = value.value;
+            }
 
             if (value.representation && value.representation != "count") {
               formattedValue += " " + value.representation;

@@ -49,13 +49,13 @@ type MessageRouter interface {
 }
 
 type messageRouter struct {
+	processMessageCount int64
 	inChan              chan *PipelinePack
 	addFilterMatcher    chan *MatchRunner
 	removeFilterMatcher chan *MatchRunner
 	removeOutputMatcher chan *MatchRunner
 	fMatchers           []*MatchRunner
 	oMatchers           []*MatchRunner
-	processMessageCount int64
 }
 
 // Creates and returns a (not yet started) Heka message router.
@@ -178,12 +178,12 @@ func (self *messageRouter) Start() {
 // Encapsulates the mechanics of testing messages against a specific plugin's
 // message_matcher value.
 type MatchRunner struct {
+	matchSamples  int64
+	matchDuration int64
 	spec          *message.MatcherSpecification
 	signer        string
 	inChan        chan *PipelinePack
 	pluginRunner  PluginRunner
-	matchSamples  int64
-	matchDuration int64
 	reportLock    sync.Mutex
 }
 
@@ -208,11 +208,27 @@ func (mr *MatchRunner) MatcherSpecification() *message.MatcherSpecification {
 	return mr.spec
 }
 
+// Returns the Matcher InChan length for backpresure detection and reporting
+func (mr *MatchRunner) InChanLen() int {
+	return len(mr.inChan)
+}
+
+// Returns the runner's average match duration in nanoseconds
+func (mr *MatchRunner) GetAvgDuration() (duration int64) {
+	mr.reportLock.Lock()
+	if mr.matchSamples != 0 {
+		duration = mr.matchDuration / mr.matchSamples
+	}
+	mr.reportLock.Unlock()
+	return
+}
+
 // Starts the runner listening for messages on its input channel. Any message
 // that is a match will be placed on the provided matchChan (usually the input
 // channel for a specific Filter or Output plugin). Any messages that are not a
 // match will be immediately recycled.
 func (mr *MatchRunner) Start(matchChan chan *PipelinePack) {
+	sampleDenominator := Globals().SampleDenominator
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -229,7 +245,7 @@ func (mr *MatchRunner) Start(matchChan chan *PipelinePack) {
 
 		var (
 			startTime time.Time
-			random    int = rand.Intn(1000) + DURATION_SAMPLE_DENOMINATOR
+			random    int = rand.Intn(1000) + sampleDenominator
 			// Don't have everyone sample at the same time. We always start with
 			// a sample so there will be a ballpark figure immediately. We could
 			// use a ticker to sample at a regular interval but that seems like
