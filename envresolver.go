@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -9,44 +10,46 @@ import (
 )
 
 type EnvResolver struct {
-	config  *Config
-	watcher *watcher
-	envs    map[string]*Environment
+	config          *Config
+	watcher         *watcher
+	services            map[string]*ServiceCluster
+	dest2ProxyCache map[string]http.Handler
 }
 
 func NewEnvResolver(c *Config) *EnvResolver {
-	envs := make(map[string]*Environment)
-	w := NewEtcdWatcher(c, nil, envs)
-	return &EnvResolver{c, w, envs}
+	services := make(map[string]*ServiceCluster)
+	w,_ := NewEtcdWatcher(c, nil, services)
+	return &EnvResolver{c, w, services, make(map[string]http.Handler)}
 }
 
-func (r *EnvResolver) resolve(domain string) (http.Handler, bool) {
-	envName := strings.Split(domain, ".")[0]
+func (r *EnvResolver) resolve(domain string) (http.Handler, error) {
+	serviceName := strings.Split(domain, ".")[0]
 
-	env := r.envs[envName]
-	if env != nil {
-		if env.server == nil {
-			uri := ""
-			if env.port != "80" {
-				uri = fmt.Sprintf("http://%s:%s/", env.ip, env.port)
+	serviceTree := r.services[serviceName]
+	if serviceTree != nil {
 
-			} else {
-				uri = fmt.Sprintf("http://%s/", env.ip)
-			}
-			dest, _ := url.Parse(uri)
-			env.server = httputil.NewSingleHostReverseProxy(dest)
+		if service, err := serviceTree.Next(); err != nil {
+			uri := fmt.Sprintf("http://%s:%d/", service.location.Host, service.location.Port)
+			return r.getOrCreateProxyFor(uri), nil
 		}
-		return env.server, true
 	}
 
-	return nil, false
+	return nil, errors.New("Unable to resolve")
 
 }
 
 func (r *EnvResolver) init() {
-	r.watcher.loadAndWatch(r.config.envPrefix, r.watcher.registerEnvironment)
+	r.watcher.loadAndWatch(r.config.servicePrefix, r.watcher.registerService)
 }
 
-func (r *EnvResolver) redirectToStatusPage(domainName string) (string){
+func (r *EnvResolver) redirectToStatusPage(domainName string) string {
 	return ""
+}
+
+func (r *EnvResolver) getOrCreateProxyFor(uri string) http.Handler {
+	if _, ok := r.dest2ProxyCache[uri]; !ok {
+		dest, _ := url.Parse(uri)
+		r.dest2ProxyCache[uri] = httputil.NewSingleHostReverseProxy(dest)
+	}
+	return r.dest2ProxyCache[uri]
 }
