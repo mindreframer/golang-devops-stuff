@@ -14,11 +14,10 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import (
 	"net"
-	"github.com/PubSubSQL/client"
 	"testing"
 	"time"
 )
@@ -65,14 +64,14 @@ func TestNetworkConnections(t *testing.T) {
 }
 
 func validateWriteRead(t *testing.T, conn net.Conn, message string, requestId uint32) {
-	rw := pubsubsql.NewNetHelper(conn, config.NET_READWRITE_BUFFER_SIZE)
+	rw := newnetHelper(conn, config.NET_READWRITE_BUFFER_SIZE)
 	bytes := []byte(message)
-	var header *pubsubsql.NetHeader
-	err := rw.WriteHeaderAndMessage(requestId, bytes)
+	var header *netHeader
+	err := rw.writeHeaderAndMessage(requestId, bytes)
 	if err != nil {
 		t.Error(err)
 	}
-	header, bytes, err = rw.ReadMessage()
+	header, bytes, err = rw.readMessage()
 	if err != nil {
 		t.Error(err)
 	}
@@ -83,8 +82,8 @@ func validateWriteRead(t *testing.T, conn net.Conn, message string, requestId ui
 }
 
 func validateRead(t *testing.T, conn net.Conn, requestId uint32) {
-	rw := pubsubsql.NewNetHelper(conn, config.NET_READWRITE_BUFFER_SIZE)
-	header, bytes, err := rw.ReadMessage()
+	rw := newnetHelper(conn, config.NET_READWRITE_BUFFER_SIZE)
+	header, bytes, err := rw.readMessage()
 	if err != nil {
 		t.Error(err)
 	}
@@ -164,7 +163,6 @@ func TestNetworkBatchRead(t *testing.T) {
 	validateWriteRead(t, c, "insert into stocks (ticker, bid) values (MSFT, 120)", 2)
 	validateWriteRead(t, c, "insert into stocks (ticker, bid) values (GOOG, 120)", 3)
 	validateWriteRead(t, c, "insert into stocks (ticker, bid) values (ORCL, 120)", 4)
-
 	//expected another 3 messages
 	validateWriteRead(t, c, "select * from stocks", 5)
 	validateRead(t, c, 5)

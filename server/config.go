@@ -14,15 +14,15 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import (
 	"flag"
 	"fmt"
+	"net"
 	"strconv"
 	"strings"
 	"time"
-	"net"
 )
 
 type configuration struct {

@@ -23,6 +23,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +35,7 @@ var VS_PLATFORM = "" //set automatically
 var GOROOT = ""      // must match ARCH
 var PATH_SEPARATOR = ""
 var PATH_SLASH = ""
-var VERSION = "1.0.0"
+var VERSION = "1.2.0"
 
 func main() {
 	start()
@@ -43,9 +44,10 @@ func main() {
 	buildService()
 	copyRootFiles()
 	copyDocFiles()
-	copyGo();
-	buildJava();	
-	buildDotnet();
+	copyGo()
+	buildJava()	
+	buildDotnet()
+	buildPython()
 	createArchive()
 	//
 	done()
@@ -147,16 +149,18 @@ func copyDocFiles() {
 	case "windows":
 		f.from = "./windows/docs"
 		f.to = "./pubsubsql/docs"
+		f.cp("dot.Net_API.html")
 		f.cp("Getting_Started.html")
 		f.cp("Go_API.html")
 		f.cp("Java_API.html")
-		f.cp("dot.Net_API.html")
+		f.cp("Python_API.html")
 	case "linux":
 		f.from = "./linux/docs"
 		f.to = "./pubsubsql/docs"
 		f.cp("Getting_Started.html")
 		f.cp("Go_API.html")
 		f.cp("Java_API.html")
+		f.cp("Python_API.html")
 	}
 }
 
@@ -190,81 +194,129 @@ func buildJava() {
 	emptyln()
 	print("Building Java binaries...")
 
-	print("Building Client...")
-	cd("../../java/src/Client")
+	print("Building All...")
+	cd("../../java")
 	shell(shellScript("build"))
 
-	print("Building PubSubSQLGUI...")
-	cd("../PubSubSQLGUI")
-	shell(shellScript("build"))
-
-	cd("../../../pubsubsql/build")
+	cd("../pubsubsql/build")
 	// create directories
 	mkdir("./pubsubsql/samples/java/bin")			
 	mkdir("./pubsubsql/samples/java/lib")			
-	mkdir("./pubsubsql/samples/java/src")			
-	mkdir("./pubsubsql/samples/java/src/Client")			
-	mkdir("./pubsubsql/samples/java/src/ClientTest")			
-	mkdir("./pubsubsql/samples/java/src/QuickStart")			
-	mkdir("./pubsubsql/samples/java/src/PubSubSQLGUI")			
-	mkdir("./pubsubsql/samples/java/src/PubSubSQLGUI/images")			
-	cp("../../java/src/manifest", "./pubsubsql/samples/java/src/manifest")
+	//
+	mkdir("./pubsubsql/samples/java/Client")		
+	mkdir("./pubsubsql/samples/java/Client/src")		
+	mkdir("./pubsubsql/samples/java/Client/src/main")		
+	mkdir("./pubsubsql/samples/java/Client/src/main/java")		
+	mkdir("./pubsubsql/samples/java/Client/src/main/java/pubsubsql")		
+	//
+	mkdir("./pubsubsql/samples/java/ClientTest")
+	mkdir("./pubsubsql/samples/java/ClientTest/src")
+	mkdir("./pubsubsql/samples/java/ClientTest/src/main")
+	mkdir("./pubsubsql/samples/java/ClientTest/src/main/java")
+	mkdir("./pubsubsql/samples/java/ClientTest/src/main/java/pubsubsql")
+	//
+	mkdir("./pubsubsql/samples/java/QuickStart")
+	mkdir("./pubsubsql/samples/java/QuickStart/src")
+	mkdir("./pubsubsql/samples/java/QuickStart/src/main")
+	mkdir("./pubsubsql/samples/java/QuickStart/src/main/java")
+	mkdir("./pubsubsql/samples/java/QuickStart/src/main/java/pubsubsql")
+	//
+	mkdir("./pubsubsql/samples/java/PubSubSqlGui")
+	mkdir("./pubsubsql/samples/java/PubSubSqlGui/src")
+	mkdir("./pubsubsql/samples/java/PubSubSqlGui/src/main")
+	mkdir("./pubsubsql/samples/java/PubSubSqlGui/src/main/java")
+	mkdir("./pubsubsql/samples/java/PubSubSqlGui/src/main/java/pubsubsql")
+	//
+	mkdir("./pubsubsql/samples/java/PubSubSqlGui/src/main/resources")
+	mkdir("./pubsubsql/samples/java/PubSubSqlGui/src/main/resources/images")
 
 	var f fileCopy
 
+	// copy <.>
+	f.from = "../../java"
+	f.to = "./pubsubsql/samples/java"
+	f.cp("build.bat")
+	f.cp("build.sh")
+	f.cp("pom.xml")
+	f.cp("run-ClientTest.bat")
+	f.cp("run-ClientTest.sh")
+	f.cp("run-PubSubSqlGui.bat")
+	f.cp("run-PubSubSqlGui.sh")
+	f.cp("run-QuickStart.bat")
+	f.cp("run-QuickStart.sh")
+
 	// copy Client
-	f.from = "../../java/src/Client"
-	f.to = "./pubsubsql/samples/java/src/Client"
-	f.cp(shellExt("build"))
+	f.from = "../../java/Client"
+	f.to = "./pubsubsql/samples/java/Client"
+	f.cp("pom.xml")
+	//
+	f.from = "../../java/Client/src/main/java/pubsubsql"
+	f.to = "./pubsubsql/samples/java/Client/src/main/java/pubsubsql"
 	f.cp("Client.java")
 	f.cp("NetHeader.java")
 	f.cp("NetHelper.java")
 	f.cp("ResponseData.java")
 
 	// copy ClientTest
-	f.from = "../../java/src/ClientTest"
-	f.to = "./pubsubsql/samples/java/src/ClientTest"
-	f.cp(shellExt("run"))
+	f.from = "../../java/ClientTest"
+	f.to = "./pubsubsql/samples/java/ClientTest"
+	f.cp("pom.xml")
+	//
+	f.from = "../../java/ClientTest/src/main/java/pubsubsql"
+	f.to = "./pubsubsql/samples/java/ClientTest/src/main/java/pubsubsql"
 	f.cp("ClientTest.java")
 
 	// copy QuickStart
-	f.from = "../../java/src/QuickStart"
-	f.to = "./pubsubsql/samples/java/src/QuickStart"
-	f.cp(shellExt("run"))
+	f.from = "../../java/QuickStart"
+	f.to = "./pubsubsql/samples/java/QuickStart"
+	f.cp("pom.xml")
+	//
+	f.from = "../../java/QuickStart/src/main/java/pubsubsql"
+	f.to = "./pubsubsql/samples/java/QuickStart/src/main/java/pubsubsql"
 	f.cp("QuickStart.java")
 
-	// copy PubSubSQLGUI 
-	f.from = "../../java/src/PubSubSQLGUI"
-	f.to = "./pubsubsql/samples/java/src/PubSubSQLGUI"
-	f.cp(shellExt("run"))
+	// copy PubSubSqlGui 
+	f.from = "../../java/PubSubSqlGui"
+	f.to = "./pubsubsql/samples/java/PubSubSqlGui"
+	f.cp("pom.xml")
+	//
+	f.from = "../../java/PubSubSqlGui/src/main/java/pubsubsql"
+	f.to = "./pubsubsql/samples/java/PubSubSqlGui/src/main/java/pubsubsql"
 	f.cp("AboutForm.java")
 	f.cp("AboutPanel.java")
 	f.cp("ConnectForm.java")
 	f.cp("ConnectPanel.java")
-	f.cp("SimulatorForm.java")
-	f.cp("SimulatorPanel.java")
-	f.cp("Simulator.java")
 	f.cp("MainForm.java")
 	f.cp("PubSubSQLGUI.java")
+	f.cp("Simulator.java")
+	f.cp("SimulatorForm.java")
+	f.cp("SimulatorPanel.java")
 	f.cp("TableDataset.java")
 	f.cp("TableView.java")
-	// images
-	f.from += "/images"
-	f.to += "/images"
-	f.cp("ConnectLocal.png")
+	//
+	// copy PubSubSqlGui/images
+	f.from = "../../java/PubSubSqlGui/src/main/resources/images"
+	f.to = "./pubsubsql/samples/java/PubSubSqlGui/src/main/resources/images"
 	f.cp("Connect.png")
+	f.cp("ConnectLocal.png")
 	f.cp("Disconnect.png")
 	f.cp("Execute2.png")
 	f.cp("New.png")
 	f.cp("Stop.png")
-	// copy binaries
+	
+	// copy bin
+	f.from = "../../java/bin"  
+	f.to = "./pubsubsql/samples/java/bin"
+	f.cp("gitempty")
+	
+	// copy lib
 	f.from = "../../java/lib"  
 	f.to = "./pubsubsql/samples/java/lib"
 	f.cp("gson-2.2.4.jar")
 	f.cp("pubsubsql.jar")
 	f.cp("pubsubsql-javadoc.jar")
-
-	// lib
+	//
+	f.from = "../../java/lib"
 	f.to = "./pubsubsql/lib"
 	f.cp("gson-2.2.4.jar")
 	f.cp("pubsubsql.jar")
@@ -376,6 +428,44 @@ func buildDotnet() {
 	f.cp("pubsub.ico")		
 
 	cd("pubsubsql/build")
+	success()
+}
+
+func buildPython() {
+	emptyln()
+	print("Building Python...")
+	
+	// create directories
+	mkdir("./pubsubsql")
+	mkdir("./pubsubsql/samples")
+	mkdir("./pubsubsql/samples/python")
+	mkdir("./pubsubsql/samples/python/src")
+	mkdir("./pubsubsql/samples/python/src/pubsubsql")
+	mkdir("./pubsubsql/samples/python/src/pubsubsql/net")
+	
+	var f fileCopy
+	
+	// copy files: src/*
+	f.from = "../../python/src"
+	f.to = "./pubsubsql/samples/python/src"
+	f.cp("quickstart.py")
+
+	// copy files: src/pubsubsql/*
+	f.from = "../../python/src/pubsubsql"
+	f.to = "./pubsubsql/samples/python/src/pubsubsql"
+	f.cp("__init__.py")
+	f.cp("client.py")
+	f.cp("testclient.py")
+
+	// copy files: src/pubsubsql/net/*
+	f.from = "../../python/src/pubsubsql/net"
+	f.to = "./pubsubsql/samples/python/src/pubsubsql/net"
+	f.cp("__init__.py")
+	f.cp("header.py")
+	f.cp("helper.py")
+	f.cp("response.py")
+	f.cp("testheader.py")
+	
 	success()
 }
 
@@ -581,15 +671,20 @@ func copyFile(src string, dst string) (err error) {
 		return
 	}
 	defer dstFile.Close()
-
+	
 	if OS == "linux" {
 		err = dstFile.Chmod(os.ModePerm)
 		if err != nil {
 			return
 		}
 	}
-
+	
 	_, err = io.Copy(dstFile, srcFile)
+	if err != nil {
+		return
+	}
+	
+	err = os.Chtimes(dst, time.Now(), time.Now())	
 	return err
 }
 
@@ -623,6 +718,11 @@ func create(path string) *os.File {
 	file, err := os.Create(path)
 	if err != nil {
 		fail("Failed to create file %v error %v", path, err)
+	}
+	err = os.Chtimes(path, time.Now(), time.Now())
+	if err != nil {
+		file.Close()
+		fail("Failed to update time of file %v error %v", path, err)
 	}
 	return file
 }
@@ -669,6 +769,9 @@ func targz(archiveFile string, dir string) {
 			fail("Failed to write tar header %v", err)
 		}
 		_, err = io.Copy(tarWriter, fileToWrite)
+		if err != nil {
+			fail("Failed to copy tar header %v", err)
+		}
 		return nil
 	}
 	//
@@ -695,12 +798,23 @@ func dozip(archiveFile string, dir string) {
 		}
 		print(path)
 		fileToWrite := open(path)
+		//
+		var fileHeader *zip.FileHeader 
+		fileHeader, err = zip.FileInfoHeader(fileInfo)
+		if err != nil {
+			fail("Failed to create file info header %v", err)
+		}
+		fileHeader.Name = path
+		//		
 		var w io.Writer
-		w, err = zipWriter.Create(path)
+		w, err = zipWriter.CreateHeader(fileHeader)
 		if err != nil {
 			fail("Failed to create zip writer %v", err)
 		}
 		_, err = io.Copy(w, fileToWrite)
+		if err != nil {
+			fail("Failed to copy (zip writer) %v", err)
+		}
 		return nil
 	}
 	//

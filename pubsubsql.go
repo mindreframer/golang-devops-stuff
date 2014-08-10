@@ -21,6 +21,6 @@ import "runtime"
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU() - 1)
-	var controller pubsubsql.Controller
+	var controller server.Controller
 	controller.Run()
 }

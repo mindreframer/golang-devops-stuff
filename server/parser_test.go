@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import "testing"
 
@@ -92,6 +92,24 @@ func TestParseCmdClose(t *testing.T) {
 }
 
 // INSERT
+
+func validateReturningColumns(t *testing.T, x *returningColumns, y *returningColumns) {
+	if x.use != y.use {
+		t.Errorf("returningColumns use does not match")
+		return
+	}
+	if len(x.cols) != len(y.cols) {
+		t.Errorf("returningColumns len does not match")
+		return
+	}
+	for i := 0; i < len(x.cols); i++ {
+		if y.cols[i] != x.cols[i] {
+			t.Errorf("returningColumns: colVals do not match")
+			t.Errorf("x.col:%s vs y.col:%s", x.cols[i], y.cols[i])
+		}
+	}
+}
+
 func validateInsert(t *testing.T, a request, y *sqlInsertRequest) {
 	switch a.(type) {
 	case *errorRequest:
@@ -116,6 +134,7 @@ func validateInsert(t *testing.T, a request, y *sqlInsertRequest) {
 				t.Errorf("x.col:%s vs y.col:%s", x.colVals[i].col, y.colVals[i].col)
 			}
 		}
+		validateReturningColumns(t, &x.returningColumns, &y.returningColumns)
 	default:
 		t.Errorf("parse error: invalid request type expected sqlInsertRequest")
 	}
@@ -134,6 +153,33 @@ func TestParseSqlInsertStatement1(t *testing.T) {
 }
 
 func TestParseSqlInsertStatement2(t *testing.T) {
+	pc := newTokens()
+	lex(" insert into stocks (ticker, bid, ask) values (IBM, 12, 14.5645) returning *", pc)
+	x := parse(pc)
+	var y sqlInsertRequest
+	y.table = "stocks"
+	y.addColVal("ticker", "IBM")
+	y.addColVal("bid", "12")
+	y.addColVal("ask", "14.5645")
+	y.use = true
+	validateInsert(t, x, &y)
+}
+
+func TestParseSqlInsertStatement3(t *testing.T) {
+	pc := newTokens()
+	lex(" insert into stocks (ticker, bid, ask) values (IBM, 12, 14.5645) returning id, ticker", pc)
+	x := parse(pc)
+	var y sqlInsertRequest
+	y.table = "stocks"
+	y.addColVal("ticker", "IBM")
+	y.addColVal("bid", "12")
+	y.addColVal("ask", "14.5645")
+	y.returningColumns.addColumn("id")
+	y.returningColumns.addColumn("ticker")
+	validateInsert(t, x, &y)
+}
+
+func TestParseSqlInsertStatement4(t *testing.T) {
 	pc := newTokens()
 	lex(" insert ", pc)
 	x := parse(pc)
@@ -322,8 +368,8 @@ func validateUpdate(t *testing.T, a request, y *sqlUpdateRequest) {
 		// filter
 		if x.filter != y.filter {
 			t.Errorf("parse error: filters do not match")
-
 		}
+		validateReturningColumns(t, &x.returningColumns, &y.returningColumns)
 
 	default:
 		t.Errorf("parse error: invalid request type expected sqlUpdateRequest")
@@ -357,6 +403,34 @@ func TestParseSqlUpdateStatement2(t *testing.T) {
 
 func TestParseSqlUpdateStatement3(t *testing.T) {
 	pc := newTokens()
+	lex(" update stocks set bid = 140.45, ask = 142.01, sector = 'TECH' where ticker = IBM returning id, bid", pc)
+	x := parse(pc)
+	var y sqlUpdateRequest
+	y.table = "stocks"
+	y.addColVal("bid", "140.45")
+	y.addColVal("ask", "142.01")
+	y.addColVal("sector", "TECH")
+	y.filter.addFilter("ticker", "IBM")
+	y.returningColumns.addColumn("id")
+	y.returningColumns.addColumn("bid")
+	validateUpdate(t, x, &y)
+}
+
+func TestParseSqlUpdateStatement4(t *testing.T) {
+	pc := newTokens()
+	lex(" update stocks set bid = 140.45, ask = 142.01 returning * ", pc)
+	x := parse(pc)
+	var y sqlUpdateRequest
+	y.table = "stocks"
+	y.addColVal("bid", "140.45")
+	y.addColVal("ask", "142.01")
+	y.use = true
+	validateUpdate(t, x, &y)
+
+}
+
+func TestParseSqlUpdateStatement5(t *testing.T) {
+	pc := newTokens()
 	lex(" update stocks set bid = ", pc)
 	x := parse(pc)
 	expectedError(t, x)
@@ -389,6 +463,7 @@ func validateDelete(t *testing.T, a request, y *sqlDeleteRequest) {
 		if x.filter != y.filter {
 			t.Errorf("parse error: filters do not match")
 		}
+		validateReturningColumns(t, &x.returningColumns, &y.returningColumns)
 
 	default:
 		t.Errorf("parse error: invalid request type expected sqlDeleteRequest")
@@ -415,6 +490,28 @@ func TestParseSqlDeleteStatement2(t *testing.T) {
 }
 
 func TestParseSqlDeleteStatement3(t *testing.T) {
+	pc := newTokens()
+	lex(" delete  from stocks returning id, bid", pc)
+	x := parse(pc)
+	var y sqlDeleteRequest
+	y.table = "stocks"
+	y.returningColumns.addColumn("id")
+	y.returningColumns.addColumn("bid")
+	validateDelete(t, x, &y)
+}
+
+func TestParseSqlDeleteStatement4(t *testing.T) {
+	pc := newTokens()
+	lex(" delete  from stocks where  ticker = 'IBM' returning *", pc)
+	x := parse(pc)
+	var y sqlDeleteRequest
+	y.table = "stocks"
+	y.filter.addFilter("ticker", "IBM")
+	y.use = true
+	validateDelete(t, x, &y)
+}
+
+func TestParseSqlDeleteStatement5(t *testing.T) {
 	pc := newTokens()
 	lex(" delete ", pc)
 	x := parse(pc)
@@ -527,6 +624,35 @@ func TestParseSqlSubscribeStatement4(t *testing.T) {
 	lex(" subscribe * from stocks where ticker =", pc)
 	x = parse(pc)
 	expectedError(t, x)
+}
+
+// SUBSCRIBE TOPIC
+func validateSubscribeTopic(t *testing.T, a request, y *sqlSubscribeTopicRequest) {
+	switch a.(type) {
+	case *errorRequest:
+		e := a.(*errorRequest)
+		t.Errorf("parse error: " + e.err)
+
+	case *sqlSubscribeTopicRequest:
+		x := a.(*sqlSubscribeTopicRequest)
+		// table name
+		if x.topic != y.topic {
+			t.Errorf("parse error: topic names do not match " + x.topic)
+		}
+
+	default:
+		t.Errorf("parse error: invalid request type expected sqlSubscribeTopicRequest")
+	}
+
+}
+
+func TestParseSqlSubscribeTopic(t *testing.T) {
+	pc := newTokens()
+	lex(" subscribe topic1 ", pc)
+	x := parse(pc)
+	var y sqlSubscribeTopicRequest
+	y.topic = "topic1"
+	validateSubscribeTopic(t, x, &y)
 }
 
 // UNSUBSCRIBE
@@ -661,6 +787,7 @@ func TestParseSqlTagStatement1(t *testing.T) {
 	y.table = "stocks"
 	y.column = "sector"
 	validateTag(t, x, &y)
+	ASSERT_FALSE(t, x.isStreaming(), "isStreaming failed")
 }
 
 func TestParseSqlTagStatement2(t *testing.T) {
@@ -673,4 +800,289 @@ func TestParseSqlTagStatement2(t *testing.T) {
 	lex(" tag stocks", pc)
 	x = parse(pc)
 	expectedError(t, x)
+}
+
+// STREAM
+
+func TestParseSqlStream1(t *testing.T) {
+	pc := newTokens()
+	lex("stream tag stocks sector", pc)
+	x := parse(pc)
+	var y sqlTagRequest
+	y.table = "stocks"
+	y.column = "sector"
+	validateTag(t, x, &y)
+	ASSERT_TRUE(t, x.isStreaming(), "isStreaming failed")
+}
+
+func TestParseSqlStream2(t *testing.T) {
+	pc := newTokens()
+	lex("stream stop ", pc)
+	req := parse(pc)
+	validateStop(t, req)
+	ASSERT_TRUE(t, req.isStreaming(), "isStreaming failed")
+}
+
+// PUSH
+
+func validatePush(t *testing.T, a request, y *sqlPushRequest) {
+	switch a.(type) {
+	case *errorRequest:
+		e := a.(*errorRequest)
+		t.Errorf("parse error: " + e.err)
+	case *sqlPushRequest:
+		x := a.(*sqlPushRequest)
+		validateInsert(t, &x.sqlInsertRequest, &y.sqlInsertRequest)
+		if x.front != y.front {
+			t.Error("front does not match")
+		}
+	default:
+		t.Errorf("invalid request expected sqlPushRequest")
+		return
+	}
+}
+
+func TestParseSqlPushStatement1(t *testing.T) {
+	pc := newTokens()
+	lex(" push into stocks (ticker, bid, ask) values (IBM, 12, 14.5645) ", pc)
+	x := parse(pc)
+	var y sqlPushRequest
+	y.table = "stocks"
+	y.sqlInsertRequest.addColVal("ticker", "IBM")
+	y.sqlInsertRequest.addColVal("bid", "12")
+	y.sqlInsertRequest.addColVal("ask", "14.5645")
+	validatePush(t, x, &y)
+}
+
+func TestParseSqlPushStatement2(t *testing.T) {
+	pc := newTokens()
+	lex(" push back into stocks (ticker, bid, ask) values (IBM, 12, 14.5645) ", pc)
+	x := parse(pc)
+	var y sqlPushRequest
+	y.table = "stocks"
+	y.sqlInsertRequest.addColVal("ticker", "IBM")
+	y.sqlInsertRequest.addColVal("bid", "12")
+	y.sqlInsertRequest.addColVal("ask", "14.5645")
+	validatePush(t, x, &y)
+}
+
+func TestParseSqlPushStatement3(t *testing.T) {
+	pc := newTokens()
+	lex(" push front into stocks (ticker, bid, ask) values (IBM, 12, 14.5645) ", pc)
+	x := parse(pc)
+	var y sqlPushRequest
+	y.table = "stocks"
+	y.sqlInsertRequest.addColVal("ticker", "IBM")
+	y.sqlInsertRequest.addColVal("bid", "12")
+	y.sqlInsertRequest.addColVal("ask", "14.5645")
+	y.front = true
+	validatePush(t, x, &y)
+}
+
+func TestParseSqlPushStatement4(t *testing.T) {
+	pc := newTokens()
+	lex(" push into stocks (ticker, bid, ask) values (IBM, 12, 14.5645) returning id, ticker", pc)
+	x := parse(pc)
+	var y sqlPushRequest
+	y.table = "stocks"
+	y.sqlInsertRequest.addColVal("ticker", "IBM")
+	y.sqlInsertRequest.addColVal("bid", "12")
+	y.sqlInsertRequest.addColVal("ask", "14.5645")
+	y.sqlInsertRequest.returningColumns.addColumn("id")
+	y.sqlInsertRequest.returningColumns.addColumn("ticker")
+	validatePush(t, x, &y)
+}
+
+func TestParseSqlPushStatement5(t *testing.T) {
+	pc := newTokens()
+	lex(" push into stocks (ticker, bid, ask) values (IBM, 12, 14.5645) returning *", pc)
+	x := parse(pc)
+	var y sqlPushRequest
+	y.table = "stocks"
+	y.sqlInsertRequest.addColVal("ticker", "IBM")
+	y.sqlInsertRequest.addColVal("bid", "12")
+	y.sqlInsertRequest.addColVal("ask", "14.5645")
+	y.use = true
+	validatePush(t, x, &y)
+}
+
+// POP
+
+func validatePop(t *testing.T, a request, y *sqlPopRequest) {
+	switch a.(type) {
+	case *errorRequest:
+		e := a.(*errorRequest)
+		t.Errorf("parse error: " + e.err)
+	case *sqlPopRequest:
+		x := a.(*sqlPopRequest)
+		validateSelect(t, &x.sqlSelectRequest, &y.sqlSelectRequest)
+		if x.front != y.front {
+			t.Error("front does not match")
+		}
+	default:
+		t.Errorf("invalid request expected sqlPopRequest")
+		return
+	}
+}
+
+func TestParseSqlPopStatement1(t *testing.T) {
+	pc := newTokens()
+	lex(" pop * from stocks ", pc)
+	x := parse(pc)
+	var y sqlPopRequest
+	y.table = "stocks"
+	y.use = true
+	validatePop(t, x, &y)
+}
+
+func TestParseSqlPopStatement2(t *testing.T) {
+	pc := newTokens()
+	lex(" pop ticker, bid, ask  from stocks ", pc)
+	x := parse(pc)
+	var y sqlPopRequest
+	y.table = "stocks"
+	y.sqlSelectRequest.addColumn("ticker")
+	y.sqlSelectRequest.addColumn("bid")
+	y.sqlSelectRequest.addColumn("ask")
+	validatePop(t, x, &y)
+}
+
+func TestParseSqlPopStatement3(t *testing.T) {
+	pc := newTokens()
+	lex(" pop back * from stocks ", pc)
+	x := parse(pc)
+	var y sqlPopRequest
+	y.table = "stocks"
+	y.use = true
+	validatePop(t, x, &y)
+}
+
+func TestParseSqlPopStatement4(t *testing.T) {
+	pc := newTokens()
+	lex(" pop back ticker, bid, ask  from stocks ", pc)
+	x := parse(pc)
+	var y sqlPopRequest
+	y.table = "stocks"
+	y.sqlSelectRequest.addColumn("ticker")
+	y.sqlSelectRequest.addColumn("bid")
+	y.sqlSelectRequest.addColumn("ask")
+	validatePop(t, x, &y)
+}
+
+func TestParseSqlPopStatement5(t *testing.T) {
+	pc := newTokens()
+	lex(" pop front * from stocks ", pc)
+	x := parse(pc)
+	var y sqlPopRequest
+	y.table = "stocks"
+	y.front = true
+	y.use = true
+	validatePop(t, x, &y)
+}
+
+func TestParseSqlPopStatement6(t *testing.T) {
+	pc := newTokens()
+	lex(" pop front ticker, bid, ask  from stocks ", pc)
+	x := parse(pc)
+	var y sqlPopRequest
+	y.table = "stocks"
+	y.front = true
+	y.sqlSelectRequest.addColumn("ticker")
+	y.sqlSelectRequest.addColumn("bid")
+	y.sqlSelectRequest.addColumn("ask")
+	validatePop(t, x, &y)
+}
+
+func TestParseSqlPopStatement7(t *testing.T) {
+	pc := newTokens()
+	lex(" pop from stocks ", pc)
+	x := parse(pc)
+	var y sqlPopRequest
+	y.table = "stocks"
+	y.use = true
+	validatePop(t, x, &y)
+}
+
+// PEEK
+
+func validatePeek(t *testing.T, a request, y *sqlPeekRequest) {
+	switch a.(type) {
+	case *errorRequest:
+		e := a.(*errorRequest)
+		t.Errorf("parse error: " + e.err)
+	case *sqlPeekRequest:
+		x := a.(*sqlPeekRequest)
+		validateSelect(t, &x.sqlSelectRequest, &y.sqlSelectRequest)
+		if x.front != y.front {
+			t.Error("front does not match")
+		}
+	default:
+		t.Errorf("invalid request expected sqlPeekRequest")
+		return
+	}
+}
+
+func TestParseSqlPeekStatement1(t *testing.T) {
+	pc := newTokens()
+	lex(" peek * from stocks ", pc)
+	x := parse(pc)
+	var y sqlPeekRequest
+	y.table = "stocks"
+	validatePeek(t, x, &y)
+}
+
+func TestParseSqlPeekStatement2(t *testing.T) {
+	pc := newTokens()
+	lex(" peek ticker, bid, ask  from stocks ", pc)
+	x := parse(pc)
+	var y sqlPeekRequest
+	y.table = "stocks"
+	y.sqlSelectRequest.addColumn("ticker")
+	y.sqlSelectRequest.addColumn("bid")
+	y.sqlSelectRequest.addColumn("ask")
+	validatePeek(t, x, &y)
+}
+
+func TestParseSqlPeekStatement3(t *testing.T) {
+	pc := newTokens()
+	lex(" peek back * from stocks ", pc)
+	x := parse(pc)
+	var y sqlPeekRequest
+	y.table = "stocks"
+	validatePeek(t, x, &y)
+}
+
+func TestParseSqlPeekStatement4(t *testing.T) {
+	pc := newTokens()
+	lex(" peek back ticker, bid, ask  from stocks ", pc)
+	x := parse(pc)
+	var y sqlPeekRequest
+	y.table = "stocks"
+	y.sqlSelectRequest.addColumn("ticker")
+	y.sqlSelectRequest.addColumn("bid")
+	y.sqlSelectRequest.addColumn("ask")
+	validatePeek(t, x, &y)
+}
+
+func TestParseSqlPeekStatement5(t *testing.T) {
+	pc := newTokens()
+	lex(" peek front * from stocks ", pc)
+	x := parse(pc)
+	var y sqlPeekRequest
+	y.table = "stocks"
+	y.front = true
+	validatePeek(t, x, &y)
+}
+
+func TestParseSqlPeekStatement6(t *testing.T) {
+	pc := newTokens()
+	lex(" peek front ticker, bid, ask  from stocks ", pc)
+	x := parse(pc)
+	var y sqlPeekRequest
+	y.table = "stocks"
+	y.front = true
+	y.sqlSelectRequest.addColumn("ticker")
+	y.sqlSelectRequest.addColumn("bid")
+	y.sqlSelectRequest.addColumn("ask")
+	validatePeek(t, x, &y)
 }

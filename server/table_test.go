@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import "testing"
 import "strconv"
@@ -29,7 +29,7 @@ func validateTableRecordsCount(t *testing.T, tbl *table, expected int) {
 
 func validateSqlInsertResponse(t *testing.T, res response) {
 	switch typ := res.(type) {
-	case *sqlInsertResponse:
+	case *sqlActionDataResponse:
 		return
 	default:
 		t.Errorf("table insert error: invalid response type expected sqlInsertResponse but got %T", typ)
@@ -58,7 +58,7 @@ func TestTable1(t *testing.T) {
 	tbl := newTable("table1")
 	tbl.getAddColumn("col1")
 	r, _ := tbl.prepareRecord()
-	tbl.addNewRecord(r)
+	tbl.addNewRecord(r, true)
 	validateTableRecordsCount(t, tbl, 1)
 	validateRecordValuesCount(t, r, 2)
 	validateRecordValue(t, r, 0, "0")
@@ -80,7 +80,7 @@ func TestTable2(t *testing.T) {
 	col3 := tbl.getColumn("col3").ordinal
 	//
 	r, _ := tbl.prepareRecord()
-	tbl.addNewRecord(r)
+	tbl.addNewRecord(r, true)
 	validateTableRecordsCount(t, tbl, 1)
 	validateRecordValuesCount(t, r, 4)
 	validateRecordValue(t, r, 0, "0")
@@ -90,7 +90,7 @@ func TestTable2(t *testing.T) {
 	validateRecordValue(t, r, 0, "0")
 	//
 	r, _ = tbl.prepareRecord()
-	tbl.addNewRecord(r)
+	tbl.addNewRecord(r, true)
 	validateTableRecordsCount(t, tbl, 2)
 	validateRecordValuesCount(t, r, 4)
 	validateRecordValue(t, r, 0, "1")
@@ -204,10 +204,10 @@ func updateHelper(t *table, sqlUpdate string) response {
 
 func validateSqlUpdate(t *testing.T, res response, expected int) {
 	switch typ := res.(type) {
-	case *sqlUpdateResponse:
-		x := res.(*sqlUpdateResponse)
-		if x.updated != expected {
-			t.Errorf("table update error: expected update %d but got %d", expected, x.updated)
+	case *sqlActionDataResponse:
+		x := res.(*sqlActionDataResponse)
+		if x.rows != expected {
+			t.Errorf("table update error: expected update %d but got %d", expected, x.rows)
 		}
 		validateResponseJSON(t, res)
 	case *errorResponse:
@@ -281,10 +281,10 @@ func deleteHelper(t *table, sqlDelete string) response {
 
 func validateSqlDelete(t *testing.T, res response, expected int) {
 	switch res.(type) {
-	case *sqlDeleteResponse:
-		x := res.(*sqlDeleteResponse)
-		if x.deleted != expected {
-			t.Errorf("table delete error: expected deleted %d but got %d", expected, x.deleted)
+	case *sqlActionDataResponse:
+		x := res.(*sqlActionDataResponse)
+		if x.rows != expected {
+			t.Errorf("table delete error: expected deleted %d but got %d", expected, x.rows)
 		}
 		validateResponseJSON(t, res)
 	case *errorResponse:
@@ -903,7 +903,7 @@ func TestgTableActionAddOnTagUpdate(t *testing.T) {
 	validateActionDelete(t, senders)
 }
 
-func TestIssue34 (t *testing.T) {
+func TestIssue34(t *testing.T) {
 	senders := make([]*responseSender, 0)
 	var sender *responseSender
 	tbl := newTable("stocks")

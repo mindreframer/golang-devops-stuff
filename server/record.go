@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import "strconv"
 
@@ -33,6 +33,8 @@ func (this *link) clear() {
 type record struct {
 	values []string
 	links  []link
+	prev   *record
+	next   *record
 }
 
 // record factory
@@ -47,6 +49,8 @@ func newRecord(columns int, id int) *record {
 func (this *record) free() {
 	this.values = nil
 	this.links = nil
+	this.prev = nil
+	this.next = nil
 }
 
 // Returns record index in a table.

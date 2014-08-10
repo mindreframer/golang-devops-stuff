@@ -1,5 +1,5 @@
 ﻿------------------------------------------------------------------------------------------
- PubSubSQL Version-1.0.0
+ PubSubSQL Version-1.1.0
  An open-source in-memory database integrated with Publish-Subscribe.
 ------------------------------------------------------------------------------------------
 pubsubsql/

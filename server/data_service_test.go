@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import "testing"
 import "time"
@@ -32,6 +32,11 @@ func sqlHelper(sql string, sender *responseSender) *requestItem {
 	pc := newTokens()
 	lex(sql, pc)
 	req := parse(pc).(request)
+
+	switch req.(type) {
+	case *errorRequest:
+		println("INVALID SQL", sql)
+	}
 	return &requestItem{
 		req:    req,
 		sender: sender,
@@ -60,7 +65,7 @@ func TestDataService(t *testing.T) {
 	res = sender.testRecv()
 	validateOkResponse(t, res)
 	// subscribe
-	dataSrv.acceptRequest(sqlHelper(" subscribe * from stocks sector = TECH ", sender))
+	dataSrv.acceptRequest(sqlHelper(" subscribe * from stocks where sector = TECH ", sender))
 	res = sender.testRecv()
 	validateSqlSubscribeResponse(t, res)
 	res = sender.testRecv() // action add
@@ -78,6 +83,5 @@ func TestDataService(t *testing.T) {
 	dataSrv.acceptRequest(sqlHelper(" unsubscribe from stocks where pubsubid = 1 ", sender))
 	res = sender.testRecv() // first is action delete
 	validateSqlUnsubscribe(t, res, 1)
-
 	quit.Quit(time.Millisecond * 1000)
 }

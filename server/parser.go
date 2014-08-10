@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import "fmt"
 
@@ -25,7 +25,8 @@ type tokenProducer interface {
 
 // parser
 type parser struct {
-	tokens tokenProducer
+	tokens    tokenProducer
+	streaming bool
 }
 
 // Indicates that error happened during parse phase and returns errorRequest
@@ -186,8 +187,98 @@ func (this *parser) parseSqlInsert() request {
 		s := fmt.Sprintf("number of columns:%d and values:%d do not match", columns, values)
 		return this.parseError(s)
 	}
-	// done
+	return this.returningColumnsHelper(nil, req, &req.returningColumns)
+}
+
+func (this *parser) returningColumnsHelper(tok *token, req request, r *returningColumns) request {
+	if tok == nil {
+		tok = this.tokens.Produce()
+	}
+	switch tok.typ {
+	case tokenTypeEOF:
+		return req
+	case tokenTypeSqlReturning:
+		tok = this.tokens.Produce()
+		if tok.typ != tokenTypeSqlStar {
+			if errreq := this.parseReturningColumns(&tok, r); errreq != nil {
+				return errreq
+			}
+		} else {
+			r.use = true
+		}
+	default:
+		s := fmt.Sprintf("invalid token %v: expected returning", tok.val)
+		return this.parseError(s)
+	}
 	return req
+}
+
+// Parses sql push statement and returns sqlInsertRequest on success.
+func (this *parser) parseSqlPush() request {
+	req := newSqlPushRequest()
+	// into
+	tok := this.tokens.Produce()
+	switch tok.typ {
+	case tokenTypeSqlBack:
+		req.front = false
+		tok = this.tokens.Produce()
+	case tokenTypeSqlFront:
+		req.front = true
+		tok = this.tokens.Produce()
+	}
+	if tok.typ != tokenTypeSqlInto {
+		return this.parseError("expected into")
+	}
+	// table name
+	if errreq := this.parseTableName(&req.table); errreq != nil {
+		return errreq
+	}
+	// (
+	tok = this.tokens.Produce()
+	if tok.typ != tokenTypeSqlLeftParenthesis {
+		return this.parseError("expected ( ")
+	}
+	// columns
+	columns := 0
+	expectedType := tokenTypeSqlColumn
+	var errreq request
+	var str string
+	for expectedType == tokenTypeSqlColumn {
+		errreq, expectedType, str = this.parseSqlInsertColumn()
+		if errreq != nil {
+			return errreq
+		}
+		req.sqlInsertRequest.addColumn(str)
+		columns++
+	}
+	// values
+	tok = this.tokens.Produce()
+	if tok.typ != tokenTypeSqlValues {
+		return this.parseError("expected values keyword")
+	}
+	// (
+	tok = this.tokens.Produce()
+	if tok.typ != tokenTypeSqlLeftParenthesis {
+		return this.parseError("expected values ( ")
+	}
+	//
+	expectedType = tokenTypeSqlValue
+	values := 0
+	for expectedType == tokenTypeSqlValue {
+		errreq, expectedType, str = this.parseSqlInsertValue()
+		if errreq != nil {
+			return errreq
+		}
+		if values < columns {
+			req.sqlInsertRequest.setValueAt(values, str)
+		}
+		values++
+	}
+	if columns != values {
+		s := fmt.Sprintf("number of columns:%d and values:%d do not match", columns, values)
+		return this.parseError(s)
+	}
+	return this.returningColumnsHelper(nil, req, &req.returningColumns)
 }
 
 func (this *parser) parseSqlInsertColumn() (request, tokenType, string) {
@@ -217,14 +308,14 @@ func (this *parser) parseSqlInsertValue() (request, tokenType, string) {
 		return nil, tokenTypeSqlValue, str
 	}
 	if tok.typ == tokenTypeSqlRightParenthesis {
-		return nil, tokenTypeEOF, str
+		return nil, tokenTypeSqlRightParenthesis, str
 	}
 	return this.parseError("expected , or ) "), tokenTypeError, ""
 }
 
 // SELECT sql statement
 
-func (this *parser) parseSelectColumns(tok **token, req *sqlSelectRequest) request {
+func (this *parser) parseReturningColumns(tok **token, retColumns *returningColumns) request {
 	nextIsColumn := true
 	for {
 		if nextIsColumn {
@@ -232,7 +323,7 @@ func (this *parser) parseSelectColumns(tok **token, req *sqlSelectRequest) reque
 				return this.parseError("expected column name")
 			}
 			nextIsColumn = false
-			req.addColumn((*tok).val)
+			retColumns.addColumn((*tok).val)
 		} else {
 			if (*tok).typ != tokenTypeSqlComma {
 				break
@@ -246,13 +337,11 @@ func (this *parser) parseSelectColumns(tok **token, req *sqlSelectRequest) reque
 
 // Parses sql select statement and returns sqlSelectRequest on success.
 func (this *parser) parseSqlSelect() request {
-	req := &sqlSelectRequest{
-		cols: make([]string, 0, config.PARSER_SQL_SELECT_REQUEST_COLUMN_CAPACITY),
-	}
 	// *
+	req := newSqlSelectRequest()
 	tok := this.tokens.Produce()
 	if tok.typ != tokenTypeSqlStar {
-		if errreq := this.parseSelectColumns(&tok, req); errreq != nil {
+		if errreq := this.parseReturningColumns(&tok, &req.returningColumns); errreq != nil {
 			return errreq
 		}
 	} else {
@@ -279,6 +368,79 @@ func (this *parser) parseSqlSelect() request {
 	return req
 }
 
+// Parses sql peek statement and returns sqlPeekRequest on success.
+func (this *parser) parseSqlPeek() request {
+	req := newSqlPeekRequest()
+	tok := this.tokens.Produce()
+	switch tok.typ {
+	case tokenTypeSqlFront:
+		req.front = true
+		tok = this.tokens.Produce()
+	case tokenTypeSqlBack:
+		req.front = false
+		tok = this.tokens.Produce()
+	}
+	if tok.typ != tokenTypeSqlStar {
+		if errreq := this.parseReturningColumns(&tok, &req.returningColumns); errreq != nil {
+			return errreq
+		}
+	} else {
+		tok = this.tokens.Produce()
+	}
+	// from
+	if tok.typ != tokenTypeSqlFrom {
+		return this.parseError("expected from")
+	}
+	// table name
+	if errreq := this.parseTableName(&req.table); errreq != nil {
+		return errreq
+	}
+	tok = this.tokens.Produce()
+	if tok.typ != tokenTypeEOF {
+		return this.parseError("expected eof token")
+	}
+	return req
+}
+
+// Parses sql pop statement and returns sqlPopRequest on success.
+func (this *parser) parseSqlPop() request {
+	req := newSqlPopRequest()
+	tok := this.tokens.Produce()
+	switch tok.typ {
+	case tokenTypeSqlFront:
+		req.front = true
+		tok = this.tokens.Produce()
+	case tokenTypeSqlBack:
+		req.front = false
+		tok = this.tokens.Produce()
+	}
+
+	switch tok.typ {
+	case tokenTypeSqlStar:
+		req.use = true
+		tok = this.tokens.Produce()
+	case tokenTypeSqlFrom:
+		req.use = false
+	default:
+		if errreq := this.parseReturningColumns(&tok, &req.returningColumns); errreq != nil {
+			return errreq
+		}
+	}
+	// from
+	if tok.typ != tokenTypeSqlFrom {
+		return this.parseError("expected from")
+	}
+	// table name
+	if errreq := this.parseTableName(&req.table); errreq != nil {
+		return errreq
+	}
+	tok = this.tokens.Produce()
+	if tok.typ != tokenTypeEOF {
+		return this.parseError("expected eof token")
+	}
+	return req
+}
+
 // UPDATE sql statement
 
 // Parses sql update statement and returns sqlUpdateRequest on success.
@@ -300,8 +462,9 @@ func (this *parser) parseSqlUpdate() request {
 
 func (this *parser) parseSqlUpdateColVals(req *sqlUpdateRequest) request {
 	count := 0
+	tok := this.tokens.Produce()
 loop:
-	for tok := this.tokens.Produce(); ; tok = this.tokens.Produce() {
+	for ; ; tok = this.tokens.Produce() {
 		switch tok.typ {
 		case tokenTypeSqlColumn:
 			colval := new(columnValue)
@@ -315,9 +478,10 @@ loop:
 			if errreq := this.parseSqlWhere(&(req.filter), tok); errreq != nil {
 				return errreq
 			}
-			// we must be at the end
+			tok = nil
 			break loop
-
+		case tokenTypeSqlReturning:
+			break loop
 		case tokenTypeEOF:
 			break loop
 
@@ -331,7 +495,7 @@ loop:
 	if count == 0 {
 		return this.parseError("expected at least on.col value pair")
 	}
-	return req
+	return this.returningColumnsHelper(tok, req, &req.returningColumns)
 }
 
 // DELETE sql statement
@@ -350,15 +514,16 @@ func (this *parser) parseSqlDelete() request {
 	}
 	// possible eof
 	tok = this.tokens.Produce()
-	if tok.typ == tokenTypeEOF {
+	switch tok.typ {
+	case tokenTypeEOF:
 		return req
+	case tokenTypeSqlWhere:
+		if errreq := this.parseSqlWhere(&(req.filter), tok); errreq != nil {
+			return errreq
+		}
+		tok = this.tokens.Produce()
 	}
-	// than it must be where
-	if errreq := this.parseSqlWhere(&(req.filter), tok); errreq != nil {
-		return errreq
-	}
-	// we are good
-	return req
+	return this.returningColumnsHelper(tok, req, &req.returningColumns)
 }
 
 // KEY sql statement
@@ -398,6 +563,9 @@ func (this *parser) parseSqlTag() request {
 // Parses sql subscribe statement and returns sqlSubscribeRequest on success.
 func (this *parser) parseSqlSubscribe() request {
 	tok := this.tokens.Produce()
+	if tok.typ == tokenTypeSqlTopic {
+		return &sqlSubscribeTopicRequest { topic: tok.val }
+	}
 	req := new(sqlSubscribeRequest)
 	// skip
 	if tok.typ == tokenTypeSqlSkip {
@@ -461,6 +629,9 @@ func (this *parser) parseSqlUnsubscribe() request {
 func (this *parser) run() request {
 	tok := this.tokens.Produce()
 	switch tok.typ {
+	case tokenTypeSqlStream:
+		this.streaming = true
+		return this.run()
 	case tokenTypeSqlInsert:
 		return this.parseSqlInsert()
 	case tokenTypeSqlSelect:
@@ -469,6 +640,12 @@ func (this *parser) run() request {
 		return this.parseSqlUpdate()
 	case tokenTypeSqlDelete:
 		return this.parseSqlDelete()
+	case tokenTypeSqlPush:
+		return this.parseSqlPush()
+	case tokenTypeSqlPop:
+		return this.parseSqlPop()
+	case tokenTypeSqlPeek:
+		return this.parseSqlPeek()
 	case tokenTypeSqlSubscribe:
 		return this.parseSqlSubscribe()
 	case tokenTypeSqlUnsubscribe:
@@ -490,7 +667,12 @@ func (this *parser) run() request {
 // Parses tokens and returns an request.
 func parse(tokens tokenProducer) request {
 	parser := &parser{
-		tokens: tokens,
+		tokens:    tokens,
+		streaming: false,
 	}
-	return parser.run()
+	req := parser.run()
+	if parser.streaming {
+		req.setStreaming()
+	}
+	return req
 }

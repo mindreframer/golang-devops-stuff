@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import "testing"
 import "encoding/json"
@@ -41,4 +41,3 @@ func TestOkResponseJSON(t *testing.T) {
 	res := &okResponse{}
 	validateResponseJSON(t, res)
 }
-

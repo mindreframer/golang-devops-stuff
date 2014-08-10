@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/lithis.nses/>.
  */
 
-package pubsubsql
+package server
 
 import (
 	"fmt"
@@ -126,6 +126,9 @@ func (this *Controller) onCommandRequest(item *requestItem) {
 	switch item.req.(type) {
 	case *cmdStatusRequest:
 		loginfo("client connection:", item.sender.connectionId, "requested server status")
+		if item.req.isStreaming() {
+			return
+		}
 		res := newCmdStatusResponse(this.network.connectionCount())
 		res.requestId = item.getRequestId()
 		item.sender.send(res)

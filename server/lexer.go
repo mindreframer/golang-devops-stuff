@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import (
 	"fmt"
@@ -26,7 +26,7 @@ import (
 type tokenType uint8
 
 const (
-	tokenTypeError                   tokenType = iota // error occured
+	tokenTypeError                   tokenType = iota // error occurred
 	tokenTypeEOF                                      // last token
 	tokenTypeCmdStatus                                // status
 	tokenTypeCmdStop                                  // stop
@@ -50,10 +50,21 @@ const (
 	tokenTypeSqlLeftParenthesis                       // (
 	tokenTypeSqlRightParenthesis                      // )
 	tokenTypeSqlComma                                 // ,
-	tokenTypeSqlValue                                 // 'some string' string or continous sequence of chars delimited by WHITE SPACE | ' | , | ( | )
+	tokenTypeSqlValue                                 // 'some string' string or continuous sequence of chars delimited by WHITE SPACE | ' | , | ( | )
 	tokenTypeSqlValueWithSingleQuote                  // '' becomes ' inside the string, parser will need to replace the string
 	tokenTypeSqlKey                                   // key
 	tokenTypeSqlTag                                   // tag
+	tokenTypeSqlStream                                // stream
+	tokenTypeSqlPush                                  // push
+	tokenTypeSqlPop                                   // pop
+	tokenTypeSqlPeek                                  // peek
+	tokenTypeSqlBack                                  // back
+	tokenTypeSqlFront                                 // front
+	tokenTypeSqlReturning                             // returning
+	tokenTypeSqlTopic                                 // topic
+	tokenTypeSqlMysql                                 // mysql
+	tokenTypeSqlConnect                               // connect
+	tokenTypeSqlDisconnect                            // disconnect
 )
 
 // String converts tokenType value to a string.
@@ -115,6 +126,26 @@ func (typ tokenType) String() string {
 		return "tokenTypeSqlKey"
 	case tokenTypeSqlTag:
 		return "tokenTypeSqlTag"
+	case tokenTypeSqlStream:
+		return "tokenTypeSqlStream"
+	case tokenTypeSqlPush:
+		return "tokenTypeSqlPush"
+	case tokenTypeSqlPop:
+		return "tokenTypeSqlPush"
+	case tokenTypeSqlPeek:
+		return "tokenTypeSqlPeek"
+	case tokenTypeSqlBack:
+		return "tokenTypeSqlBack"
+	case tokenTypeSqlFront:
+		return "tokenTypeSqlFront"
+	case tokenTypeSqlTopic:
+		return "tokenTypeSqlTopic"
+	case tokenTypeSqlMysql:
+		return "tokenTypeSqlMysql"
+	case tokenTypeSqlConnect:
+		return "tokenTypeSqlConnect"
+	case tokenTypeSqlDisconnect:
+		return "tokenTypeSqlDisconnect"
 	}
 	return "not implemented"
 }
@@ -135,7 +166,7 @@ func (this token) String() string {
 	return this.val
 }
 
-// tokenConsumer consumes tokens emited by lexer.
+// tokenConsumer consumes tokens emitted by lexer.
 type tokenConsumer interface {
 	Consume(t *token)
 }
@@ -143,6 +174,15 @@ type tokenConsumer interface {
 type tokensProducerConsumer struct {
 	idx    int
 	tokens []*token
+}
+
+// String converts tokensProducerConsumer to a string.
+func (this tokensProducerConsumer) String() string {
+	return fmt.Sprintf(
+		"tokensProducerConsumer: idx=%d; tokens(%d)=%s",
+		this.idx,
+		len(this.tokens),
+		this.tokens)
 }
 
 func newTokens() *tokensProducerConsumer {
@@ -176,7 +216,7 @@ func (this *tokensProducerConsumer) Produce() *token {
 type lexer struct {
 	input  string        // the string being scanned
 	start  int           // start position of this item
-	pos    int           // currenty position in the input
+	pos    int           // currently position in the input
 	width  int           // width of last rune read from input
 	tokens tokenConsumer // consumed tokens
 	err    string        // error message
@@ -187,7 +227,7 @@ type lexer struct {
 type stateFn func(*lexer) stateFn
 
 // Emits an error token and terminates the scan
-// by passing back a nil ponter that will be the next state
+// by passing back a nil pointer that will be the next state
 // terminating lexer.run function
 func (this *lexer) errorToken(format string, args ...interface{}) stateFn {
 	this.err = fmt.Sprintf(format, args...)
@@ -257,7 +297,7 @@ func isWhiteSpace(rune int32) bool {
 // as defined by isWhiteSpace function
 func (this *lexer) scanTillWhiteSpace() {
 	for rune := this.next(); !isWhiteSpace(rune); rune = this.next() {
-
+		// void
 	}
 }
 
@@ -306,7 +346,7 @@ func (this *lexer) tryMatch(val string) bool {
 	return true
 }
 
-// lexMatch matches expected string value emiting the token on success
+// lexMatch matches expected string value emitting the token on success
 // and returning passed state function.
 func (this *lexer) lexMatch(typ tokenType, value string, skip int, fn stateFn) stateFn {
 	if this.match(value, skip) {
@@ -316,7 +356,7 @@ func (this *lexer) lexMatch(typ tokenType, value string, skip int, fn stateFn) s
 	return this.errorToken("Unexpected token:" + this.current())
 }
 
-// lexSqlIndentifier scans input for valid sql identifier emiting the token on success
+// lexSqlIndentifier scans input for valid sql identifier emitting the token on success
 // and returning passed state function.
 func (this *lexer) lexSqlIdentifier(typ tokenType, fn stateFn) stateFn {
 	this.skipWhiteSpaces()
@@ -332,7 +372,7 @@ func (this *lexer) lexSqlIdentifier(typ tokenType, fn stateFn) stateFn {
 	return fn
 }
 
-// lexSqlLeftParenthesis scans input for '(' emiting the token on success
+// lexSqlLeftParenthesis scans input for '(' emitting the token on success
 // and returning passed state function.
 func (this *lexer) lexSqlLeftParenthesis(fn stateFn) stateFn {
 	this.skipWhiteSpaces()
@@ -343,8 +383,8 @@ func (this *lexer) lexSqlLeftParenthesis(fn stateFn) stateFn {
 	return fn
 }
 
-// lexSqlValue scans input for valid sql value emiting the token on success
-// and returing passed state function.
+// lexSqlValue scans input for valid sql value emitting the token on success
+// and returning passed state function.
 func (this *lexer) lexSqlValue(fn stateFn) stateFn {
 	this.skipWhiteSpaces()
 	if this.end() {
@@ -425,7 +465,7 @@ func lexSqlWhereColumnEqual(this *lexer) stateFn {
 
 func lexSqlWhereColumnEqualValue(this *lexer) stateFn {
 	this.skipWhiteSpaces()
-	return this.lexSqlValue(lexEof)
+	return this.lexSqlValue(lexSqlReturning)
 }
 
 func lexEof(this *lexer) stateFn {
@@ -436,9 +476,22 @@ func lexEof(this *lexer) stateFn {
 	return this.errorToken("unexpected token at the end of statement")
 }
 
-// BEGING SQL
+// BEGINNING SQL
 
 // INSERT sql statement scan state functions.
+
+func lexSqlPushInto(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	switch this.next() {
+	case 'b':
+		return this.lexMatch(tokenTypeSqlBack, "back", 1, lexSqlInsertInto)
+	case 'f':
+		return this.lexMatch(tokenTypeSqlFront, "front", 1, lexSqlInsertInto)
+	case 'i':
+		return this.lexMatch(tokenTypeSqlInto, "into", 1, lexSqlInsertIntoTable)
+	}
+	return this.errorToken("unexpected token expected front, back or into")
+}
 
 func lexSqlInsertInto(this *lexer) stateFn {
 	this.skipWhiteSpaces()
@@ -492,10 +545,45 @@ func lexSqlInsertValueCommaOrRigthParenthesis(this *lexer) stateFn {
 		return lexSqlInsertVal
 	case ')':
 		this.emit(tokenTypeSqlRightParenthesis)
-		// we are done with insert
-		return nil
+		return lexSqlReturning
 	}
 	return this.errorToken("expected , or ) ")
+}
+
+// returning
+
+func lexSqlReturning(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	if this.end() {
+		return nil
+	}
+	return this.lexMatch(tokenTypeSqlReturning, "returning", 0, lexSqlReturningStar)
+}
+
+func lexSqlReturningStar(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	if this.next() == '*' {
+		this.emit(tokenTypeSqlStar)
+		return nil
+	}
+	this.backup()
+	return lexSqlReturningColumn(this)
+}
+
+func lexSqlReturningColumn(this *lexer) stateFn {
+	return this.lexSqlIdentifier(tokenTypeSqlColumn, lexSqlReturningCommaOrEnd)
+}
+
+func lexSqlReturningCommaOrEnd(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	if this.end() {
+		return nil
+	}
+	if this.next() == ',' {
+		this.emit(tokenTypeSqlComma)
+		return lexSqlReturningColumn
+	}
+	return this.errorToken("expected , ")
 }
 
 // SELECT sql statement scan state functions.
@@ -525,6 +613,54 @@ func lexSqlSelectStar(this *lexer) stateFn {
 	return lexSqlSelectColumn(this)
 }
 
+func lexSqlPopFrom(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	// from
+	if this.tryMatch("from") {
+		this.emit(tokenTypeSqlFrom)
+		return lexSqlFromTable
+	}
+	// *
+	if this.next() == '*' {
+		this.emit(tokenTypeSqlStar)
+		return lexSqlFrom
+	}
+	this.backup()
+	// back
+	if this.tryMatch("back") {
+		this.emit(tokenTypeSqlBack)
+		return lexSqlSelectStar
+	}
+	// front
+	if this.tryMatch("front") {
+		this.emit(tokenTypeSqlFront)
+		return lexSqlSelectStar
+	}
+	// columns
+	return lexSqlSelectColumn(this)
+}
+
+func lexSqlPeekFrom(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	if this.next() == '*' {
+		this.emit(tokenTypeSqlStar)
+		return lexSqlFrom
+	}
+	this.backup()
+	// back
+	if this.tryMatch("back") {
+		this.emit(tokenTypeSqlBack)
+		return lexSqlSelectStar
+	}
+	// front
+	if this.tryMatch("front") {
+		this.emit(tokenTypeSqlFront)
+		return lexSqlSelectStar
+	}
+	// columns
+	return lexSqlSelectColumn(this)
+}
+
 // UPDATE sql statement scan state functions.
 
 func lexSqlUpdateTable(this *lexer) stateFn {
@@ -551,7 +687,7 @@ func lexSqlColumnEqual(this *lexer) stateFn {
 		this.emit(tokenTypeSqlEqual)
 		return lexSqlColumnEqualValue
 	}
-	return this.errorToken("expecgted = ")
+	return this.errorToken("expected = ")
 }
 
 func lexSqlColumnEqualValue(this *lexer) stateFn {
@@ -581,7 +717,7 @@ func lexSqlFromTable(this *lexer) stateFn {
 }
 
 func lexSqlWhere(this *lexer) stateFn {
-	return this.lexTryMatch(tokenTypeSqlWhere, "where", lexSqlWhereColumn, nil)
+	return this.lexTryMatch(tokenTypeSqlWhere, "where", lexSqlWhereColumn, lexSqlReturning)
 }
 
 // KEY and TAG sql statement scan state functions.
@@ -607,7 +743,11 @@ func lexSqlSubscribe(this *lexer) stateFn {
 		return lexSqlSelectStar
 	}
 	this.backup()
-	return lexSqlSubscribeSkip(this)
+	return this.lexTryMatch(tokenTypeSqlSkip, "skip", lexSqlSelectStar, lexSqlTopic)
+}
+
+func lexSqlTopic(this *lexer) stateFn {
+	return this.lexSqlIdentifier(tokenTypeSqlTopic, nil)
 }
 
 // UNSUBSCRIBE
@@ -616,11 +756,36 @@ func lexSqlUnsubscribeFrom(this *lexer) stateFn {
 	return lexSqlFrom(this)
 }
 
+// CONNECT
+
+func lexSqlConnectValue(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	return this.lexSqlValue(nil)
+}
+
 // END SQL
+
+// Helper function to process subscribe unsubscribe connect disconnect commands.
+func lexCommandMysql(this *lexer) stateFn {
+	this.skipWhiteSpaces()
+	switch this.next() {
+	case 's':
+		return this.lexMatch(tokenTypeSqlSubscribe, "subscribe", 1, lexSqlSubscribe)
+	case 'u':
+		return this.lexMatch(tokenTypeSqlUnsubscribe, "unsubscribe", 1, lexSqlUnsubscribeFrom)
+	case 'c':
+		return this.lexMatch(tokenTypeSqlConnect, "connect", 1, lexSqlConnectValue)
+	case 'd':
+		return this.lexMatch(tokenTypeSqlDisconnect, "disconnect", 1, nil)
+	}
+	return this.errorToken("Invalid command:" + this.current())
+}
 
 // Helper function to process status stop start commands.
 func lexCommandST(this *lexer) stateFn {
 	switch this.next() {
+	case 'r':
+		return this.lexMatch(tokenTypeSqlStream, "stream", 3, lexCommand)
 	case 'a':
 		return this.lexMatch(tokenTypeCmdStatus, "status", 3, nil)
 	case 'o':
@@ -642,6 +807,19 @@ func lexCommandS(this *lexer) stateFn {
 	return this.errorToken("Invalid command:" + this.current())
 }
 
+// Helper function to process push, pop, peek commands.
+func lexCommandP(this *lexer) stateFn {
+	switch this.next() {
+	case 'u':
+		return this.lexMatch(tokenTypeSqlPush, "push", 2, lexSqlPushInto)
+	case 'o':
+		return this.lexMatch(tokenTypeSqlPop, "pop", 2, lexSqlPopFrom)
+	case 'e':
+		return this.lexMatch(tokenTypeSqlPeek, "peek", 2, lexSqlPeekFrom)
+	}
+	return this.errorToken("Invalid command:" + this.current())
+}
+
 // Initial state function.
 func lexCommand(this *lexer) stateFn {
 	this.skipWhiteSpaces()
@@ -651,7 +829,7 @@ func lexCommand(this *lexer) stateFn {
 			return this.lexMatch(tokenTypeSqlUpdate, "update", 2, lexSqlUpdateTable)
 		}
 		return this.lexMatch(tokenTypeSqlUnsubscribe, "unsubscribe", 2, lexSqlUnsubscribeFrom)
-	case 's': // select subscribe status stop start
+	case 's': // select subscribe status stop start stream
 		return lexCommandS(this)
 	case 'i': // insert
 		return this.lexMatch(tokenTypeSqlInsert, "insert", 1, lexSqlInsertInto)
@@ -663,11 +841,15 @@ func lexCommand(this *lexer) stateFn {
 		return this.lexMatch(tokenTypeSqlTag, "tag", 1, lexSqlKeyTable)
 	case 'c': // close
 		return this.lexMatch(tokenTypeCmdClose, "close", 1, nil)
+	case 'p': // pop, push, peek
+		return lexCommandP(this)
+	case 'm': // mysql
+		return this.lexMatch(tokenTypeSqlMysql, "mysql", 1, lexCommandMysql)
 	}
 	return this.errorToken("Invalid command:" + this.current())
 }
 
-// Scans the input by executing state functon untithis.
+// Scans the input by executing state function untithis.
 // the state is nil
 func (this *lexer) run() {
 	for state := lexCommand; state != nil; {

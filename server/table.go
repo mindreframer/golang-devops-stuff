@@ -14,7 +14,7 @@
  * along with PubSubSQL.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-package pubsubsql
+package server
 
 import (
 	"strconv"
@@ -52,7 +52,11 @@ type table struct {
 	//
 	requestId uint32
 	//
-	count uint32;
+	count     uint32
+	streaming bool
+	//
+	last  *record
+	first *record
 }
 
 // table factory
@@ -65,6 +69,7 @@ func newTable(name string) *table {
 		tagedColumns:  make([]*column, 0, config.TABLE_COLUMNS_CAPACITY),
 		subscriptions: make(mapSubscriptionByConnection),
 		requestId:     0,
+		streaming:     false,
 	}
 	table.addColumn("id")
 	return table
@@ -133,9 +138,25 @@ func (this *table) prepareRecord() (*record, int) {
 }
 
 // adNewRecord add newly created record to the table
-func (this *table) addNewRecord(rec *record) {
-	this.count++;
+func (this *table) addNewRecord(rec *record, back bool) {
+	this.count++
 	addRecordToSlice(&this.records, rec)
+	// initial record
+	if this.first == nil {
+		this.first = rec
+		this.last = rec
+		return
+	}
+	//
+	if back {
+		this.last.next = rec
+		rec.prev = this.last
+		this.last = rec
+	} else {
+		rec.next = this.first
+		this.first.prev = rec
+		this.first = rec
+	}
 }
 
 // addRecordToSlice generic helper function that adds record to the slice and
@@ -172,8 +193,21 @@ func (this *table) deleteRecord(rec *record) {
 	}
 	// delete record
 	if this.records[rec.id()] != nil {
-		this.count--;
+		this.count--
 		this.records[rec.id()] = nil
+	}
+	//
+	if rec == this.last {
+		this.last = rec.prev
+	}
+	if rec == this.first {
+		this.first = rec.next
+	}
+	if rec.prev != nil {
+		rec.prev.next = rec.next
+	}
+	if rec.next != nil {
+		rec.next.prev = rec.prev
 	}
 }
 
@@ -383,10 +417,31 @@ func (this *table) deleteTag(rec *record, col *column) *pubsub {
 }
 
 // INSERT sql statement
+func (this *table) setReturningColumns(ret *returningColumns) (response, *[]*column) {
+	if !ret.use {
+		return nil, nil
+	}
+	if len(ret.cols) == 0 {
+		return nil, &this.colSlice
+	}
+	columns := make([]*column, len(ret.cols))
+	for idx, colName := range ret.cols {
+		col := this.getColumn(colName)
+		if col == nil {
+			return newErrorResponse("operation failed, returning column " + colName + " does not exist"), nil
+		}
+		columns[idx] = col
+	}
+	return nil, &columns
+}
 
 // Proceses sql insert request by inserting record in the table.
 // On success returns sqlInsertResponse.
 func (this *table) sqlInsert(req *sqlInsertRequest) response {
+	return this.sqlInsertHelper(req, "insert", true)
+}
+
+func (this *table) sqlInsertHelper(req *sqlInsertRequest, action string, back bool) response {
 	rec, id := this.prepareRecord()
 	// validate unique keys constrain
 	cols := make([]*column, len(req.colVals))
@@ -400,13 +455,25 @@ func (this *table) sqlInsert(req *sqlInsertRequest) response {
 		}
 		cols[idx] = col
 	}
+	// validate returning columns
+	errres, retCols := this.setReturningColumns(&(req.returningColumns))
+	if errres != nil {
+		//remove created columns
+		this.removeColumns(originalColLen)
+		return errres
+	}
 	// ready to insert
 	this.bindRecord(cols, req.colVals, rec, id)
-	this.addNewRecord(rec)
-	res := new(sqlInsertResponse)
-	this.copyRecordToSqlSelectResponse(&res.sqlSelectResponse, rec)
+	this.addNewRecord(rec, back)
+	res := &sqlActionDataResponse{action: action}
+	this.prepareSelectResponse(&res.sqlSelectResponse, retCols, 1)
+	this.addRecordToSelectResponse(&res.sqlSelectResponse, rec)
 	this.onInsert(rec)
 	return res
+}
+
+func (this *table) sqlPush(req *sqlPushRequest) response {
+	return this.sqlInsertHelper(&req.sqlInsertRequest, "push", !req.front)
 }
 
 // SELECT sql statement
@@ -430,8 +497,26 @@ func (this *table) copyRecordToSqlSelectResponse(res *sqlSelectResponse, rec *re
 	res.copyRecordData(rec)
 }
 
+func (this *table) prepareSelectResponse(res *sqlSelectResponse, columns *[]*column, rows int) bool {
+	if columns != nil && len(*columns) > 0 {
+		res.columns = *columns
+		res.records = make([]*record, 0, rows)
+		return true
+	}
+	return false
+}
+
+func (this *table) addRecordToSelectResponse(res *sqlSelectResponse, rec *record) {
+	if len(res.columns) > 0 {
+		res.copyRecordData(rec)
+	} else {
+		res.rows++
+	}
+}
+
 // Processes sql select request.
 // On success returns sqlSelectResponse.
+
 func (this *table) sqlSelect(req *sqlSelectRequest) response {
 	records, errResponse := this.getRecordsBySqlFilter(req.filter)
 	if errResponse != nil {
@@ -452,8 +537,34 @@ func (this *table) sqlSelect(req *sqlSelectRequest) response {
 	return &res
 }
 
-// UPDATE sql statement
+// PEEK
+func (this *table) sqlPeek(req *sqlPeekRequest) response {
+	var rec *record
+	if req.front {
+		rec = this.first
+	} else {
+		rec = this.last
+	}
+	// precreate columns
+	var columns []*column
+	if len(req.cols) > 0 {
+		columns = make([]*column, 0, cap(req.cols))
+		for _, colName := range req.cols {
+			col, _ := this.getAddColumn(colName)
+			columns = append(columns, col)
+		}
+	} else {
+		columns = this.colSlice
+	}
+	res := newPeekResponse()
+	this.prepareSelectResponse(&res.sqlSelectResponse, &columns, 1)
+	if rec != nil {
+		this.addRecordToSelectResponse(&res.sqlSelectResponse, rec)
+	}
+	return res
+}
 
+// UPDATE sql statement
 // Processes sql update requesthis.
 // On success returns sqlUpdateResponse.
 func (this *table) sqlUpdate(req *sqlUpdateRequest) response {
@@ -461,9 +572,10 @@ func (this *table) sqlUpdate(req *sqlUpdateRequest) response {
 	if errResponse != nil {
 		return errResponse
 	}
-	res := &sqlUpdateResponse{updated: 0}
+	res := newUpdateResponse()
 	var onlyRecord *record
-	switch len(records) {
+	l := len(records)
+	switch l {
 	case 0:
 		return res
 	case 1:
@@ -484,11 +596,15 @@ func (this *table) sqlUpdate(req *sqlUpdateRequest) response {
 		}
 		cols[idx+1] = col
 	}
+	// validate returning columns
+	errres, retCols := this.setReturningColumns(&(req.returningColumns))
+	if errres != nil {
+		return errres
+	}
 	// all is valid ready to update
-	updated := 0
+	this.prepareSelectResponse(&res.sqlSelectResponse, retCols, l)
 	for _, rec := range records {
 		if rec != nil {
-			updated++
 			ra := this.updateRecord(cols[1:], req.colVals, rec, int(rec.id()))
 			if hasWhatToRemove(ra) {
 				this.onRemove(ra.removed, rec)
@@ -498,32 +614,62 @@ func (this *table) sqlUpdate(req *sqlUpdateRequest) response {
 				added = &ra.added
 				this.onAdd(ra.added, rec)
 			}
+			this.addRecordToSelectResponse(&res.sqlSelectResponse, rec)
 			this.onUpdate(cols, rec, added)
 		}
 	}
-	res.updated = updated
 	return res
 }
 
 // DELETE sql statement
 
-// Processes sql delete requesthis.
+// Processes sql delete reques.
 // On success returns sqlDeleteResponse.
 func (this *table) sqlDelete(req *sqlDeleteRequest) response {
 	records, errResponse := this.getRecordsBySqlFilter(req.filter)
 	if errResponse != nil {
 		return errResponse
 	}
-	deleted := 0
+	// validate returning columns
+	errres, retCols := this.setReturningColumns(&(req.returningColumns))
+	if errres != nil {
+		return errres
+	}
+	res := newDeleteResponse()
+	this.prepareSelectResponse(&res.sqlSelectResponse, retCols, len(records))
 	for _, rec := range records {
 		if rec != nil {
-			deleted++
+			this.addRecordToSelectResponse(&res.sqlSelectResponse, rec)
 			this.onDelete(rec)
 			this.deleteRecord(rec)
 			rec.free()
 		}
 	}
-	return &sqlDeleteResponse{deleted: deleted}
+	return res
+}
+
+// POP
+func (this *table) sqlPop(req *sqlPopRequest) response {
+	var rec *record
+	if req.front {
+		rec = this.first
+	} else {
+		rec = this.last
+	}
+	// validate returning columns
+	errres, retCols := this.setReturningColumns(&(req.returningColumns))
+	if errres != nil {
+		return errres
+	}
+	res := newPopResponse()
+	if rec != nil {
+		this.prepareSelectResponse(&res.sqlSelectResponse, retCols, 1)
+		this.addRecordToSelectResponse(&res.sqlSelectResponse, rec)
+		this.onDelete(rec)
+		this.deleteRecord(rec)
+		rec.free()
+	}
+	return res
 }
 
 // Key sql statement
@@ -634,6 +780,10 @@ func (this *table) subscribeToId(id string, sender *responseSender, skip bool) (
 }
 
 func (this *table) send(sender *responseSender, res response) {
+	// do not send response when streaming
+	if this.streaming {
+		return
+	}
 	res.setRequestId(this.requestId)
 	sender.send(res)
 }
@@ -665,7 +815,7 @@ func (this *table) sqlSubscribe(req *sqlSubscribeRequest) {
 	}
 	// subscribe
 	sub, records := this.subscribe(col, req.filter.val, req.sender, req.skip)
-	if sub != nil && len(records) > 0 && this.count >  0 {
+	if sub != nil && len(records) > 0 && this.count > 0 {
 		// publish initial action add
 		this.publishActionAdd(sub, records)
 	}
@@ -804,11 +954,18 @@ func (this *table) run() {
 }
 
 func (this *table) onSqlRequest(req request, sender *responseSender) {
+	this.streaming = req.isStreaming()
 	switch req.(type) {
 	case *sqlInsertRequest:
 		this.onSqlInsert(req.(*sqlInsertRequest), sender)
+	case *sqlPushRequest:
+		this.onSqlPush(req.(*sqlPushRequest), sender)
 	case *sqlSelectRequest:
 		this.onSqlSelect(req.(*sqlSelectRequest), sender)
+	case *sqlPeekRequest:
+		this.onSqlPeek(req.(*sqlPeekRequest), sender)
+	case *sqlPopRequest:
+		this.onSqlPop(req.(*sqlPopRequest), sender)
 	case *sqlUpdateRequest:
 		this.onSqlUpdate(req.(*sqlUpdateRequest), sender)
 	case *sqlDeleteRequest:
@@ -829,8 +986,21 @@ func (this *table) onSqlInsert(req *sqlInsertRequest, sender *responseSender) {
 	this.send(sender, res)
 }
 
+func (this *table) onSqlPush(req *sqlPushRequest, sender *responseSender) {
+	res := this.sqlPush(req)
+	this.send(sender, res)
+}
+
 func (this *table) onSqlSelect(req *sqlSelectRequest, sender *responseSender) {
 	this.send(sender, this.sqlSelect(req))
+}
+
+func (this *table) onSqlPeek(req *sqlPeekRequest, sender *responseSender) {
+	this.send(sender, this.sqlPeek(req))
+}
+
+func (this *table) onSqlPop(req *sqlPopRequest, sender *responseSender) {
+	this.send(sender, this.sqlPop(req))
 }
 
 func (this *table) onSqlUpdate(req *sqlUpdateRequest, sender *responseSender) {
