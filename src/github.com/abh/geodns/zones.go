@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/abh/dns"
-	"github.com/abh/errorutil"
 	"io/ioutil"
 	"log"
 	"net"
@@ -15,6 +13,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/abh/dns"
+	"github.com/abh/errorutil"
 )
 
 // Zones maps domain names to zone data
@@ -210,6 +211,9 @@ func readZoneFile(zoneName, fileName string) (zone *Zone, zerr error) {
 	case zone.Options.Targeting >= TargetContinent:
 		geoIP.setupGeoIPCountry()
 	}
+	if zone.Options.Targeting&TargetASN > 0 {
+		geoIP.setupGeoIPASN()
+	}
 
 	return zone, nil
 }
@@ -225,6 +229,7 @@ func setupZoneData(data map[string]interface{}, Zone *Zone) {
 		"ns":    dns.TypeNS,
 		"txt":   dns.TypeTXT,
 		"spf":   dns.TypeSPF,
+		"srv":   dns.TypeSRV,
 	}
 
 	for dk, dv_inter := range data {
@@ -296,7 +301,13 @@ func setupZoneData(data map[string]interface{}, Zone *Zone) {
 				h.Ttl = uint32(label.Ttl)
 				h.Class = dns.ClassINET
 				h.Rrtype = dnsType
-				h.Name = label.Label + "." + Zone.Origin + "."
+
+				switch len(label.Label) {
+				case 0:
+					h.Name = Zone.Origin + "."
+				default:
+					h.Name = label.Label + "." + Zone.Origin + "."
+				}
 
 				switch dnsType {
 				case dns.TypeA, dns.TypeAAAA:
@@ -337,6 +348,33 @@ func setupZoneData(data map[string]interface{}, Zone *Zone) {
 						Hdr:        h,
 						Mx:         mx,
 						Preference: pref}
+
+				case dns.TypeSRV:
+					rec := records[rType][i].(map[string]interface{})
+					priority := uint16(0)
+					srv_weight := uint16(0)
+					port := uint16(0)
+					target := rec["target"].(string)
+
+					if !dns.IsFqdn(target) {
+						target = target + "." + Zone.Origin
+					}
+
+					if rec["srv_weight"] != nil {
+						srv_weight = uint16(valueToInt(rec["srv_weight"]))
+					}
+					if rec["port"] != nil {
+						port = uint16(valueToInt(rec["port"]))
+					}
+					if rec["priority"] != nil {
+						priority = uint16(valueToInt(rec["priority"]))
+					}
+					record.RR = &dns.SRV{
+						Hdr:      h,
+						Priority: priority,
+						Weight:   srv_weight,
+						Port:     port,
+						Target:   target}
 
 				case dns.TypeCNAME:
 					rec := records[rType][i]
@@ -455,6 +493,20 @@ func setupZoneData(data map[string]interface{}, Zone *Zone) {
 			if label.Weight[dnsType] > 0 {
 				sort.Sort(RecordsByWeight{label.Records[dnsType]})
 			}
+		}
+	}
+
+	// loop over exisiting labels, create zone records for missing sub-domains
+	for k := range Zone.Labels {
+		if strings.Contains(k, ".") {
+			subLabels := strings.Split(k, ".")
+			for i := 1; i < len(subLabels); i++ {
+				subSubLabel := strings.Join(subLabels[i:len(subLabels)], ".")
+				if _, ok := Zone.Labels[subSubLabel]; !ok {
+					Zone.AddLabel(subSubLabel)
+				}
+			}
+
 		}
 	}
 

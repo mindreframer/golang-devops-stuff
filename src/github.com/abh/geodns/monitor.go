@@ -1,10 +1,8 @@
 package main
 
 import (
-	"code.google.com/p/go.net/websocket"
 	"encoding/json"
 	"fmt"
-	"github.com/abh/go-metrics"
 	"html/template"
 	"io"
 	"log"
@@ -14,6 +12,9 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"code.google.com/p/go.net/websocket"
+	"github.com/abh/go-metrics"
 )
 
 // Initial status message on websocket
@@ -154,7 +155,8 @@ func initialStatus() string {
 
 func logStatus() {
 	log.Println(initialStatus())
-	// Does not impact performance too much
+
+	qCounter := metrics.Get("queries").(metrics.Meter)
 	lastQueryCount := qCounter.Count()
 
 	for {
@@ -177,6 +179,7 @@ func monitor(zones Zones) {
 	go hub.run()
 	go httpHandler(zones)
 
+	qCounter := metrics.Get("queries").(metrics.Meter)
 	lastQueryCount := qCounter.Count()
 
 	status := new(statusStreamMsgUpdate)
@@ -191,7 +194,6 @@ func monitor(zones Zones) {
 		status.QueryCount = qCounter.Count()
 		status.Qps = newQueries
 
-		// go-metrics only updates the rate every 5 seconds, so don't pretend otherwise
 		newQps1m := qCounter.Rate1()
 		if newQps1m != lastQps1m {
 			status.Qps1m = newQps1m
@@ -279,8 +281,13 @@ func StatusServer(zones Zones) func(http.ResponseWriter, *http.Request) {
 			}
 		}
 
-		tmpl := template.New("status_html")
-		tmpl, err := tmpl.Parse(string(status_html()))
+		statusTemplate, err := templates_status_html()
+		if err != nil {
+			log.Println("Could not read template", err)
+			w.WriteHeader(500)
+			return
+		}
+		tmpl, err := template.New("status_html").Parse(string(statusTemplate))
 
 		if err != nil {
 			str := fmt.Sprintf("Could not parse template: %s", err)
@@ -327,7 +334,6 @@ func StatusServer(zones Zones) func(http.ResponseWriter, *http.Request) {
 		status.Global.Queries = metrics.Get("queries").(*metrics.StandardMeter)
 
 		setupHistogramData(metrics.Get("queries-histogram").(*metrics.StandardHistogram), &status.Global.Histogram)
-		setupHistogramData(metrics.Get("queries-histogram-recent").(*metrics.StandardHistogram), &status.Global.HistogramRecent)
 
 		err = tmpl.Execute(w, status)
 		if err != nil {
