@@ -3,9 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"code.google.com/p/go.crypto/ssh"
+	"code.google.com/p/gosshold/ssh"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -20,26 +21,34 @@ import (
 )
 
 const (
-	DEFAULT_TIMEOUT = 30000 // default timeout for operations (in milliseconds)
+	DEFAULT_TIMEOUT               = 30000 // default timeout for operations (in milliseconds)
+	CHUNK_SIZE                    = 65536 // chunk size in bytes for scp
+	THROUGHPUT_SLEEP_INTERVAL     = 100   // how many milliseconds to sleep between writing "tickets" to channel in maxThroughputThread
+	MIN_CHUNKS                    = 10    // minimum allowed count of chunks to be sent per sleep interval
+	MIN_THROUGHPUT                = CHUNK_SIZE * MIN_CHUNKS * (1000 / THROUGHPUT_SLEEP_INTERVAL)
+	MAX_OPENSSH_AGENT_CONNECTIONS = 128 // default connection backlog for openssh
 )
 
 var (
 	user                string
-	haveKeyring         bool
-	keyring             ssh.ClientAuth
+	signers             []ssh.Signer
+	keys                []string
 	connectedHosts      map[string]*ssh.ClientConn
 	connectedHostsMutex sync.Mutex
-	repliesChan         chan interface{}
-	requestsChan        chan *ProxyRequest
+	repliesChan         = make(chan interface{})
+	requestsChan        = make(chan *ProxyRequest)
+	maxThroughputChan   = make(chan bool, MIN_CHUNKS) // channel that is used for throughput limiting in scp
+	maxThroughput       uint64                        // max throughput (for scp) in bytes per second
+	maxThroughputMutex  sync.Mutex
+	agentConnChan       = make(chan chan bool) // channel for getting "ticket" for new agent connection
+	agentConnFreeChan   = make(chan bool, 10)  // channel for freeing connections
+	sshAuthSock         string
 )
 
 type (
-	MegaPassword struct {
-		pass string
-	}
-
 	SignerContainer struct {
 		signers []ssh.Signer
+		agentKr ssh.ClientKeyring
 	}
 
 	SshResult struct {
@@ -55,13 +64,14 @@ type (
 	}
 
 	ProxyRequest struct {
-		Action   string
-		Password string // password for private key (only for Action == "password")
-		Cmd      string // command to execute (only for Action == "ssh")
-		Source   string // source file to copy (only for Action == "scp")
-		Target   string // target file (only for Action == "scp")
-		Hosts    []string
-		Timeout  uint64
+		Action        string
+		Password      string // password for private key (only for Action == "password")
+		Cmd           string // command to execute (only for Action == "ssh")
+		Source        string // source file to copy (only for Action == "scp")
+		Target        string // target file (only for Action == "scp")
+		Hosts         []string
+		Timeout       uint64 // timeout (in milliseconds), default is DEFAULT_TIMEOUT
+		MaxThroughput uint64 // max throughput (for scp) in bytes per second, default is no limit
 	}
 
 	Reply struct {
@@ -99,26 +109,22 @@ type (
 )
 
 func (t *SignerContainer) Key(i int) (key ssh.PublicKey, err error) {
-	if i >= len(t.signers) {
-		return
+	if i < len(t.signers) {
+		key = t.signers[i].PublicKey()
+	} else if t.agentKr != nil {
+		key, err = t.agentKr.Key(i - len(t.signers))
 	}
 
-	key = t.signers[i].PublicKey()
 	return
 }
 
 func (t *SignerContainer) Sign(i int, rand io.Reader, data []byte) (sig []byte, err error) {
-	if i >= len(t.signers) {
-		return
+	if i < len(t.signers) {
+		sig, err = t.signers[i].Sign(rand, data)
+	} else if t.agentKr != nil {
+		sig, err = t.agentKr.Sign(i-len(t.signers), rand, data)
 	}
 
-	sig, err = t.signers[i].Sign(rand, data)
-	return
-}
-
-func (t *MegaPassword) Password(user string) (password string, err error) {
-	fmt.Println("User ", user)
-	password = t.pass
 	return
 }
 
@@ -130,13 +136,33 @@ func reportCriticalErrorToUser(msg string) {
 	repliesChan <- &UserError{IsCritical: true, ErrorMsg: msg}
 }
 
-func makeConfig() *ssh.ClientConfig {
+func waitAgent() {
+	if sshAuthSock != "" {
+		respChan := make(chan bool)
+		agentConnChan <- respChan
+		<-respChan
+	}
+}
+
+func releaseAgent() {
+	if sshAuthSock != "" {
+		agentConnFreeChan <- true
+	}
+}
+
+func makeConfig() (config *ssh.ClientConfig, agentUnixSock net.Conn) {
 	clientAuth := []ssh.ClientAuth{}
 
-	sshAuthSock := os.Getenv("SSH_AUTH_SOCK")
+	var (
+		agentKr ssh.ClientKeyring
+		ok      bool
+		err     error
+	)
+
 	if sshAuthSock != "" {
 		for {
-			sock, err := net.Dial("unix", sshAuthSock)
+			agentUnixSock, err = net.Dial("unix", sshAuthSock)
+
 			if err != nil {
 				netErr := err.(net.Error)
 				if netErr.Temporary() {
@@ -146,12 +172,11 @@ func makeConfig() *ssh.ClientConfig {
 
 				reportErrorToUser("Cannot open connection to SSH agent: " + netErr.Error())
 			} else {
-				agent := ssh.NewAgentClient(sock)
-				identities, err := agent.RequestIdentities()
-				if err != nil {
-					reportErrorToUser("Cannot request identities from ssh-agent: " + err.Error())
-				} else if len(identities) > 0 {
-					clientAuth = append(clientAuth, ssh.ClientAuthAgent(agent))
+				authAgent := ssh.ClientAuthAgent(ssh.NewAgentClient(agentUnixSock))
+				agentKr, ok = authAgent.(ssh.ClientKeyring)
+				if !ok {
+					reportErrorToUser("Type assertion failed: ssh.ClientAuthAgent no longer returns ssh.ClientKeyring, using fallback")
+					clientAuth = append(clientAuth, authAgent)
 				}
 			}
 
@@ -159,14 +184,15 @@ func makeConfig() *ssh.ClientConfig {
 		}
 	}
 
-	if haveKeyring {
-		clientAuth = append(clientAuth, keyring)
-	}
+	keyring := ssh.ClientAuthKeyring(&SignerContainer{signers, agentKr})
+	clientAuth = append(clientAuth, keyring)
 
-	return &ssh.ClientConfig{
+	config = &ssh.ClientConfig{
 		User: user,
 		Auth: clientAuth,
 	}
+
+	return
 }
 
 func makeSigner(keyname string) (signer ssh.Signer, err error) {
@@ -218,8 +244,8 @@ func makeSigner(keyname string) (signer ssh.Signer, err error) {
 		response := <-requestsChan
 
 		if response.Password == "" {
-			reportErrorToUser("No passphase supplied in request for " + keyname)
-			err = errors.New("No passphare supplied")
+			reportErrorToUser("No passphrase supplied in request for " + keyname)
+			err = errors.New("No passphrase supplied")
 			return
 		}
 
@@ -254,22 +280,14 @@ func makeSigner(keyname string) (signer ssh.Signer, err error) {
 	return
 }
 
-func makeKeyring() {
-	signers := []ssh.Signer{}
-	keys := []string{os.Getenv("HOME") + "/.ssh/id_rsa", os.Getenv("HOME") + "/.ssh/id_dsa"}
+func makeSigners() {
+	signers = []ssh.Signer{}
 
 	for _, keyname := range keys {
 		signer, err := makeSigner(keyname)
 		if err == nil {
 			signers = append(signers, signer)
 		}
-	}
-
-	if len(signers) == 0 {
-		haveKeyring = false
-	} else {
-		haveKeyring = true
-		keyring = ssh.ClientAuthKeyring(&SignerContainer{signers})
 	}
 }
 
@@ -286,7 +304,23 @@ func getConnection(hostname string) (conn *ssh.ClientConn, err error) {
 			err = errors.New("Panic: " + fmt.Sprint(msg))
 		}
 	}()
-	conn, err = ssh.Dial("tcp", hostname+":22", makeConfig())
+
+	waitAgent()
+	conf, agentConn := makeConfig()
+	if agentConn != nil {
+		defer agentConn.Close()
+	}
+
+	defer releaseAgent()
+
+	port := "22"
+	str := strings.SplitN(hostname, ":", 2)
+	if len(str) == 2 {
+		hostname = str[0]
+		port = str[1]
+	}
+
+	conn, err = ssh.Dial("tcp", hostname+":"+port, conf)
 	if err != nil {
 		return
 	}
@@ -312,7 +346,7 @@ func uploadFile(target string, contents []byte, hostname string) (stdout, stderr
 	}
 	defer session.Close()
 
-	cmd := "cat >" + target
+	cmd := "cat >'" + strings.Replace(target, "'", "'\\''", -1) + "'"
 	stdinPipe, err := session.StdinPipe()
 	if err != nil {
 		return
@@ -328,9 +362,17 @@ func uploadFile(target string, contents []byte, hostname string) (stdout, stderr
 		return
 	}
 
-	_, err = stdinPipe.Write(contents)
-	if err != nil {
-		return
+	for start, maxEnd := 0, len(contents); start < maxEnd; start += CHUNK_SIZE {
+		<-maxThroughputChan
+
+		end := start + CHUNK_SIZE
+		if end > maxEnd {
+			end = maxEnd
+		}
+		_, err = stdinPipe.Write(contents[start:end])
+		if err != nil {
+			return
+		}
 	}
 
 	err = stdinPipe.Close()
@@ -369,17 +411,64 @@ func executeCmd(cmd string, hostname string) (stdout, stderr string, err error) 
 	return
 }
 
-func initialize() {
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	user = os.Getenv("LOGNAME")
+// do not allow more than maxConn simultaneous ssh-agent connections
+func agentConnectionManagerThread(maxConn int) {
+	freeConn := maxConn // free connections count
 
-	repliesChan = make(chan interface{})
-	requestsChan = make(chan *ProxyRequest)
+	for {
+		reqCh := agentConnChan
+		freeCh := agentConnFreeChan
+
+		if freeConn <= 0 {
+			reqCh = nil
+		}
+
+		// fmt.Fprintln(os.Stderr, "Free connections: ", freeConn)
+
+		select {
+		case respChan := <-reqCh:
+			freeConn--
+			respChan <- true
+		case <-freeCh:
+			freeConn++
+		}
+	}
+}
+
+func initialize() {
+	var (
+		pubKey              string
+		maxAgentConnections int
+	)
+
+	flag.StringVar(&pubKey, "i", "", "Optional path to public key to use")
+	flag.StringVar(&user, "l", os.Getenv("LOGNAME"), "Optional login name")
+	flag.IntVar(&maxAgentConnections, "c", MAX_OPENSSH_AGENT_CONNECTIONS, "Maximum simultaneous ssh-agent connections")
+	flag.Parse()
+
+	keys = []string{os.Getenv("HOME") + "/.ssh/id_rsa", os.Getenv("HOME") + "/.ssh/id_dsa", os.Getenv("HOME") + "/.ssh/id_ecdsa"}
+
+	if pubKey != "" {
+		if strings.HasSuffix(pubKey, ".pub") {
+			pubKey = strings.TrimSuffix(pubKey, ".pub")
+		}
+
+		keys = append(keys, pubKey)
+	}
+
+	sshAuthSock = os.Getenv("SSH_AUTH_SOCK")
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
+	if sshAuthSock != "" {
+		go agentConnectionManagerThread(maxAgentConnections)
+	}
 
 	go inputDecoder()
 	go jsonReplierThread()
+	go maxThroughputThread()
 
-	makeKeyring()
+	makeSigners()
 	connectedHosts = make(map[string]*ssh.ClientConn)
 }
 
@@ -410,7 +499,12 @@ func jsonReplierThread() {
 			panic("Could not marshal json reply: " + err.Error())
 		}
 
-		fmt.Println(string(buf))
+		if buf[0] == '{' {
+			typeStr := strings.TrimPrefix(fmt.Sprintf("%T", reply), "*main.")
+			fmt.Printf("{\"Type\":\"%s\",%s}\n", typeStr, buf[1:len(buf)-1])
+		} else {
+			fmt.Println(string(buf))
+		}
 	}
 }
 
@@ -420,6 +514,29 @@ func sendProxyReply(response interface{}) {
 
 func debug(msg string) {
 	fmt.Fprintln(os.Stderr, msg)
+}
+
+func maxThroughputThread() {
+	for {
+		maxThroughputMutex.Lock()
+		throughput := maxThroughput
+		maxThroughputMutex.Unlock()
+
+		// how many chunks can be sent in specified time interval
+		chunks := throughput / CHUNK_SIZE * THROUGHPUT_SLEEP_INTERVAL / 1000
+
+		if chunks < MIN_CHUNKS {
+			chunks = MIN_CHUNKS
+		}
+
+		for i := uint64(0); i < chunks; i++ {
+			maxThroughputChan <- true
+		}
+
+		if throughput > 0 {
+			time.Sleep(THROUGHPUT_SLEEP_INTERVAL * time.Millisecond)
+		}
+	}
 }
 
 func runAction(msg *ProxyRequest) {
@@ -445,6 +562,14 @@ func runAction(msg *ProxyRequest) {
 			reportCriticalErrorToUser("Empty 'Target'")
 			return
 		}
+
+		if msg.MaxThroughput > 0 && msg.MaxThroughput < MIN_THROUGHPUT {
+			reportErrorToUser(fmt.Sprint("Minimal supported throughput is ", MIN_THROUGHPUT, " Bps"))
+		}
+
+		maxThroughputMutex.Lock()
+		maxThroughput = msg.MaxThroughput
+		maxThroughputMutex.Unlock()
 
 		fp, err := os.Open(msg.Source)
 		if err != nil {
@@ -501,7 +626,7 @@ func runAction(msg *ProxyRequest) {
 				errMsg = msg.err.Error()
 				success = false
 			}
-			sendProxyReply(Reply{Hostname: msg.hostname, Stdout: msg.stdout, Stderr: msg.stderr, ErrMsg: errMsg, Success: success})
+			sendProxyReply(&Reply{Hostname: msg.hostname, Stdout: msg.stdout, Stderr: msg.stderr, ErrMsg: errMsg, Success: success})
 		}
 	}
 
@@ -519,7 +644,7 @@ finish:
 
 	sendProxyReply(DisableReportConnectedHosts(true))
 
-	sendProxyReply(FinalReply{TotalTime: float64(time.Now().UnixNano()-startTime) / 1e9, TimedOutHosts: timedOutHosts})
+	sendProxyReply(&FinalReply{TotalTime: float64(time.Now().UnixNano()-startTime) / 1e9, TimedOutHosts: timedOutHosts})
 }
 
 func inputDecoder() {
