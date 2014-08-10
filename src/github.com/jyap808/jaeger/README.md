@@ -10,7 +10,7 @@ A basic set of files consists of the following.
 
 * Template file.  A file in [Go text template format](http://golang.org/pkg/text/template/) which holds the structure of the generated file.
  * Jaeger assumes the template file name is in the form `filename.txt.jgrt` where `filename.txt` is the file name of the generated file.
-* JSON encoded GPG encrypted key value store file.  This file can be managed using the `jaegerdb` program.
+* JSON encoded GPG encrypted key value store file.  This file is managed using the `jaegerdb` program.
  * Jaeger assumes the template file name is in the form `filename.txt.jgrdb` where `filename.txt` is the file name of the generated file.
 
 The best way to experience Jaeger is to run through the Quickstart below.
