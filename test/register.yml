@@ -1,0 +1,10 @@
+---
+
+- hosts: all
+  tasks:
+    - name: get date
+      shell: date
+      register: date
+    - name: show
+      shell: echo "{{ date.stdout }}"
+

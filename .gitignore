@@ -1,0 +1,5 @@
+*.test
+.vagrant/
+tachyon
+tachyon-linux-amd64
+scratch/

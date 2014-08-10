@@ -1,0 +1,8 @@
+---
+
+- tasks:
+  - name: Run on self via ssh
+    tachyon:
+      target: vagrant@localhost
+      playbook: on_vagrant2.yml
+      dev: true

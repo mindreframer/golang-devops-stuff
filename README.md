@@ -1,5 +1,7 @@
 ## tachyon
 
+[![Build Status](https://travis-ci.org/vektra/tachyon.svg?branch=master)](https://travis-ci.org/vektra/tachyon)
+
 Tachyon is an experimental configuration management tool inspired by ansible implemented in golang.
 
 #### Ok.. why?

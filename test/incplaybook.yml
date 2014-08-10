@@ -1,0 +1,11 @@
+---
+- hosts: all
+  vars:
+    sub2: "defined in incplaybook"
+
+  tasks:
+  - name: test exposed include vars
+    shell: echo inc $sub1
+  - name: test include vars override
+    shell: echo sub2 is $sub2
+

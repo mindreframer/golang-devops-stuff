@@ -1,0 +1,12 @@
+---
+name: gem
+tasks:
+- name: Check for installation
+  shell:
+    command: gem list $name | grep $name
+    ignore_failure: true
+  register: check
+
+- name: Install gem
+  shell: gem install --no-ri --no-rdoc $name
+  when: $(== check.rc 1)

@@ -1,0 +1,7 @@
+---
+- name: show name
+  shell: echo $name
+- name: show host
+  shell: echo $host
+- name: show city
+  shell: echo $city

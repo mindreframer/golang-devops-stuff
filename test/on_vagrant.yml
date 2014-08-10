@@ -1,0 +1,5 @@
+---
+
+- tasks:
+  - name: Get memory
+    shell: free

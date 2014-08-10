@@ -1,0 +1,5 @@
+---
+- name: echo role
+  shell: echo in role
+  notify:
+    - role handler

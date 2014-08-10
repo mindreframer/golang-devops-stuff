@@ -1,0 +1,4 @@
+---
+
+- name: Show in get
+  shell: echo in get
