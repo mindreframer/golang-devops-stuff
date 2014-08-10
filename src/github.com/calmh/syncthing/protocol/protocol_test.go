@@ -1,10 +1,28 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package protocol
 
 import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
+	"io/ioutil"
+	"os"
+	"reflect"
 	"testing"
 	"testing/quick"
+
+	"github.com/calmh/xdr"
+)
+
+var (
+	c0ID = NewNodeID([]byte{1})
+	c1ID = NewNodeID([]byte{2})
 )
 
 func TestHeaderFunctions(t *testing.T) {
@@ -12,7 +30,7 @@ func TestHeaderFunctions(t *testing.T) {
 		ver = int(uint(ver) % 16)
 		id = int(uint(id) % 4096)
 		typ = int(uint(typ) % 256)
-		h0 := header{ver, id, typ}
+		h0 := header{version: ver, msgID: id, msgType: typ}
 		h1 := decodeHeader(encodeHeader(h0))
 		return h0 == h1
 	}
@@ -21,12 +39,37 @@ func TestHeaderFunctions(t *testing.T) {
 	}
 }
 
+func TestHeaderLayout(t *testing.T) {
+	var e, a uint32
+
+	// Version are the first four bits
+	e = 0xf0000000
+	a = encodeHeader(header{version: 0xf})
+	if a != e {
+		t.Errorf("Header layout incorrect; %08x != %08x", a, e)
+	}
+
+	// Message ID are the following 12 bits
+	e = 0x0fff0000
+	a = encodeHeader(header{msgID: 0xfff})
+	if a != e {
+		t.Errorf("Header layout incorrect; %08x != %08x", a, e)
+	}
+
+	// Type are the last 8 bits before reserved
+	e = 0x0000ff00
+	a = encodeHeader(header{msgType: 0xff})
+	if a != e {
+		t.Errorf("Header layout incorrect; %08x != %08x", a, e)
+	}
+}
+
 func TestPing(t *testing.T) {
 	ar, aw := io.Pipe()
 	br, bw := io.Pipe()
 
-	c0 := NewConnection("c0", ar, bw, nil).(wireFormatConnection).next.(*rawConnection)
-	c1 := NewConnection("c1", br, aw, nil).(wireFormatConnection).next.(*rawConnection)
+	c0 := NewConnection(c0ID, ar, bw, nil, "name", true).(wireFormatConnection).next.(*rawConnection)
+	c1 := NewConnection(c1ID, br, aw, nil, "name", true).(wireFormatConnection).next.(*rawConnection)
 
 	if ok := c0.ping(); !ok {
 		t.Error("c0 ping failed")
@@ -39,8 +82,8 @@ func TestPing(t *testing.T) {
 func TestPingErr(t *testing.T) {
 	e := errors.New("something broke")
 
-	for i := 0; i < 12; i++ {
-		for j := 0; j < 12; j++ {
+	for i := 0; i < 16; i++ {
+		for j := 0; j < 16; j++ {
 			m0 := newTestModel()
 			m1 := newTestModel()
 
@@ -49,13 +92,13 @@ func TestPingErr(t *testing.T) {
 			eaw := &ErrPipe{PipeWriter: *aw, max: i, err: e}
 			ebw := &ErrPipe{PipeWriter: *bw, max: j, err: e}
 
-			c0 := NewConnection("c0", ar, ebw, m0).(wireFormatConnection).next.(*rawConnection)
-			NewConnection("c1", br, eaw, m1)
+			c0 := NewConnection(c0ID, ar, ebw, m0, "name", true).(wireFormatConnection).next.(*rawConnection)
+			NewConnection(c1ID, br, eaw, m1, "name", true)
 
 			res := c0.ping()
-			if (i < 4 || j < 4) && res {
+			if (i < 8 || j < 8) && res {
 				t.Errorf("Unexpected ping success; i=%d, j=%d", i, j)
-			} else if (i >= 8 && j >= 8) && !res {
+			} else if (i >= 12 && j >= 12) && !res {
 				t.Errorf("Unexpected ping fail; i=%d, j=%d", i, j)
 			}
 		}
@@ -77,8 +120,8 @@ func TestPingErr(t *testing.T) {
 // 			eaw := &ErrPipe{PipeWriter: *aw, max: i, err: e}
 // 			ebw := &ErrPipe{PipeWriter: *bw, max: j, err: e}
 
-// 			NewConnection("c0", ar, ebw, m0, nil)
-// 			c1 := NewConnection("c1", br, eaw, m1, nil).(wireFormatConnection).next.(*rawConnection)
+// 			NewConnection(c0ID, ar, ebw, m0, nil)
+// 			c1 := NewConnection(c1ID, br, eaw, m1, nil).(wireFormatConnection).next.(*rawConnection)
 
 // 			d, err := c1.Request("default", "tn", 1234, 5678)
 // 			if err == e || err == ErrClosed {
@@ -125,15 +168,16 @@ func TestVersionErr(t *testing.T) {
 	ar, aw := io.Pipe()
 	br, bw := io.Pipe()
 
-	c0 := NewConnection("c0", ar, bw, m0).(wireFormatConnection).next.(*rawConnection)
-	NewConnection("c1", br, aw, m1)
+	c0 := NewConnection(c0ID, ar, bw, m0, "name", true).(wireFormatConnection).next.(*rawConnection)
+	NewConnection(c1ID, br, aw, m1, "name", true)
 
-	c0.xw.WriteUint32(encodeHeader(header{
+	w := xdr.NewWriter(c0.cw)
+	w.WriteUint32(encodeHeader(header{
 		version: 2,
 		msgID:   0,
 		msgType: 0,
 	}))
-	c0.flush()
+	w.WriteUint32(0)
 
 	if !m1.isClosed() {
 		t.Error("Connection should close due to unknown version")
@@ -147,15 +191,16 @@ func TestTypeErr(t *testing.T) {
 	ar, aw := io.Pipe()
 	br, bw := io.Pipe()
 
-	c0 := NewConnection("c0", ar, bw, m0).(wireFormatConnection).next.(*rawConnection)
-	NewConnection("c1", br, aw, m1)
+	c0 := NewConnection(c0ID, ar, bw, m0, "name", true).(wireFormatConnection).next.(*rawConnection)
+	NewConnection(c1ID, br, aw, m1, "name", true)
 
-	c0.xw.WriteUint32(encodeHeader(header{
+	w := xdr.NewWriter(c0.cw)
+	w.WriteUint32(encodeHeader(header{
 		version: 0,
 		msgID:   0,
 		msgType: 42,
 	}))
-	c0.flush()
+	w.WriteUint32(0)
 
 	if !m1.isClosed() {
 		t.Error("Connection should close due to unknown message type")
@@ -169,8 +214,8 @@ func TestClose(t *testing.T) {
 	ar, aw := io.Pipe()
 	br, bw := io.Pipe()
 
-	c0 := NewConnection("c0", ar, bw, m0).(wireFormatConnection).next.(*rawConnection)
-	NewConnection("c1", br, aw, m1)
+	c0 := NewConnection(c0ID, ar, bw, m0, "name", true).(wireFormatConnection).next.(*rawConnection)
+	NewConnection(c1ID, br, aw, m1, "name", true)
 
 	c0.close(nil)
 
@@ -191,4 +236,148 @@ func TestClose(t *testing.T) {
 	if _, err := c0.Request("default", "foo", 0, 0); err == nil {
 		t.Error("Request should return an error")
 	}
+}
+
+func TestElementSizeExceededNested(t *testing.T) {
+	m := ClusterConfigMessage{
+		Repositories: []Repository{
+			{ID: "longstringlongstringlongstringinglongstringlongstringlonlongstringlongstringlon"},
+		},
+	}
+	_, err := m.EncodeXDR(ioutil.Discard)
+	if err == nil {
+		t.Errorf("ID length %d > max 64, but no error", len(m.Repositories[0].ID))
+	}
+}
+
+func TestMarshalIndexMessage(t *testing.T) {
+	var quickCfg = &quick.Config{MaxCountScale: 10}
+	if testing.Short() {
+		quickCfg = nil
+	}
+
+	f := func(m1 IndexMessage) bool {
+		for _, f := range m1.Files {
+			for i := range f.Blocks {
+				f.Blocks[i].Offset = 0
+				if len(f.Blocks[i].Hash) == 0 {
+					f.Blocks[i].Hash = nil
+				}
+			}
+		}
+
+		return testMarshal(t, "index", &m1, &IndexMessage{})
+	}
+
+	if err := quick.Check(f, quickCfg); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestMarshalRequestMessage(t *testing.T) {
+	var quickCfg = &quick.Config{MaxCountScale: 10}
+	if testing.Short() {
+		quickCfg = nil
+	}
+
+	f := func(m1 RequestMessage) bool {
+		return testMarshal(t, "request", &m1, &RequestMessage{})
+	}
+
+	if err := quick.Check(f, quickCfg); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestMarshalResponseMessage(t *testing.T) {
+	var quickCfg = &quick.Config{MaxCountScale: 10}
+	if testing.Short() {
+		quickCfg = nil
+	}
+
+	f := func(m1 ResponseMessage) bool {
+		if len(m1.Data) == 0 {
+			m1.Data = nil
+		}
+		return testMarshal(t, "response", &m1, &ResponseMessage{})
+	}
+
+	if err := quick.Check(f, quickCfg); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestMarshalClusterConfigMessage(t *testing.T) {
+	var quickCfg = &quick.Config{MaxCountScale: 10}
+	if testing.Short() {
+		quickCfg = nil
+	}
+
+	f := func(m1 ClusterConfigMessage) bool {
+		return testMarshal(t, "clusterconfig", &m1, &ClusterConfigMessage{})
+	}
+
+	if err := quick.Check(f, quickCfg); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestMarshalCloseMessage(t *testing.T) {
+	var quickCfg = &quick.Config{MaxCountScale: 10}
+	if testing.Short() {
+		quickCfg = nil
+	}
+
+	f := func(m1 CloseMessage) bool {
+		return testMarshal(t, "close", &m1, &CloseMessage{})
+	}
+
+	if err := quick.Check(f, quickCfg); err != nil {
+		t.Error(err)
+	}
+}
+
+type message interface {
+	EncodeXDR(io.Writer) (int, error)
+	DecodeXDR(io.Reader) error
+}
+
+func testMarshal(t *testing.T, prefix string, m1, m2 message) bool {
+	var buf bytes.Buffer
+
+	failed := func(bc []byte) {
+		bs, _ := json.MarshalIndent(m1, "", "  ")
+		ioutil.WriteFile(prefix+"-1.txt", bs, 0644)
+		bs, _ = json.MarshalIndent(m2, "", "  ")
+		ioutil.WriteFile(prefix+"-2.txt", bs, 0644)
+		if len(bc) > 0 {
+			f, _ := os.Create(prefix + "-data.txt")
+			fmt.Fprint(f, hex.Dump(bc))
+			f.Close()
+		}
+	}
+
+	_, err := m1.EncodeXDR(&buf)
+	if err == xdr.ErrElementSizeExceeded {
+		return true
+	}
+	if err != nil {
+		failed(nil)
+		t.Fatal(err)
+	}
+
+	bc := make([]byte, len(buf.Bytes()))
+	copy(bc, buf.Bytes())
+
+	err = m2.DecodeXDR(&buf)
+	if err != nil {
+		failed(bc)
+		t.Fatal(err)
+	}
+
+	ok := reflect.DeepEqual(m1, m2)
+	if !ok {
+		failed(bc)
+	}
+	return ok
 }

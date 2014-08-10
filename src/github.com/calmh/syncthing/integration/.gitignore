@@ -10,3 +10,9 @@ genfiles
 md5r
 json
 *.idx.gz
+dirs-*
+*.out
+csrftokens.txt
+s4d
+http
+index

@@ -1,30 +1,31 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package discover
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
 
-	"github.com/calmh/syncthing/buffers"
-	"github.com/calmh/syncthing/mc"
-)
-
-const (
-	AnnouncementPort = 21025
+	"github.com/syncthing/syncthing/beacon"
+	"github.com/syncthing/syncthing/events"
+	"github.com/syncthing/syncthing/protocol"
 )
 
 type Discoverer struct {
-	myID             string
+	myID             protocol.NodeID
 	listenAddrs      []string
 	localBcastIntv   time.Duration
 	globalBcastIntv  time.Duration
-	beacon           *mc.Beacon
-	registry         map[string][]string
+	beacon           *beacon.Beacon
+	registry         map[protocol.NodeID][]string
 	registryLock     sync.RWMutex
 	extServer        string
 	extPort          uint16
@@ -43,14 +44,18 @@ var (
 // When we hit this many errors in succession, we stop.
 const maxErrors = 30
 
-func NewDiscoverer(id string, addresses []string) (*Discoverer, error) {
+func NewDiscoverer(id protocol.NodeID, addresses []string, localPort int) (*Discoverer, error) {
+	b, err := beacon.New(localPort)
+	if err != nil {
+		return nil, err
+	}
 	disc := &Discoverer{
 		myID:            id,
 		listenAddrs:     addresses,
 		localBcastIntv:  30 * time.Second,
 		globalBcastIntv: 1800 * time.Second,
-		beacon:          mc.NewBeacon("239.21.0.25", 21025),
-		registry:        make(map[string][]string),
+		beacon:          b,
+		registry:        make(map[protocol.NodeID][]string),
 	}
 
 	go disc.recvAnnouncements()
@@ -76,7 +81,7 @@ func (d *Discoverer) ExtAnnounceOK() bool {
 	return d.extAnnounceOK
 }
 
-func (d *Discoverer) Lookup(node string) []string {
+func (d *Discoverer) Lookup(node protocol.NodeID) []string {
 	d.registryLock.Lock()
 	addr, ok := d.registry[node]
 	d.registryLock.Unlock()
@@ -92,15 +97,17 @@ func (d *Discoverer) Lookup(node string) []string {
 
 func (d *Discoverer) Hint(node string, addrs []string) {
 	resAddrs := resolveAddrs(addrs)
+	var id protocol.NodeID
+	id.UnmarshalText([]byte(node))
 	d.registerNode(nil, Node{
-		ID:        node,
 		Addresses: resAddrs,
+		ID:        id[:],
 	})
 }
 
-func (d *Discoverer) All() map[string][]string {
+func (d *Discoverer) All() map[protocol.NodeID][]string {
 	d.registryLock.RLock()
-	nodes := make(map[string][]string, len(d.registry))
+	nodes := make(map[protocol.NodeID][]string, len(d.registry))
 	for node, addrs := range d.registry {
 		addrsCopy := make([]string, len(addrs))
 		copy(addrsCopy, addrs)
@@ -115,10 +122,10 @@ func (d *Discoverer) announcementPkt() []byte {
 	for _, astr := range d.listenAddrs {
 		addr, err := net.ResolveTCPAddr("tcp", astr)
 		if err != nil {
-			log.Printf("discover/announcement: %v: not announcing %s", err, astr)
+			l.Warnln("%v: not announcing %s", err, astr)
 			continue
 		} else if debug {
-			dlog.Printf("announcing %s: %#v", astr, addr)
+			l.Debugf("discover: announcing %s: %#v", astr, addr)
 		}
 		if len(addr.IP) == 0 || addr.IP.IsUnspecified() {
 			addrs = append(addrs, Address{Port: uint16(addr.Port)})
@@ -128,9 +135,9 @@ func (d *Discoverer) announcementPkt() []byte {
 			addrs = append(addrs, Address{IP: bs, Port: uint16(addr.Port)})
 		}
 	}
-	var pkt = AnnounceV2{
-		Magic: AnnouncementMagicV2,
-		This:  Node{d.myID, addrs},
+	var pkt = Announce{
+		Magic: AnnouncementMagic,
+		This:  Node{d.myID[:], addrs},
 	}
 	return pkt.MarshalXDR()
 }
@@ -138,9 +145,9 @@ func (d *Discoverer) announcementPkt() []byte {
 func (d *Discoverer) sendLocalAnnouncements() {
 	var addrs = resolveAddrs(d.listenAddrs)
 
-	var pkt = AnnounceV2{
-		Magic: AnnouncementMagicV2,
-		This:  Node{d.myID, addrs},
+	var pkt = Announce{
+		Magic: AnnouncementMagic,
+		This:  Node{d.myID[:], addrs},
 	}
 
 	for {
@@ -151,7 +158,7 @@ func (d *Discoverer) sendLocalAnnouncements() {
 				break
 			}
 
-			anode := Node{node, resolveAddrs(addrs)}
+			anode := Node{node[:], resolveAddrs(addrs)}
 			pkt.Extra = append(pkt.Extra, anode)
 		}
 		d.registryLock.RUnlock()
@@ -166,54 +173,56 @@ func (d *Discoverer) sendLocalAnnouncements() {
 }
 
 func (d *Discoverer) sendExternalAnnouncements() {
+	// this should go in the Discoverer struct
+	errorRetryIntv := 60 * time.Second
+
 	remote, err := net.ResolveUDPAddr("udp", d.extServer)
-	if err != nil {
-		log.Printf("discover/external: %v; no external announcements", err)
-		return
+	for err != nil {
+		l.Warnf("Global discovery: %v; trying again in %v", err, errorRetryIntv)
+		time.Sleep(errorRetryIntv)
+		remote, err = net.ResolveUDPAddr("udp", d.extServer)
 	}
 
 	conn, err := net.ListenUDP("udp", nil)
-	if err != nil {
-		log.Printf("discover/external: %v; no external announcements", err)
-		return
+	for err != nil {
+		l.Warnf("Global discovery: %v; trying again in %v", err, errorRetryIntv)
+		time.Sleep(errorRetryIntv)
+		conn, err = net.ListenUDP("udp", nil)
 	}
 
 	var buf []byte
 	if d.extPort != 0 {
-		var pkt = AnnounceV2{
-			Magic: AnnouncementMagicV2,
-			This:  Node{d.myID, []Address{{Port: d.extPort}}},
+		var pkt = Announce{
+			Magic: AnnouncementMagic,
+			This:  Node{d.myID[:], []Address{{Port: d.extPort}}},
 		}
 		buf = pkt.MarshalXDR()
 	} else {
 		buf = d.announcementPkt()
 	}
-	var errCounter = 0
 
-	for errCounter < maxErrors {
+	for {
 		var ok bool
 
 		if debug {
-			dlog.Printf("send announcement -> %v\n%s", remote, hex.Dump(buf))
+			l.Debugf("discover: send announcement -> %v\n%s", remote, hex.Dump(buf))
 		}
 
-		_, err = conn.WriteTo(buf, remote)
+		_, err := conn.WriteTo(buf, remote)
 		if err != nil {
-			log.Println("discover/write: warning:", err)
-			errCounter++
+			if debug {
+				l.Debugln("discover: warning:", err)
+			}
 			ok = false
 		} else {
-			errCounter = 0
-
 			// Verify that the announce server responds positively for our node ID
 
 			time.Sleep(1 * time.Second)
 			res := d.externalLookup(d.myID)
 			if debug {
-				dlog.Println("external lookup check:", res)
+				l.Debugln("discover: external lookup check:", res)
 			}
 			ok = len(res) > 0
-
 		}
 
 		d.extAnnounceOKmut.Lock()
@@ -223,10 +232,9 @@ func (d *Discoverer) sendExternalAnnouncements() {
 		if ok {
 			time.Sleep(d.globalBcastIntv)
 		} else {
-			time.Sleep(60 * time.Second)
+			time.Sleep(errorRetryIntv)
 		}
 	}
-	log.Printf("discover/write: %v: stopping due to too many errors: %v", remote, err)
 }
 
 func (d *Discoverer) recvAnnouncements() {
@@ -234,28 +242,28 @@ func (d *Discoverer) recvAnnouncements() {
 		buf, addr := d.beacon.Recv()
 
 		if debug {
-			dlog.Printf("read announcement:\n%s", hex.Dump(buf))
+			l.Debugf("discover: read announcement:\n%s", hex.Dump(buf))
 		}
 
-		var pkt AnnounceV2
+		var pkt Announce
 		err := pkt.UnmarshalXDR(buf)
 		if err != nil && err != io.EOF {
 			continue
 		}
 
 		if debug {
-			dlog.Printf("parsed announcement: %#v", pkt)
+			l.Debugf("discover: parsed announcement: %#v", pkt)
 		}
 
 		var newNode bool
-		if pkt.This.ID != d.myID {
-			n := d.registerNode(addr, pkt.This)
-			newNode = newNode || n
-		}
-		for _, node := range pkt.Extra {
-			if node.ID != d.myID {
-				n := d.registerNode(nil, node)
-				newNode = newNode || n
+		if bytes.Compare(pkt.This.ID, d.myID[:]) != 0 {
+			newNode = d.registerNode(addr, pkt.This)
+			for _, node := range pkt.Extra {
+				if bytes.Compare(node.ID, d.myID[:]) != 0 {
+					if d.registerNode(nil, node) {
+						newNode = true
+					}
+				}
 			}
 		}
 
@@ -283,73 +291,91 @@ func (d *Discoverer) registerNode(addr net.Addr, node Node) bool {
 	}
 	if len(addrs) == 0 {
 		if debug {
-			dlog.Println("no valid address for", node.ID)
+			l.Debugln("discover: no valid address for", node.ID)
 		}
 	}
 	if debug {
-		dlog.Printf("register: %s -> %#v", node.ID, addrs)
+		l.Debugf("discover: register: %s -> %#v", node.ID, addrs)
 	}
+	var id protocol.NodeID
+	copy(id[:], node.ID)
 	d.registryLock.Lock()
-	_, seen := d.registry[node.ID]
-	d.registry[node.ID] = addrs
+	_, seen := d.registry[id]
+	d.registry[id] = addrs
 	d.registryLock.Unlock()
+
+	if !seen {
+		events.Default.Log(events.NodeDiscovered, map[string]interface{}{
+			"node":  id.String(),
+			"addrs": addrs,
+		})
+	}
 	return !seen
 }
 
-func (d *Discoverer) externalLookup(node string) []string {
+func (d *Discoverer) externalLookup(node protocol.NodeID) []string {
 	extIP, err := net.ResolveUDPAddr("udp", d.extServer)
 	if err != nil {
-		log.Printf("discover/external: %v; no external lookup", err)
+		if debug {
+			l.Debugf("discover: %v; no external lookup", err)
+		}
 		return nil
 	}
 
 	conn, err := net.DialUDP("udp", nil, extIP)
 	if err != nil {
-		log.Printf("discover/external: %v; no external lookup", err)
+		if debug {
+			l.Debugf("discover: %v; no external lookup", err)
+		}
 		return nil
 	}
 	defer conn.Close()
 
 	err = conn.SetDeadline(time.Now().Add(5 * time.Second))
 	if err != nil {
-		log.Printf("discover/external: %v; no external lookup", err)
+		if debug {
+			l.Debugf("discover: %v; no external lookup", err)
+		}
 		return nil
 	}
 
-	buf := QueryV2{QueryMagicV2, node}.MarshalXDR()
+	buf := Query{QueryMagic, node[:]}.MarshalXDR()
 	_, err = conn.Write(buf)
 	if err != nil {
-		log.Printf("discover/external: %v; no external lookup", err)
+		if debug {
+			l.Debugf("discover: %v; no external lookup", err)
+		}
 		return nil
 	}
-	buffers.Put(buf)
 
-	buf = buffers.Get(2048)
-	defer buffers.Put(buf)
-
+	buf = make([]byte, 2048)
 	n, err := conn.Read(buf)
 	if err != nil {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
 			// Expected if the server doesn't know about requested node ID
 			return nil
 		}
-		log.Printf("discover/external/read: %v; no external lookup", err)
+		if debug {
+			l.Debugf("discover: %v; no external lookup", err)
+		}
 		return nil
 	}
 
 	if debug {
-		dlog.Printf("read external:\n%s", hex.Dump(buf[:n]))
+		l.Debugf("discover: read external:\n%s", hex.Dump(buf[:n]))
 	}
 
-	var pkt AnnounceV2
+	var pkt Announce
 	err = pkt.UnmarshalXDR(buf[:n])
 	if err != nil && err != io.EOF {
-		log.Println("discover/external/decode:", err)
+		if debug {
+			l.Debugln("discover:", err)
+		}
 		return nil
 	}
 
 	if debug {
-		dlog.Printf("parsed external: %#v", pkt)
+		l.Debugf("discover: parsed external: %#v", pkt)
 	}
 
 	var addrs []string
@@ -381,6 +407,8 @@ func resolveAddrs(addrs []string) []Address {
 		addr := addrToAddr(addrRes)
 		if len(addr.IP) > 0 {
 			raddrs = append(raddrs, addr)
+		} else {
+			raddrs = append(raddrs, Address{Port: addr.Port})
 		}
 	}
 	return raddrs

@@ -1,12 +1,17 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package files
 
 import (
-	"log"
 	"os"
 	"strings"
+
+	"github.com/syncthing/syncthing/logger"
 )
 
 var (
-	dlog  = log.New(os.Stderr, "files: ", log.Lmicroseconds|log.Lshortfile)
-	debug = strings.Contains(os.Getenv("STTRACE"), "files")
+	debug = strings.Contains(os.Getenv("STTRACE"), "files") || os.Getenv("STTRACE") == "all"
+	l     = logger.DefaultLogger
 )

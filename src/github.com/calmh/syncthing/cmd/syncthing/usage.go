@@ -1,3 +1,7 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -32,7 +36,7 @@ func usageFor(fs *flag.FlagSet, usage string, extra string) func() {
 			var opt = "  -" + f.Name
 
 			if f.DefValue != "false" {
-				opt += "=" + f.DefValue
+				opt += "=" + fmt.Sprintf("%q", f.DefValue)
 			}
 
 			options = append(options, []string{opt, f.Usage})

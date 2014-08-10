@@ -1,7 +1,11 @@
 syncthing
 syncthing.exe
-stcli
-stcli.exe
 *.tar.gz
 *.zip
 *.asc
+*.sublime*
+.jshintrc
+coverage.out
+files/pidx
+bin
+perfstats*.csv

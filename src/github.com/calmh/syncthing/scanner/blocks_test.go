@@ -1,9 +1,15 @@
+// Copyright (C) 2014 Jakob Borg and Contributors (see the CONTRIBUTORS file).
+// All rights reserved. Use of this source code is governed by an MIT-style
+// license that can be found in the LICENSE file.
+
 package scanner
 
 import (
 	"bytes"
 	"fmt"
 	"testing"
+
+	"github.com/syncthing/syncthing/protocol"
 )
 
 var blocksTestData = []struct {
@@ -79,20 +85,20 @@ var diffTestData = []struct {
 	a string
 	b string
 	s int
-	d []Block
+	d []protocol.BlockInfo
 }{
-	{"contents", "contents", 1024, []Block{}},
-	{"", "", 1024, []Block{}},
-	{"contents", "contents", 3, []Block{}},
-	{"contents", "cantents", 3, []Block{{0, 3, nil}}},
-	{"contents", "contants", 3, []Block{{3, 3, nil}}},
-	{"contents", "cantants", 3, []Block{{0, 3, nil}, {3, 3, nil}}},
-	{"contents", "", 3, []Block{{0, 0, nil}}},
-	{"", "contents", 3, []Block{{0, 3, nil}, {3, 3, nil}, {6, 2, nil}}},
-	{"con", "contents", 3, []Block{{3, 3, nil}, {6, 2, nil}}},
+	{"contents", "contents", 1024, []protocol.BlockInfo{}},
+	{"", "", 1024, []protocol.BlockInfo{}},
+	{"contents", "contents", 3, []protocol.BlockInfo{}},
+	{"contents", "cantents", 3, []protocol.BlockInfo{{0, 3, nil}}},
+	{"contents", "contants", 3, []protocol.BlockInfo{{3, 3, nil}}},
+	{"contents", "cantants", 3, []protocol.BlockInfo{{0, 3, nil}, {3, 3, nil}}},
+	{"contents", "", 3, []protocol.BlockInfo{{0, 0, nil}}},
+	{"", "contents", 3, []protocol.BlockInfo{{0, 3, nil}, {3, 3, nil}, {6, 2, nil}}},
+	{"con", "contents", 3, []protocol.BlockInfo{{3, 3, nil}, {6, 2, nil}}},
 	{"contents", "con", 3, nil},
-	{"contents", "cont", 3, []Block{{3, 1, nil}}},
-	{"cont", "contents", 3, []Block{{3, 3, nil}, {6, 2, nil}}},
+	{"contents", "cont", 3, []protocol.BlockInfo{{3, 1, nil}}},
+	{"cont", "contents", 3, []protocol.BlockInfo{{3, 3, nil}, {6, 2, nil}}},
 }
 
 func TestDiff(t *testing.T) {
