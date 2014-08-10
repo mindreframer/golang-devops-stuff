@@ -14,13 +14,13 @@ import (
 func doRequest(req *http.Request, client *http.Client, log *logger.Logger) interface{} {
 	var json_out interface{}
 	resp, err := client.Do(req)
+	defer resp.Body.Close()
 
 	if err != nil {
 		log.Log("crit", fmt.Sprintf("Could not contact resource at URL '%s': %s", req.URL.String(), err.Error()))
 		return nil
 	}
 
-	defer resp.Body.Close()
 	out, err := ioutil.ReadAll(resp.Body)
 
 	if err != nil {

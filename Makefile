@@ -1,16 +1,19 @@
-all: gollector gstat gollector-graphite
+all: goget gollector gstat gollector-graphite
+
+goget:
+	GOPATH=${PWD} go get -u -d github.com/gollector/gollector_metrics
 
 clean:
 	rm -f gollector gstat gollector-graphite
 
-gollector-graphite: gollector-graphite.go src/*/*/*.go src/*/*.go
-	GOPATH=$(PWD) go build gollector-graphite.go
+gollector-graphite: goget gollector-graphite.go
+	GOPATH=${PWD} go build gollector-graphite.go
 
-gollector: gollector.go src/*/*/*.go src/*/*.go
-	GOPATH=$(PWD) go build gollector.go
+gollector: goget gollector.go src/*/*/*.go src/*/*.go
+	GOPATH=${PWD} go build gollector.go
 
-gstat: gstat.go
-	GOPATH=$(PWD) go build gstat.go
+gstat: goget gstat.go
+	GOPATH=${PWD} go build gstat.go
 
 gollector.tar.gz: gollector gstat
 	tar cvzf gollector.tar.gz gollector gstat gollector-graphite >/dev/null

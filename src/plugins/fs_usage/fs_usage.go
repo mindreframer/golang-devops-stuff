@@ -1,37 +1,13 @@
 package fs_usage
 
-/*
-// int statfs(const char *path, struct statfs *buf);
-
-#include <sys/statvfs.h>
-#include <stdlib.h>
-#include <assert.h>
-
-struct statvfs* go_statvfs(const char *path) {
-  struct statvfs *fsinfo;
-  fsinfo = malloc(sizeof(struct statvfs));
-  assert(fsinfo != NULL);
-  statvfs(path, fsinfo);
-  return fsinfo;
-}
-
-int go_fs_readonly(const char *path) {
-  struct statvfs *fsinfo = go_statvfs(path);
-
-  return (fsinfo->f_flag & ST_RDONLY) == ST_RDONLY;
-}
-*/
-import "C"
-
 import (
 	"fmt"
+	gm "github.com/gollector/gollector_metrics"
 	"io/ioutil"
 	"logger"
-	"math"
 	"os"
 	"regexp"
 	"strings"
-	"unsafe"
 )
 
 var SYSTEM_FILESYSTEMS = []string{
@@ -47,6 +23,7 @@ var SYSTEM_FILESYSTEMS = []string{
 }
 
 const MTAB = "/etc/mtab"
+
 const (
 	PART_DISK       = 0
 	PART_MOUNTPOINT = iota
@@ -89,30 +66,13 @@ func Detect() []string {
 }
 
 func GetMetric(params interface{}, log *logger.Logger) interface{} {
-	path := C.CString(params.(string))
-	stat := C.go_statvfs(path)
-	readonly := C.go_fs_readonly(path)
+	info := gm.FSUsage(params.(string))
 
-	log.Log("debug", fmt.Sprintf("blocks size on %s: %v", string(*path), stat.f_bsize))
-	log.Log("debug", fmt.Sprintf("blocks total on %s: %v", string(*path), stat.f_blocks))
-	log.Log("debug", fmt.Sprintf("blocks free on %s: %v", string(*path), stat.f_bavail))
-
-	defer C.free(unsafe.Pointer(stat))
-	defer C.free(unsafe.Pointer(path))
-
-	blocks := uint64(stat.f_blocks)
-	avail := uint64(stat.f_bavail)
-
-	free := float64(0)
-
-	if avail != 0 {
-		free = math.Ceil(((float64(blocks) - float64(avail)) / float64(blocks)) * 100)
-	}
-
-	return [4]interface{}{
-		free,
-		avail * uint64(stat.f_frsize),
-		blocks * uint64(stat.f_frsize),
-		readonly == 1,
+	return [5]interface{}{
+		info.Free,
+		info.Avail,
+		info.Blocks,
+		info.ReadOnly,
+    info.Percent,
 	}
 }
