@@ -20,4 +20,15 @@ if [ ! -L /etc/init.d/influxdb ]; then
         chkconfig --add influxdb
     fi
 fi
-service influxdb restart
+
+if ! id influxdb >/dev/null 2>&1; then
+    useradd --system -U -M influxdb
+fi
+
+chown -R -L influxdb:influxdb $influx_dir
+chmod -R a+rX $influx_dir
+
+# only restart if the service was already running
+if /etc/init.d/influxdb status > /dev/null 2>&1; then
+    service influxdb restart
+fi
