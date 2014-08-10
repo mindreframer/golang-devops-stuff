@@ -2,6 +2,7 @@ package raw_socket
 
 import (
 	"encoding/binary"
+	"net"
 	"strconv"
 	"strings"
 )
@@ -34,11 +35,14 @@ type TCPPacket struct {
 	Urgent     uint16
 
 	Data []byte
+
+	Addr net.Addr
 }
 
-func ParseTCPPacket(b []byte) (p *TCPPacket) {
+func ParseTCPPacket(addr net.Addr, b []byte) (p *TCPPacket) {
 	p = &TCPPacket{Data: b}
 	p.ParseBasic()
+	p.Addr = addr
 
 	return p
 }
@@ -88,3 +92,9 @@ func (t *TCPPacket) String() string {
 		"Data:" + string(t.Data),
 	}, "\n")
 }
+
+type BySeq []*TCPPacket
+
+func (a BySeq) Len() int			{ return len(a) }
+func (a BySeq) Swap(i, j int)		{ a[i], a[j] = a[j], a[i] }
+func (a BySeq) Less(i, j int) bool	{ return a[i].Seq < a[j].Seq }

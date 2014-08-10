@@ -1,4 +1,4 @@
-package gor
+package main
 
 type writeCallback func(data []byte)
 

@@ -1,4 +1,4 @@
-package gor
+package main
 
 import (
 	"io"
@@ -41,6 +41,6 @@ func InitPlugins() {
 	}
 
 	for _, options := range Settings.outputHTTP {
-		Plugins.Outputs = append(Plugins.Outputs, NewHTTPOutput(options, Settings.outputHTTPHeaders, Settings.outputHTTPMethods, Settings.outputHTTPElasticSearch))
+		Plugins.Outputs = append(Plugins.Outputs, NewHTTPOutput(options, Settings.outputHTTPHeaders, Settings.outputHTTPMethods, Settings.outputHTTPUrlRegexp, Settings.outputHTTPHeaderFilters, Settings.outputHTTPHeaderHashFilters))
 	}
 }
