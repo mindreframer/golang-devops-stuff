@@ -10,8 +10,6 @@ import (
 	"runtime/debug"
 	"runtime/pprof"
 	"time"
-
-	"github.com/buger/gor"
 )
 
 var (
@@ -30,12 +28,12 @@ func main() {
 		}
 	}()
 
-	fmt.Println("Version:", gor.VERSION)
+	fmt.Println("Version:", VERSION)
 
 	flag.Parse()
-	gor.InitPlugins()
+	InitPlugins()
 
-	if len(gor.Plugins.Inputs) == 0 || len(gor.Plugins.Outputs) == 0 {
+	if len(Plugins.Inputs) == 0 || len(Plugins.Outputs) == 0 {
 		log.Fatal("Required at least 1 input and 1 output")
 	}
 
@@ -47,7 +45,7 @@ func main() {
 		profileCPU(*cpuprofile)
 	}
 
-	gor.Start(nil)
+	Start(nil)
 }
 
 func profileCPU(cpuprofile string) {

@@ -6,16 +6,16 @@ import (
 	"time"
 )
 
-const MSG_EXPIRE = 200 * time.Millisecond
+const MSG_EXPIRE = 2000 * time.Millisecond
 
 // TCPMessage ensure that all TCP packets for given request is received, and processed in right sequence
 // Its needed because all TCP message can be fragmented or re-transmitted
 //
 // Each TCP Packet have 2 ids: acknowledgment - message_id, and sequence - packet_id
 // Message can be compiled from unique packets with same message_id which sorted by sequence
-// Message is received if we didn't receive any packets for 200ms
+// Message is received if we didn't receive any packets for 2000ms
 type TCPMessage struct {
-	Ack     uint32 // Message ID
+	ID      string // Message ID
 	packets []*TCPPacket
 
 	timer *time.Timer // Used for expire check
@@ -26,8 +26,8 @@ type TCPMessage struct {
 }
 
 // NewTCPMessage pointer created from a Acknowledgment number and a channel of messages readuy to be deleted
-func NewTCPMessage(Ack uint32, c_del chan *TCPMessage) (msg *TCPMessage) {
-	msg = &TCPMessage{Ack: Ack}
+func NewTCPMessage(ID string, c_del chan *TCPMessage) (msg *TCPMessage) {
+	msg = &TCPMessage{ID: ID}
 
 	msg.c_packets = make(chan *TCPPacket)
 	msg.c_del_message = c_del // used for notifying that message completed or expired
@@ -62,18 +62,10 @@ func (t *TCPMessage) Timeout() {
 
 // Bytes sorts packets in right orders and return message content
 func (t *TCPMessage) Bytes() (output []byte) {
-	mk := make([]int, len(t.packets))
+	sort.Sort(BySeq(t.packets))
 
-	i := 0
-	for k, _ := range t.packets {
-		mk[i] = k
-		i++
-	}
-
-	sort.Ints(mk)
-
-	for _, k := range mk {
-		output = append(output, t.packets[k].Data...)
+	for _, v := range t.packets {
+		output = append(output, v.Data...)
 	}
 
 	return

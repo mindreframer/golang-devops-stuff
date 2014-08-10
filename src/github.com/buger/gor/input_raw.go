@@ -1,4 +1,4 @@
-package gor
+package main
 
 import (
 	raw "github.com/buger/gor/raw_socket_listener"

@@ -1,4 +1,4 @@
-package gor
+package main
 
 import (
 	"io"
@@ -22,7 +22,7 @@ func CopyMulty(src io.Reader, writers ...io.Writer) (err error) {
 
 	for {
 		nr, er := src.Read(buf)
-		if nr > 0 {
+		if nr > 0 && len(buf) > nr{
 			Debug("Sending", src, ": ", string(buf[0:nr]))
 
 			if Settings.splitOutput {

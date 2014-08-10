@@ -1,16 +1,14 @@
-package gor
+package main
 
 import (
 	"bufio"
 	"bytes"
-	es "github.com/buger/gor/elasticsearch"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type RedirectNotAllowed struct{}
@@ -40,15 +38,20 @@ func ParseRequest(data []byte) (request *http.Request, err error) {
 type HTTPOutput struct {
 	address string
 	limit   int
-	buf     chan []byte
+
+	urlRegexp         HTTPUrlRegexp
+	headerFilters     HTTPHeaderFilters
+	headerHashFilters HTTPHeaderHashFilters
+
+	buf chan []byte
 
 	headers HTTPHeaders
 	methods HTTPMethods
 
-	elasticSearch *es.ESPlugin
+	bufStats *GorStat
 }
 
-func NewHTTPOutput(options string, headers HTTPHeaders, methods HTTPMethods, elasticSearchAddr string) io.Writer {
+func NewHTTPOutput(options string, headers HTTPHeaders, methods HTTPMethods, urlRegexp HTTPUrlRegexp, headerFilters HTTPHeaderFilters, headerHashFilters HTTPHeaderHashFilters) io.Writer {
 	o := new(HTTPOutput)
 
 	optionsArr := strings.Split(options, "|")
@@ -62,12 +65,12 @@ func NewHTTPOutput(options string, headers HTTPHeaders, methods HTTPMethods, ela
 	o.headers = headers
 	o.methods = methods
 
-	o.buf = make(chan []byte, 100)
+	o.urlRegexp = urlRegexp
+	o.headerFilters = headerFilters
+	o.headerHashFilters = headerHashFilters
 
-	if elasticSearchAddr != "" {
-		o.elasticSearch = new(es.ESPlugin)
-		o.elasticSearch.Init(elasticSearchAddr)
-	}
+	o.buf = make(chan []byte, 100)
+	o.bufStats = NewGorStat("output_http")
 
 	if len(optionsArr) > 1 {
 		o.limit, _ = strconv.Atoi(optionsArr[1])
@@ -100,6 +103,7 @@ func (o *HTTPOutput) Write(data []byte) (n int, err error) {
 	copy(buf, data)
 
 	o.buf <- buf
+	o.bufStats.Write(len(o.buf))
 
 	return len(data), nil
 }
@@ -108,14 +112,18 @@ func (o *HTTPOutput) sendRequest(client *http.Client, data []byte) {
 	request, err := ParseRequest(data)
 
 	if err != nil {
-		log.Println("Can not parse request", string(data), err)
+		log.Println("Cannot parse request", string(data), err)
 		return
 	}
 
 	if len(o.methods) > 0 && !o.methods.Contains(request.Method) {
 		return
 	}
-	
+
+	if !(o.urlRegexp.Good(request) && o.headerFilters.Good(request) && o.headerHashFilters.Good(request)) {
+		return
+	}
+
 	// Change HOST of original request
 	URL := o.address + request.URL.Path + "?" + request.URL.RawQuery
 
@@ -126,13 +134,13 @@ func (o *HTTPOutput) sendRequest(client *http.Client, data []byte) {
 		request.Header.Set(header.Name, header.Value)
 	}
 
-	start := time.Now()
 	resp, err := client.Do(request)
-	stop := time.Now()
 
 	// We should not count Redirect as errors
-	if _, ok := err.(*RedirectNotAllowed); ok {
-		err = nil
+	if urlErr, ok := err.(*url.Error); ok {
+		if _, ok := urlErr.Err.(*RedirectNotAllowed); ok {
+			err = nil
+		}
 	}
 
 	if err == nil {
@@ -141,9 +149,6 @@ func (o *HTTPOutput) sendRequest(client *http.Client, data []byte) {
 		log.Println("Request error:", err)
 	}
 
-	if o.elasticSearch != nil {
-		o.elasticSearch.ResponseAnalyze(request, resp, start, stop)
-	}
 }
 
 func (o *HTTPOutput) String() string {

@@ -1,4 +1,4 @@
-package gor
+package main
 
 type TestInput struct {
 	data chan []byte

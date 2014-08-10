@@ -15,7 +15,7 @@ import (
 // Since we can't use default TCP libraries RAWTCPLitener implements own TCP layer
 // TCP packets is parsed using tcp_packet.go, and flow control is managed by tcp_message.go
 type Listener struct {
-	messages map[uint32]*TCPMessage // buffer of TCPMessages waiting to be send
+	messages map[string]*TCPMessage // buffer of TCPMessages waiting to be send
 
 	c_packets  chan *TCPPacket
 	c_messages chan *TCPMessage // Messages ready to be send to client
@@ -33,7 +33,7 @@ func NewListener(addr string, port string) (rawListener *Listener) {
 	rawListener.c_packets = make(chan *TCPPacket, 100)
 	rawListener.c_messages = make(chan *TCPMessage, 100)
 	rawListener.c_del_message = make(chan *TCPMessage, 100)
-	rawListener.messages = make(map[uint32]*TCPMessage)
+	rawListener.messages = make(map[string]*TCPMessage)
 
 	rawListener.addr = addr
 	rawListener.port, _ = strconv.Atoi(port)
@@ -50,7 +50,7 @@ func (t *Listener) listen() {
 		// If message ready for deletion it means that its also complete or expired by timeout
 		case message := <-t.c_del_message:
 			t.c_messages <- message
-			delete(t.messages, message.Ack)
+			delete(t.messages, message.ID)
 
 		// We need to use channels to process each packet to avoid data races
 		case packet := <-t.c_packets:
@@ -71,7 +71,7 @@ func (t *Listener) readRAWSocket() {
 
 	for {
 		// Note: ReadFrom receive messages without IP header
-		n, _, err := conn.ReadFrom(buf)
+		n, addr, err := conn.ReadFrom(buf)
 
 		if err != nil {
 			log.Println("Error:", err)
@@ -79,17 +79,17 @@ func (t *Listener) readRAWSocket() {
 		}
 
 		if n > 0 {
-			t.parsePacket(buf[:n])
+			t.parsePacket(addr, buf[:n])
 		}
 	}
 }
 
-func (t *Listener) parsePacket(buf []byte) {
+func (t *Listener) parsePacket(addr net.Addr, buf []byte) {
 	if t.isIncomingDataPacket(buf) {
 		new_buf := make([]byte, len(buf))
 		copy(new_buf, buf)
 
-		t.c_packets <- ParseTCPPacket(new_buf)
+		t.c_packets <- ParseTCPPacket(addr, new_buf)
 	}
 }
 
@@ -118,14 +118,17 @@ func (t *Listener) isIncomingDataPacket(buf []byte) bool {
 //
 // For TCP message unique id is Acknowledgment number (see tcp_packet.go)
 func (t *Listener) processTCPPacket(packet *TCPPacket) {
-	var message *TCPMessage
+	defer func() { recover() }()
 
-	message, ok := t.messages[packet.Ack]
+	var message *TCPMessage
+	m_id := packet.Addr.String() + strconv.Itoa(int(packet.Ack))
+
+	message, ok := t.messages[m_id]
 
 	if !ok {
 		// We sending c_del_message channel, so message object can communicate with Listener and notify it if message completed
-		message = NewTCPMessage(packet.Ack, t.c_del_message)
-		t.messages[packet.Ack] = message
+		message = NewTCPMessage(m_id, t.c_del_message)
+		t.messages[m_id] = message
 	}
 
 	// Adding packet to message
