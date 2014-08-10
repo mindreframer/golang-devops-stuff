@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -8,14 +8,13 @@ import (
 	"flag"
 	"fmt"
 	"github.com/bmizerany/pat"
-	"github.com/globocom/config"
-	"github.com/globocom/gandalf/api"
-	"github.com/globocom/gandalf/db"
+	"github.com/tsuru/config"
+	"github.com/tsuru/gandalf/api"
 	"log"
 	"net/http"
 )
 
-const version = "0.2.0"
+const version = "0.4.1"
 
 func main() {
 	dry := flag.Bool("dry", false, "dry-run: does not start the server (for testing purpose)")
@@ -34,7 +33,6 @@ func main() {
 For an example conf check gandalf/etc/gandalf.conf file.\n %s`
 		log.Panicf(msg, *configFile, err)
 	}
-	db.Connect()
 	router := pat.New()
 	router.Post("/user/:name/key", http.HandlerFunc(api.AddKey))
 	router.Del("/user/:name/key/:keyname", http.HandlerFunc(api.RemoveKey))
@@ -47,7 +45,15 @@ For an example conf check gandalf/etc/gandalf.conf file.\n %s`
 	router.Del("/repository/:name", http.HandlerFunc(api.RemoveRepository))
 	router.Get("/repository/:name", http.HandlerFunc(api.GetRepository))
 	router.Put("/repository/:name", http.HandlerFunc(api.RenameRepository))
+	router.Get("/repository/:name/archive", http.HandlerFunc(api.GetArchive))
+	router.Get("/repository/:name/contents", http.HandlerFunc(api.GetFileContents))
+	router.Get("/repository/:name/tree/:path", http.HandlerFunc(api.GetTree))
+	router.Get("/repository/:name/tree", http.HandlerFunc(api.GetTree))
+	router.Get("/repository/:name/branches", http.HandlerFunc(api.GetBranches))
+	router.Get("/repository/:name/tags", http.HandlerFunc(api.GetTags))
+	router.Get("/repository/:name/diff/commits", http.HandlerFunc(api.GetDiff))
 	router.Get("/healthcheck/", http.HandlerFunc(api.HealthCheck))
+	router.Post("/hook/:name", http.HandlerFunc(api.AddHook))
 
 	bind, err := config.GetString("bind")
 	if err != nil {

@@ -35,6 +35,26 @@ start Gandalf and git-daemon using upstart:
 
     $ sudo start git-daemon
     $ sudo start gandalf-server
+    
+Install from Homebrew
+=====================
+
+You can install Gandalf server from homebrew, but first you need to add the `tsuru-taps
+<https://github.com/tsuru/homebrew-tsuru>`_:
+
+.. highlight:: bash
+
+::
+
+    $ brew tap tsuru/homebrew-tsuru
+
+Then, install the gandalf formula:
+
+.. highlight:: bash
+
+::
+
+    $ brew install gandalf
 
 Installing from pre-built binaries
 ==================================
@@ -102,7 +122,7 @@ You can download the sample configuration file from Github:
 
 ::
 
-    $ [sudo] curl -sL https://raw.github.com/globocom/gandalf/master/etc/gandalf.conf -o /etc/gandalf.conf
+    $ [sudo] curl -sL https://raw.github.com/tsuru/gandalf/master/etc/gandalf.conf -o /etc/gandalf.conf
 
 Starting
 --------

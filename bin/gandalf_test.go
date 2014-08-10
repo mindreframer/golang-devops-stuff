@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,12 +6,12 @@ package main
 
 import (
 	"bytes"
-	"github.com/globocom/commandmocker"
-	"github.com/globocom/config"
-	"github.com/globocom/gandalf/db"
-	"github.com/globocom/gandalf/repository"
-	"github.com/globocom/gandalf/user"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/commandmocker"
+	"github.com/tsuru/config"
+	"github.com/tsuru/gandalf/db"
+	"github.com/tsuru/gandalf/repository"
+	"github.com/tsuru/gandalf/user"
+	"gopkg.in/mgo.v2/bson"
 	"launchpad.net/gocheck"
 	"log/syslog"
 	"os"
@@ -35,17 +35,22 @@ func (s *S) SetUpSuite(c *gocheck.C) {
 	err = config.ReadConfigFile("../etc/gandalf.conf")
 	c.Check(err, gocheck.IsNil)
 	config.Set("database:name", "gandalf_bin_tests")
-	db.Connect()
 	s.user, err = user.New("testuser", map[string]string{})
 	c.Check(err, gocheck.IsNil)
 	// does not uses repository.New to avoid creation of bare git repo
 	s.repo = &repository.Repository{Name: "myapp", Users: []string{s.user.Name}}
-	err = db.Session.Repository().Insert(s.repo)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	err = conn.Repository().Insert(s.repo)
 	c.Check(err, gocheck.IsNil)
 }
 
 func (s *S) TearDownSuite(c *gocheck.C) {
-	db.Session.DB.DropDatabase()
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	conn.User().Database.DropDatabase()
 }
 
 func (s *S) TestHasWritePermissionSholdReturnTrueWhenUserCanWriteInRepo(c *gocheck.C) {
@@ -55,16 +60,22 @@ func (s *S) TestHasWritePermissionSholdReturnTrueWhenUserCanWriteInRepo(c *goche
 
 func (s *S) TestHasWritePermissionShouldReturnFalseWhenUserCannotWriteinRepo(c *gocheck.C) {
 	r := &repository.Repository{Name: "myotherapp"}
-	db.Session.Repository().Insert(&r)
-	defer db.Session.Repository().Remove(bson.M{"_id": r.Name})
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	conn.Repository().Insert(&r)
+	defer conn.Repository().Remove(bson.M{"_id": r.Name})
 	allowed := hasWritePermission(s.user, r)
 	c.Assert(allowed, gocheck.Equals, false)
 }
 
 func (s *S) TestHasReadPermissionShouldReturnTrueWhenRepositoryIsPublic(c *gocheck.C) {
 	r := &repository.Repository{Name: "myotherapp", IsPublic: true}
-	db.Session.Repository().Insert(&r)
-	defer db.Session.Repository().Remove(bson.M{"_id": r.Name})
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	conn.Repository().Insert(&r)
+	defer conn.Repository().Remove(bson.M{"_id": r.Name})
 	allowed := hasReadPermission(s.user, r)
 	c.Assert(allowed, gocheck.Equals, true)
 }
@@ -76,8 +87,11 @@ func (s *S) TestHasReadPermissionShouldReturnTrueWhenRepositoryIsNotPublicAndUse
 
 func (s *S) TestHasReadPermissionShouldReturnFalseWhenUserDoesNotHavePermissionToReadWriteAndRepoIsNotPublic(c *gocheck.C) {
 	r := &repository.Repository{Name: "myotherapp", IsPublic: false}
-	db.Session.Repository().Insert(&r)
-	defer db.Session.Repository().Remove(bson.M{"_id": r.Name})
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	conn.Repository().Insert(&r)
+	defer conn.Repository().Remove(bson.M{"_id": r.Name})
 	allowed := hasReadPermission(s.user, r)
 	c.Assert(allowed, gocheck.Equals, false)
 }
@@ -96,9 +110,12 @@ func (s *S) TestActionShouldReturnEmptyWhenEnvVarIsNotSet(c *gocheck.C) {
 
 func (s *S) TestRequestedRepositoryShouldGetArgumentInSSH_ORIGINAL_COMMANDAndRetrieveTheEquivalentDatabaseRepository(c *gocheck.C) {
 	r := repository.Repository{Name: "foo"}
-	err := db.Session.Repository().Insert(&r)
+	conn, err := db.Conn()
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.Repository().Remove(bson.M{"_id": r.Name})
+	defer conn.Close()
+	err = conn.Repository().Insert(&r)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Repository().Remove(bson.M{"_id": r.Name})
 	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack 'foo.git'")
 	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
 	repo, err := requestedRepository()
@@ -108,9 +125,12 @@ func (s *S) TestRequestedRepositoryShouldGetArgumentInSSH_ORIGINAL_COMMANDAndRet
 
 func (s *S) TestRequestedRepositoryShouldDeduceCorrectlyRepositoryNameWithDash(c *gocheck.C) {
 	r := repository.Repository{Name: "foo-bar"}
-	err := db.Session.Repository().Insert(&r)
+	conn, err := db.Conn()
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.Repository().Remove(bson.M{"_id": r.Name})
+	defer conn.Close()
+	err = conn.Repository().Insert(&r)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Repository().Remove(bson.M{"_id": r.Name})
 	os.Setenv("SSH_ORIGINAL_COMMAND", "git-receive-pack 'foo-bar.git'")
 	defer os.Setenv("SSH_ORIGINAL_COMMAND", "")
 	repo, err := requestedRepository()

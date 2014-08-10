@@ -1,0 +1,63 @@
+{
+	"ImportPath": "github.com/tsuru/gandalf",
+	"GoVersion": "devel +bfe2cc97b9e1 Fri Aug 01 06:21:08 2014 -0700",
+	"Packages": [
+		"./..."
+	],
+	"Deps": [
+		{
+			"ImportPath": "code.google.com/p/go.crypto/ssh",
+			"Comment": "null-209",
+			"Rev": "23b39e4e860172e1983ded00a9d2f7e42b7683d0"
+		},
+		{
+			"ImportPath": "github.com/bmizerany/pat",
+			"Rev": "51b7af73e39f6dc59846b22d56ca886d105ef0c3"
+		},
+		{
+			"ImportPath": "github.com/howeyc/fsnotify",
+			"Rev": "5102fde921d31f59c6e45d835aa01f0213aade0f"
+		},
+		{
+			"ImportPath": "github.com/tsuru/commandmocker",
+			"Rev": "adc1ee2fa7604e1663b2564ca1283d71c9153cac"
+		},
+		{
+			"ImportPath": "github.com/tsuru/config",
+			"Rev": "97d4a7511ea73e02a62a1a381d17110b5372cc40"
+		},
+		{
+			"ImportPath": "github.com/tsuru/tsuru/db/storage",
+			"Comment": "0.6.0-9-g5d32bbe",
+			"Rev": "5d32bbe10562ead99ba5b7d8a075654a66c783ea"
+		},
+		{
+			"ImportPath": "github.com/tsuru/tsuru/fs",
+			"Comment": "0.6.0-9-g5d32bbe",
+			"Rev": "5d32bbe10562ead99ba5b7d8a075654a66c783ea"
+		},
+		{
+			"ImportPath": "github.com/tsuru/tsuru/log",
+			"Comment": "0.6.0-9-g5d32bbe",
+			"Rev": "5d32bbe10562ead99ba5b7d8a075654a66c783ea"
+		},
+		{
+			"ImportPath": "github.com/tsuru/tsuru/safe",
+			"Comment": "0.6.0-9-g5d32bbe",
+			"Rev": "5d32bbe10562ead99ba5b7d8a075654a66c783ea"
+		},
+		{
+			"ImportPath": "gopkg.in/mgo.v2",
+			"Rev": "dc255bb679efa273b6544a03261c4053505498a4"
+		},
+		{
+			"ImportPath": "gopkg.in/v1/yaml",
+			"Rev": "4914593b9558e85597f08346c798aea8f6fb899f"
+		},
+		{
+			"ImportPath": "launchpad.net/gocheck",
+			"Comment": "87",
+			"Rev": "gustavo@niemeyer.net-20130302024745-6ikofwq2c03h7giu"
+		}
+	]
+}

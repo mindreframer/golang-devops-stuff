@@ -10,4 +10,4 @@ irc channel
 ticket system
 =============
 
-`ticket system <https://github.com/globocom/gandalf/issues>`_ - report bugs and make feature requests
+`ticket system <https://github.com/tsuru/gandalf/issues>`_ - report bugs and make feature requests

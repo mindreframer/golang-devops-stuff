@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -9,11 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/gandalf/db"
+	"github.com/tsuru/config"
+	"github.com/tsuru/gandalf/db"
+	"gopkg.in/mgo.v2/bson"
 	"io"
 	"io/ioutil"
-	"labix.org/v2/mgo/bson"
 	"launchpad.net/gocheck"
 	"os"
 	"path"
@@ -226,9 +226,12 @@ func (s *S) TestAddKeyStoresKeyInTheDatabase(c *gocheck.C) {
 	err := addKey("key1", rawKey, "gopher")
 	c.Assert(err, gocheck.IsNil)
 	var k Key
-	err = db.Session.Key().Find(bson.M{"name": "key1"}).One(&k)
+	conn, err := db.Conn()
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.Key().Remove(bson.M{"name": "key1"})
+	defer conn.Close()
+	err = conn.Key().Find(bson.M{"name": "key1"}).One(&k)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Key().Remove(bson.M{"name": "key1"})
 	c.Assert(k.Name, gocheck.Equals, "key1")
 	c.Assert(k.UserName, gocheck.Equals, "gopher")
 	c.Assert(k.Comment, gocheck.Equals, comment)
@@ -238,9 +241,12 @@ func (s *S) TestAddKeyStoresKeyInTheDatabase(c *gocheck.C) {
 func (s *S) TestAddKeyShouldSaveTheKeyInTheAuthorizedKeys(c *gocheck.C) {
 	err := addKey("key1", rawKey, "gopher")
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.Key().Remove(bson.M{"name": "key1"})
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	defer conn.Key().Remove(bson.M{"name": "key1"})
 	var k Key
-	err = db.Session.Key().Find(bson.M{"name": "key1"}).One(&k)
+	err = conn.Key().Find(bson.M{"name": "key1"}).One(&k)
 	c.Assert(err, gocheck.IsNil)
 	f, err := s.rfs.Open(authKey())
 	c.Assert(err, gocheck.IsNil)
@@ -253,7 +259,10 @@ func (s *S) TestAddKeyShouldSaveTheKeyInTheAuthorizedKeys(c *gocheck.C) {
 func (s *S) TestAddKeyDuplicate(c *gocheck.C) {
 	err := addKey("key1", rawKey, "gopher")
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.Key().Remove(bson.M{"name": "key1"})
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	defer conn.Key().Remove(bson.M{"name": "key1"})
 	err = addKey("key2", rawKey, "gopher")
 	c.Assert(err, gocheck.Equals, ErrDuplicateKey)
 }
@@ -268,7 +277,9 @@ func (s *S) TestRemoveKeyDeletesFromDB(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	err = removeKey("key1", "gopher")
 	c.Assert(err, gocheck.IsNil)
-	count, err := db.Session.Key().Find(bson.M{"name": "key1"}).Count()
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	count, err := conn.Key().Find(bson.M{"name": "key1"}).Count()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(count, gocheck.Equals, 0)
 }
@@ -281,7 +292,9 @@ func (s *S) TestRemoveKeyDeletesOnlyTheRightKey(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	err = removeKey("key1", "glenda")
 	c.Assert(err, gocheck.IsNil)
-	count, err := db.Session.Key().Find(bson.M{"name": "key1", "username": "gopher"}).Count()
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	count, err := conn.Key().Find(bson.M{"name": "key1", "username": "gopher"}).Count()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(count, gocheck.Equals, 1)
 }
@@ -313,7 +326,9 @@ func (s *S) TestRemoveKeyKeepOtherKeys(c *gocheck.C) {
 	err = removeKey("key2", "gopher")
 	c.Assert(err, gocheck.IsNil)
 	var key Key
-	err = db.Session.Key().Find(bson.M{"name": "key1"}).One(&key)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	err = conn.Key().Find(bson.M{"name": "key1"}).One(&key)
 	c.Assert(err, gocheck.IsNil)
 	f, err := s.rfs.Open(authKey())
 	c.Assert(err, gocheck.IsNil)
@@ -333,7 +348,9 @@ func (s *S) TestRemoveUserKeys(c *gocheck.C) {
 	err = removeUserKeys("glenda")
 	c.Assert(err, gocheck.IsNil)
 	var key Key
-	err = db.Session.Key().Find(bson.M{"name": "key1"}).One(&key)
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	err = conn.Key().Find(bson.M{"name": "key1"}).One(&key)
 	c.Assert(err, gocheck.IsNil)
 	f, err := s.rfs.Open(authKey())
 	c.Assert(err, gocheck.IsNil)
@@ -351,7 +368,9 @@ func (s *S) TestRemoveUserMultipleKeys(c *gocheck.C) {
 	c.Assert(err, gocheck.IsNil)
 	err = removeUserKeys("glenda")
 	c.Assert(err, gocheck.IsNil)
-	count, err := db.Session.Key().Find(nil).Count()
+	conn, err := db.Conn()
+	c.Assert(err, gocheck.IsNil)
+	count, err := conn.Key().Find(nil).Count()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(count, gocheck.Equals, 0)
 	f, err := s.rfs.Open(authKey())
@@ -384,16 +403,18 @@ func (s *S) TestKeyListJSON(c *gocheck.C) {
 
 func (s *S) TestListKeys(c *gocheck.C) {
 	user := map[string]string{"_id": "glenda"}
-	err := db.Session.User().Insert(user)
+	conn, err := db.Conn()
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.User().Remove(user)
+	err = conn.User().Insert(user)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.User().Remove(user)
 	err = addKey("key1", rawKey, "glenda")
 	c.Assert(err, gocheck.IsNil)
 	err = addKey("key2", otherKey, "glenda")
 	c.Assert(err, gocheck.IsNil)
 	defer removeUserKeys("glenda")
 	var expected []Key
-	err = db.Session.Key().Find(nil).All(&expected)
+	err = conn.Key().Find(nil).All(&expected)
 	c.Assert(err, gocheck.IsNil)
 	got, err := ListKeys("glenda")
 	c.Assert(err, gocheck.IsNil)
@@ -408,9 +429,11 @@ func (s *S) TestListKeysUnknownUser(c *gocheck.C) {
 
 func (s *S) TestListKeysEmpty(c *gocheck.C) {
 	user := map[string]string{"_id": "gopher"}
-	err := db.Session.User().Insert(user)
+	conn, err := db.Conn()
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.User().Remove(user)
+	err = conn.User().Insert(user)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.User().Remove(user)
 	got, err := ListKeys("gopher")
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(got, gocheck.HasLen, 0)
@@ -418,13 +441,15 @@ func (s *S) TestListKeysEmpty(c *gocheck.C) {
 
 func (s *S) TestListKeysFromTheUserOnly(c *gocheck.C) {
 	user := map[string]string{"_id": "gopher"}
-	err := db.Session.User().Insert(user)
+	conn, err := db.Conn()
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.User().Remove(user)
+	err = conn.User().Insert(user)
+	c.Assert(err, gocheck.IsNil)
+	defer conn.User().Remove(user)
 	user2 := map[string]string{"_id": "glenda"}
-	err = db.Session.User().Insert(user2)
+	err = conn.User().Insert(user2)
 	c.Assert(err, gocheck.IsNil)
-	defer db.Session.User().Remove(user2)
+	defer conn.User().Remove(user2)
 	err = addKey("key1", rawKey, "glenda")
 	c.Assert(err, gocheck.IsNil)
 	err = addKey("key1", otherKey, "gopher")
@@ -432,7 +457,7 @@ func (s *S) TestListKeysFromTheUserOnly(c *gocheck.C) {
 	defer removeUserKeys("glenda")
 	defer removeUserKeys("gopher")
 	var expected []Key
-	err = db.Session.Key().Find(bson.M{"username": "gopher"}).All(&expected)
+	err = conn.Key().Find(bson.M{"username": "gopher"}).All(&expected)
 	c.Assert(err, gocheck.IsNil)
 	got, err := ListKeys("gopher")
 	c.Assert(err, gocheck.IsNil)
