@@ -134,7 +134,7 @@ func (s *CSuite) TestConnectionOnMessageCallback(c *C) {
 
 	select {
 	case msg := <-messages:
-		c.Assert(msg.SubID, Equals, 1)
+		c.Assert(msg.SubID, Equals, int64(1))
 		c.Assert(string(msg.Payload), Equals, "hello")
 	case <-time.After(1 * time.Second):
 		c.Error("Did not receive message.")

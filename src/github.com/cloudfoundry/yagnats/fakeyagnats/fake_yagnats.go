@@ -1,26 +1,31 @@
 package fakeyagnats
 
 import (
+	"sync"
+
 	"github.com/cloudfoundry/yagnats"
 )
 
 type FakeYagnats struct {
-	Subscriptions        map[string][]yagnats.Subscription
-	PublishedMessages    map[string][]yagnats.Message
-	Unsubscriptions      []int
-	UnsubscribedSubjects []string
+	subscriptions        map[string][]yagnats.Subscription
+	publishedMessages    map[string][]yagnats.Message
+	unsubscriptions      []int64
+	unsubscribedSubjects []string
 
-	ConnectedConnectionProvider yagnats.ConnectionProvider
+	connectedConnectionProvider yagnats.ConnectionProvider
 
-	ConnectError     error
-	PublishError     error
-	SubscribeError   error
-	UnsubscribeError error
+	connectError     error
+	unsubscribeError error
 
-	OnPing       func() bool
-	PingResponse bool
+	whenSubscribing map[string]func(yagnats.Callback) error
+	whenPublishing  map[string]func(*yagnats.Message) error
 
-	counter int
+	onPing       func() bool
+	pingResponse bool
+
+	nextSubscriptionID int64
+
+	sync.RWMutex
 }
 
 func New() *FakeYagnats {
@@ -30,38 +35,64 @@ func New() *FakeYagnats {
 }
 
 func (f *FakeYagnats) Reset() {
-	f.PublishedMessages = map[string][]yagnats.Message{}
-	f.Subscriptions = map[string][]yagnats.Subscription{}
-	f.Unsubscriptions = []int{}
-	f.UnsubscribedSubjects = []string{}
+	f.Lock()
+	defer f.Unlock()
 
-	f.ConnectedConnectionProvider = nil
+	f.publishedMessages = map[string][]yagnats.Message{}
+	f.subscriptions = map[string][]yagnats.Subscription{}
+	f.unsubscriptions = []int64{}
+	f.unsubscribedSubjects = []string{}
 
-	f.ConnectError = nil
-	f.PublishError = nil
-	f.SubscribeError = nil
-	f.UnsubscribeError = nil
+	f.connectedConnectionProvider = nil
 
-	f.PingResponse = true
+	f.connectError = nil
+	f.unsubscribeError = nil
 
-	f.counter = 0
+	f.whenSubscribing = map[string]func(yagnats.Callback) error{}
+	f.whenPublishing = map[string]func(*yagnats.Message) error{}
+
+	f.pingResponse = true
+
+	f.nextSubscriptionID = 0
+}
+
+func (f *FakeYagnats) OnPing(onPingCallback func() bool) {
+	f.Lock()
+	f.onPing = onPingCallback
+	f.Unlock()
 }
 
 func (f *FakeYagnats) Ping() bool {
-	if f.OnPing != nil {
-		return f.OnPing()
+	f.RLock()
+	onPing := f.onPing
+	response := f.pingResponse
+	f.RUnlock()
+
+	if onPing != nil {
+		return onPing()
 	}
 
-	return f.PingResponse
+	return response
 }
 
 func (f *FakeYagnats) Connect(connectionProvider yagnats.ConnectionProvider) error {
-	f.ConnectedConnectionProvider = connectionProvider
-	return f.ConnectError
+	f.Lock()
+	defer f.Unlock()
+
+	if f.connectError != nil {
+		return f.connectError
+	}
+
+	f.connectedConnectionProvider = connectionProvider
+
+	return f.connectError
 }
 
 func (f *FakeYagnats) Disconnect() {
-	f.ConnectedConnectionProvider = nil
+	f.Lock()
+	defer f.Unlock()
+
+	f.connectedConnectionProvider = nil
 	return
 }
 
@@ -70,41 +101,142 @@ func (f *FakeYagnats) Publish(subject string, payload []byte) error {
 }
 
 func (f *FakeYagnats) PublishWithReplyTo(subject, reply string, payload []byte) error {
+	f.RLock()
+
+	injectedCallback, injected := f.whenPublishing[subject]
+
 	message := &yagnats.Message{
 		Subject: subject,
 		ReplyTo: reply,
 		Payload: payload,
 	}
 
-	f.PublishedMessages[subject] = append(f.PublishedMessages[subject], *message)
-	if len(f.Subscriptions[subject]) > 0 {
-		f.Subscriptions[subject][0].Callback(message)
+	var callback yagnats.Callback
+
+	if len(f.subscriptions[subject]) > 0 {
+		callback = f.subscriptions[subject][0].Callback
 	}
-	return f.PublishError
+
+	f.RUnlock()
+
+	if injected {
+		err := injectedCallback(message)
+		if err != nil {
+			return err
+		}
+	}
+
+	f.Lock()
+	f.publishedMessages[subject] = append(f.publishedMessages[subject], *message)
+	f.Unlock()
+
+	if callback != nil {
+		callback(message)
+	}
+
+	return nil
 }
 
-func (f *FakeYagnats) Subscribe(subject string, callback yagnats.Callback) (int, error) {
+func (f *FakeYagnats) Subscribe(subject string, callback yagnats.Callback) (int64, error) {
 	return f.SubscribeWithQueue(subject, "", callback)
 }
 
-func (f *FakeYagnats) SubscribeWithQueue(subject, queue string, callback yagnats.Callback) (int, error) {
-	f.counter++
+func (f *FakeYagnats) SubscribeWithQueue(subject, queue string, callback yagnats.Callback) (int64, error) {
+	f.RLock()
+
+	injectedCallback, injected := f.whenSubscribing[subject]
+
+	f.RUnlock()
+
+	if injected {
+		err := injectedCallback(callback)
+		if err != nil {
+			return 0, err
+		}
+	}
+
+	f.Lock()
+	defer f.Unlock()
+
+	f.nextSubscriptionID++
+
 	subscription := yagnats.Subscription{
 		Subject:  subject,
 		Queue:    queue,
-		ID:       f.counter,
+		ID:       f.nextSubscriptionID,
 		Callback: callback,
 	}
 
-	f.Subscriptions[subject] = append(f.Subscriptions[subject], subscription)
-	return subscription.ID, f.SubscribeError
+	f.subscriptions[subject] = append(f.subscriptions[subject], subscription)
+
+	return subscription.ID, nil
 }
 
-func (f *FakeYagnats) Unsubscribe(subscription int) error {
-	f.Unsubscriptions = append(f.Unsubscriptions, subscription)
-	return f.UnsubscribeError
+func (f *FakeYagnats) Unsubscribe(subscription int64) error {
+	f.Lock()
+	defer f.Unlock()
+
+	if f.unsubscribeError != nil {
+		return f.unsubscribeError
+	}
+
+	f.unsubscriptions = append(f.unsubscriptions, subscription)
+
+	return nil
 }
 
 func (f *FakeYagnats) UnsubscribeAll(subject string) {
-	f.UnsubscribedSubjects = append(f.UnsubscribedSubjects, subject)
+	f.Lock()
+	defer f.Unlock()
+
+	f.unsubscribedSubjects = append(f.unsubscribedSubjects, subject)
+}
+
+func (f *FakeYagnats) WhenSubscribing(subject string, callback func(yagnats.Callback) error) {
+	f.Lock()
+	defer f.Unlock()
+
+	f.whenSubscribing[subject] = callback
+}
+
+func (f *FakeYagnats) Subscriptions(subject string) []yagnats.Subscription {
+	f.RLock()
+	defer f.RUnlock()
+
+	return f.subscriptions[subject]
+}
+
+func (f *FakeYagnats) SubscriptionCount() int {
+	f.RLock()
+	defer f.RUnlock()
+
+	return len(f.subscriptions)
+}
+
+func (f *FakeYagnats) WhenPublishing(subject string, callback func(*yagnats.Message) error) {
+	f.Lock()
+	defer f.Unlock()
+
+	f.whenPublishing[subject] = callback
+}
+
+func (f *FakeYagnats) PublishedMessages(subject string) []yagnats.Message {
+	f.RLock()
+	defer f.RUnlock()
+
+	return f.publishedMessages[subject]
+}
+
+func (f *FakeYagnats) PublishedMessageCount() int {
+	f.RLock()
+	defer f.RUnlock()
+
+	return len(f.publishedMessages)
+}
+
+func (f* FakeYagnats) ConnectedConnectionProvider() yagnats.ConnectionProvider {
+	f.RLock()
+	defer f.RUnlock()
+
+	return f.connectedConnectionProvider
 }

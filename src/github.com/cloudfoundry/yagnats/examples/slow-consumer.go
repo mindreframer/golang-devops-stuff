@@ -4,10 +4,11 @@ package main
 
 import (
 	"fmt"
-	yagnats "github.com/cloudfoundry/yagnats"
 	"log"
 	"os"
 	"os/signal"
+
+	yagnats "github.com/cloudfoundry/yagnats"
 )
 
 func main() {
@@ -17,7 +18,11 @@ func main() {
 	log.Printf("Receiving messages...\n")
 
 	client := yagnats.NewClient()
-	err := client.Connect(&yagnats.ConnectionInfo{"127.0.0.1:4222", "nats", "nats"})
+	err := client.Connect(&yagnats.ConnectionInfo{
+		Addr:     "127.0.0.1:4222",
+		Username: "nats",
+		Password: "nats",
+	})
 	if err != nil {
 		log.Fatalf("Error connecting: %s\n", err)
 	}
