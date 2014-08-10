@@ -5,9 +5,11 @@ package gophercloud
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
+
 	"github.com/mitchellh/mapstructure"
 	"github.com/racker/perigee"
-	"strings"
 )
 
 // genericServersProvider structures provide the implementation for generic OpenStack-compatible
@@ -23,6 +25,23 @@ type genericServersProvider struct {
 	// access associates this API provider with a set of credentials,
 	// which may be automatically renewed if they near expiration.
 	access AccessProvider
+}
+
+// See the CloudServersProvider interface for details.
+func (gcp *genericServersProvider) ListServersByFilter(filter url.Values) ([]Server, error) {
+	var ss []Server
+
+	err := gcp.context.WithReauth(gcp.access, func() error {
+		url := gcp.endpoint + "/servers/detail?" + filter.Encode()
+		return perigee.Get(url, perigee.Options{
+			CustomClient: gcp.context.httpClient,
+			Results:      &struct{ Servers *[]Server }{&ss},
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gcp.access.AuthToken(),
+			},
+		})
+	})
+	return ss, err
 }
 
 // See the CloudServersProvider interface for details.
@@ -86,6 +105,7 @@ func (gsp *genericServersProvider) ServerById(id string) (*Server, error) {
 			MoreHeaders: map[string]string{
 				"X-Auth-Token": gsp.access.AuthToken(),
 			},
+			OkCodes: []int{200},
 		})
 	})
 
@@ -397,6 +417,162 @@ func (gsp *genericServersProvider) CreateImage(id string, ci CreateImage) (strin
 	return locationArr[len(locationArr)-1], err
 }
 
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) ListSecurityGroups() ([]SecurityGroup, error) {
+	var sgs []SecurityGroup
+
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/os-security-groups", gsp.endpoint)
+		return perigee.Get(ep, perigee.Options{
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			Results: &struct {
+				SecurityGroups *[]SecurityGroup `json:"security_groups"`
+			}{&sgs},
+		})
+	})
+	return sgs, err
+}
+
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) CreateSecurityGroup(desired SecurityGroup) (*SecurityGroup, error) {
+	var actual *SecurityGroup
+
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/os-security-groups", gsp.endpoint)
+		return perigee.Post(ep, perigee.Options{
+			ReqBody: struct {
+				AddSecurityGroup SecurityGroup `json:"security_group"`
+			}{desired},
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			Results: &struct {
+				SecurityGroup **SecurityGroup `json:"security_group"`
+			}{&actual},
+		})
+	})
+	return actual, err
+}
+
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) ListSecurityGroupsByServerId(id string) ([]SecurityGroup, error) {
+	var sgs []SecurityGroup
+
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/servers/%s/os-security-groups", gsp.endpoint, id)
+		return perigee.Get(ep, perigee.Options{
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			Results: &struct {
+				SecurityGroups *[]SecurityGroup `json:"security_groups"`
+			}{&sgs},
+		})
+	})
+	return sgs, err
+}
+
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) SecurityGroupById(id int) (*SecurityGroup, error) {
+	var actual *SecurityGroup
+
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/os-security-groups/%d", gsp.endpoint, id)
+		return perigee.Get(ep, perigee.Options{
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			Results: &struct {
+				SecurityGroup **SecurityGroup `json:"security_group"`
+			}{&actual},
+		})
+	})
+	return actual, err
+}
+
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) DeleteSecurityGroupById(id int) error {
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/os-security-groups/%d", gsp.endpoint, id)
+		return perigee.Delete(ep, perigee.Options{
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			OkCodes: []int{202},
+		})
+	})
+	return err
+}
+
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) ListDefaultSGRules() ([]SGRule, error) {
+	var sgrs []SGRule
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/os-security-group-default-rules", gsp.endpoint)
+		return perigee.Get(ep, perigee.Options{
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			Results: &struct{ Security_group_default_rules *[]SGRule }{&sgrs},
+		})
+	})
+	return sgrs, err
+}
+
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) CreateDefaultSGRule(r SGRule) (*SGRule, error) {
+	var sgr *SGRule
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/os-security-group-default-rules", gsp.endpoint)
+		return perigee.Post(ep, perigee.Options{
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			Results: &struct{ Security_group_default_rule **SGRule }{&sgr},
+			ReqBody: struct {
+				Security_group_default_rule SGRule `json:"security_group_default_rule"`
+			}{r},
+		})
+	})
+	return sgr, err
+}
+
+// See the CloudServersProvider interface for details.
+func (gsp *genericServersProvider) GetSGRule(id string) (*SGRule, error) {
+	var sgr *SGRule
+	err := gsp.context.WithReauth(gsp.access, func() error {
+		ep := fmt.Sprintf("%s/os-security-group-default-rules/%s", gsp.endpoint, id)
+		return perigee.Get(ep, perigee.Options{
+			MoreHeaders: map[string]string{
+				"X-Auth-Token": gsp.access.AuthToken(),
+			},
+			Results: &struct{ Security_group_default_rule **SGRule }{&sgr},
+		})
+	})
+	return sgr, err
+}
+
+// SecurityGroup provides a description of a security group, including all its rules.
+type SecurityGroup struct {
+	Description string   `json:"description,omitempty"`
+	Id          int      `json:"id,omitempty"`
+	Name        string   `json:"name,omitempty"`
+	Rules       []SGRule `json:"rules,omitempty"`
+	TenantId    string   `json:"tenant_id,omitempty"`
+}
+
+// SGRule encapsulates a single rule which applies to a security group.
+// This definition is just a guess, based on the documentation found in another extension here: http://docs.openstack.org/api/openstack-compute/2/content/GET_os-security-group-default-rules-v2_listSecGroupDefaultRules_v2__tenant_id__os-security-group-rules_ext-os-security-group-default-rules.html
+type SGRule struct {
+	FromPort   int                    `json:"from_port,omitempty"`
+	Id         int                    `json:"id,omitempty"`
+	IpProtocol string                 `json:"ip_protocol,omitempty"`
+	IpRange    map[string]interface{} `json:"ip_range,omitempty"`
+	ToPort     int                    `json:"to_port,omitempty"`
+}
+
 // RaxBandwidth provides measurement of server bandwidth consumed over a given audit interval.
 type RaxBandwidth struct {
 	AuditPeriodEnd    string `json:"audit_period_end"`
@@ -612,6 +788,8 @@ type NewServer struct {
 	Links           []Link                   `json:"links,omitempty"`
 	OsDcfDiskConfig string                   `json:"OS-DCF:diskConfig,omitempty"`
 	SecurityGroup   []map[string]interface{} `json:"security_groups,omitempty"`
+	ConfigDrive     bool                     `json:"config_drive"`
+	UserData        string                   `json:"user_data"`
 }
 
 // ResizeRequest structures are used internally to encode to JSON the parameters required to resize a server instance.
