@@ -1,6 +1,8 @@
 package tb
 
 import (
+	"fmt"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -8,18 +10,18 @@ import (
 func TestNewBucket(t *testing.T) {
 	t.Parallel()
 
-	b := NewBucket(10, 0)
+	b := NewBucket(10, -1)
 	b.Take(10)
 	time.Sleep(100 * time.Millisecond)
 	if w, g := int64(0), b.Take(1); w != g {
-		t.Fatal("Expected no filling when freq < 1/c")
+		t.Fatal("Expected no filling when freq == -1")
 	}
 }
 
 func TestBucket_Take_single(t *testing.T) {
 	t.Parallel()
 
-	b := NewBucket(10, -1)
+	b := NewBucket(10, 0)
 	defer b.Close()
 
 	ex := [...]int64{5, 5, 1, 1, 5, 4, 1, 0}
@@ -49,7 +51,7 @@ func TestBucket_Put_single(t *testing.T) {
 func TestBucket_Take_multi(t *testing.T) {
 	t.Parallel()
 
-	b := NewBucket(10, -1)
+	b := NewBucket(10, 0)
 	defer b.Close()
 
 	exs := [2][]int64{{4, 4, 2, 2}, {2, 2, 1, 1}}
@@ -86,11 +88,14 @@ func TestBucket_Put_multi(t *testing.T) {
 
 func TestBucket_Take_throughput(t *testing.T) {
 	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("Skipping test in short mode")
 	}
 
-	b := NewBucket(1000, -1)
+	runtime.GOMAXPROCS(2)
+
+	b := NewBucket(1000, 0)
 	defer b.Close()
 
 	b.Take(1000)
@@ -110,7 +115,7 @@ func TestBucket_Take_throughput(t *testing.T) {
 }
 
 func BenchmarkBucket_Take_sequential(b *testing.B) {
-	bucket := NewBucket(int64(b.N), -1)
+	bucket := NewBucket(int64(b.N), 0)
 	defer bucket.Close()
 
 	b.ResetTimer()
@@ -130,8 +135,42 @@ func BenchmarkBucket_Put_sequential(b *testing.B) {
 		bucket.Put(8)
 	}
 }
+
+func TestBucket_Wait(t *testing.T) {
+	t.Parallel()
+
+	cases := map[*Bucket]time.Duration{
+		NewBucket(1e3, 500*time.Millisecond): 1 * time.Second,
+		NewBucket(1e3, 20*time.Millisecond):  1 * time.Second,
+		NewBucket(1e3, 1*time.Millisecond):   1 * time.Second,
+		NewBucket(1e3, 0):                    1 * time.Second,
+		NewBucket(2e3, 0):                    0,
+		NewBucket(3e3, 0):                    0,
+	}
+	errors := make(chan error, len(cases))
+
+	for bucket, wait := range cases {
+		go func(bucket *Bucket, wait time.Duration) {
+			defer bucket.Close()
+
+			if got := bucket.Wait(2000); int(wait.Seconds()) != int(got.Seconds()) {
+				errors <- fmt.Errorf("bucket.Wait(2000) with cap=%d, freq=%s: Want: %s, Got %s",
+					bucket.capacity, bucket.freq, wait, got)
+			} else {
+				errors <- nil
+			}
+		}(bucket, wait)
+	}
+
+	for i := 0; i < cap(errors); i++ {
+		if err := <-errors; err != nil {
+			t.Error(err)
+		}
+	}
+}
+
 func TestBucket_Close(t *testing.T) {
-	b := NewBucket(10000, -1)
+	b := NewBucket(10000, 0)
 	b.Close()
 	b.Take(10000)
 	time.Sleep(10 * time.Millisecond)

@@ -11,6 +11,7 @@ type Bucket struct {
 	inc      int64
 	tokens   int64
 	capacity int64
+	freq     time.Duration
 	closing  chan struct{}
 }
 
@@ -18,18 +19,21 @@ type Bucket struct {
 // go-routine which ticks every freq. The number of tokens added on each tick
 // is computed dynamically to be even across the duration of a second.
 //
-// If freq == -1 then it will be adjusted to 1/c seconds. Otherwise,
-// If freq < 1/c seconds, the filling go-routine won't be started.
+// If freq == -1 then the filling go-routine won't be started. Otherwise,
+// If freq < 1/c seconds, then it will be adjusted to 1/c seconds.
 func NewBucket(c int64, freq time.Duration) *Bucket {
 	b := &Bucket{tokens: c, capacity: c, closing: make(chan struct{})}
 
 	if freq == -1 {
-		freq = time.Duration(1e9 / c)
-	} else if freq.Seconds() < 1/float64(c) {
 		return b
+	} else if evenFreq := time.Duration(1e9 / c); freq < evenFreq {
+		freq = evenFreq
 	}
 
-	go b.fill(freq)
+	b.freq = freq
+	b.inc = int64(math.Floor(.5 + (float64(c) * freq.Seconds())))
+
+	go b.fill()
 
 	return b
 }
@@ -76,17 +80,43 @@ func (b *Bucket) Put(n int64) (added int64) {
 	}
 }
 
+// Wait waits for n amount of tokens to be available.
+// If n tokens are immediatelly available it doesn't sleep.
+// Otherwise, it sleeps the minimum amount of time required for the remaining
+// tokens to be available. It returns the wait duration.
+//
+// This method is thread-safe.
+func (b *Bucket) Wait(n int64) time.Duration {
+	var rem int64
+	if rem = n - b.Take(n); rem == 0 {
+		return 0
+	}
+
+	var wait time.Duration
+	for rem > 0 {
+		wait += b.wait(rem)
+		time.Sleep(wait)
+		rem -= b.Take(rem)
+	}
+	return wait
+}
+
 // Close stops the filling go-routine given it was started.
 func (b *Bucket) Close() error {
 	close(b.closing)
 	return nil
 }
 
-func (b *Bucket) fill(freq time.Duration) {
-	ticker := time.NewTicker(freq)
-	defer ticker.Stop()
+// wait returns the minimum amount of time required for n tokens to be available.
+// if n > capacity, n will be adjusted to capacity
+func (b *Bucket) wait(n int64) time.Duration {
+	return time.Duration(int64(math.Ceil(math.Min(float64(n), float64(b.capacity))/float64(b.inc))) *
+		b.freq.Nanoseconds())
+}
 
-	b.inc = int64(math.Floor(.5 + (float64(b.capacity) * freq.Seconds())))
+func (b *Bucket) fill() {
+	ticker := time.NewTicker(b.freq)
+	defer ticker.Stop()
 
 	for _ = range ticker.C {
 		select {
