@@ -1,6 +1,4 @@
-var Gogits = {
-    "PageIsSignup": false
-};
+var Gogits = {};
 
 (function ($) {
     // extend jQuery ajax, set csrf token value
@@ -57,11 +55,17 @@ var Gogits = {
         toggleShow: function () {
             $(this).removeClass("hidden");
         },
-        toggleAjax: function (successCallback) {
+        toggleAjax: function (successCallback, errorCallback) {
             var url = $(this).data("ajax");
             var method = $(this).data('ajax-method') || 'get';
             var ajaxName = $(this).data('ajax-name');
             var data = {};
+
+            if (ajaxName.endsWith("preview")) {
+                data["mode"] = "gfm";
+                data["context"] = $(this).data('ajax-context');
+            }
+
             $('[data-ajax-rel=' + ajaxName + ']').each(function () {
                 var field = $(this).data("ajax-field");
                 var t = $(this).data("ajax-val");
@@ -83,10 +87,12 @@ var Gogits = {
                 }
                 return true;
             });
+            console.log("toggleAjax:", method, url, data);
             $.ajax({
                 url: url,
                 method: method.toUpperCase(),
                 data: data,
+                error: errorCallback,
                 success: function (d) {
                     if (successCallback) {
                         successCallback(d);
@@ -240,7 +246,7 @@ var Gogits = {
             }
         });
 
-        $(window).on('hashchange',function (e) {
+        $(window).on('hashchange', function (e) {
             var m = window.location.hash.match(/^#(L\d+)\-(L\d+)$/);
             var $list = $('.code-view ol.linenums > li');
             if (m) {
@@ -327,32 +333,6 @@ function initCore() {
     Gogits.renderCodeView();
 }
 
-function initRegister() {
-    $.getScript("/js/jquery.validate.min.js", function () {
-        Gogits.validateForm("#login-card", {
-            rules: {
-                "username": {
-                    required: true,
-                    maxlength: 30
-                },
-                "email": {
-                    required: true,
-                    email: true
-                },
-                "passwd": {
-                    required: true,
-                    minlength: 6,
-                    maxlength: 30
-                },
-                "re-passwd": {
-                    required: true,
-                    equalTo: "input[name=passwd]"
-                }
-            }
-        });
-    });
-}
-
 function initUserSetting() {
     // ssh confirmation
     $('#ssh-keys .delete').confirmation({
@@ -387,7 +367,7 @@ function initRepository() {
         var $clone = $('.clone-group-btn');
         if ($clone.length) {
             var $url = $('.clone-group-url');
-            $clone.find('button[data-link]').on("click",function (e) {
+            $clone.find('button[data-link]').on("click", function (e) {
                 var $this = $(this);
                 if (!$this.hasClass('btn-primary')) {
                     $clone.find('.input-group-btn .btn-primary').removeClass('btn-primary').addClass("btn-default");
@@ -408,7 +388,7 @@ function initRepository() {
         var $watch = $('#repo-watching'),
             watchLink = $watch.data("watch"),
             unwatchLink = $watch.data("unwatch");
-        $watch.on('click', '.to-watch',function () {
+        $watch.on('click', '.to-watch', function () {
             if ($watch.hasClass("watching")) {
                 return false;
             }
@@ -468,13 +448,28 @@ function initRepository() {
 function initInstall() {
     // database type change
     (function () {
+        var mysql_default = '127.0.0.1:3306'
+        var postgres_default = '127.0.0.1:5432'
+
         $('#install-database').on("change", function () {
             var val = $(this).val();
-            if (val != "sqlite") {
+            if (val != "SQLite3") {
                 $('.server-sql').show();
                 $('.sqlite-setting').addClass("hide");
-                if (val == "pgsql") {
+                if (val == "PostgreSQL") {
                     $('.pgsql-setting').removeClass("hide");
+
+                    // Change the host value to the Postgres default, but only
+                    // if the user hasn't already changed it from the MySQL
+                    // default.
+                    if ($('#database-host').val() == mysql_default) {
+                        $('#database-host').val(postgres_default);
+                    }
+                } else if (val == 'MySQL') {
+                    $('.pgsql-setting').addClass("hide");
+                    if ($('#database-host').val() == postgres_default) {
+                        $('#database-host').val(mysql_default);
+                    }
                 } else {
                     $('.pgsql-setting').addClass("hide");
                 }
@@ -507,17 +502,19 @@ function initIssue() {
     (function () {
         $("#issue-edit-btn").on("click", function () {
             $('#issue h1.title,#issue .issue-main > .issue-content .content,#issue-edit-btn').toggleHide();
-            $('#issue-edit-title,#issue-edit-content,.issue-edit-cancel,.issue-edit-save').toggleShow();
+            $('#issue-edit-title,.issue-edit-content,.issue-edit-cancel,.issue-edit-save').toggleShow();
         });
         $('.issue-edit-cancel').on("click", function () {
             $('#issue h1.title,#issue .issue-main > .issue-content .content,#issue-edit-btn').toggleShow();
-            $('#issue-edit-title,#issue-edit-content,.issue-edit-cancel,.issue-edit-save').toggleHide();
+            $('#issue-edit-title,.issue-edit-content,.issue-edit-cancel,.issue-edit-save').toggleHide();
         })
     }());
 
     // issue ajax update
     (function () {
+        var $cnt = $('#issue-edit-content');
         $('.issue-edit-save').on("click", function () {
+            $cnt.attr('data-ajax-rel', 'issue-edit-save');
             $(this).toggleAjax(function (json) {
                 if (json.ok) {
                     $('.issue-head h1.title').text(json.title);
@@ -525,24 +522,182 @@ function initIssue() {
                     $('.issue-edit-cancel').trigger("click");
                 }
             });
+            setTimeout(function () {
+                $cnt.attr('data-ajax-rel', 'issue-edit-preview');
+            }, 200)
         });
     }());
 
     // issue ajax preview
     (function () {
-        $('[data-ajax-name=issue-preview]').on("click", function () {
+        $('[data-ajax-name=issue-preview],[data-ajax-name=issue-edit-preview]').on("click", function () {
             var $this = $(this);
-            $this.toggleAjax(function (json) {
-                if (json.ok) {
-                    $($this.data("preview")).html(json.content);
-                }
+            $this.toggleAjax(function (resp) {
+                $($this.data("preview")).html(resp);
+            }, function () {
+                $($this.data("preview")).html("no content");
             })
         });
         $('.issue-write a[data-toggle]').on("click", function () {
-            $('.issue-preview-content').html("loading...");
+            var selector = $(this).parent().next(".issue-preview").find('a').data('preview');
+            $(selector).html("loading...");
         });
-    }())
+    }());
 
+    // assignee
+    var is_issue_bar = $('.issue-bar').length > 0;
+    var $a = $('.assignee');
+    if ($a.data("assigned") > 0) {
+        $('.clear-assignee').toggleShow();
+    }
+    $('.assignee', '#issue').on('click', 'li', function () {
+        var uid = $(this).data("uid");
+        if (is_issue_bar) {
+            var assignee = $a.data("assigned");
+            if (uid != assignee) {
+                $.post($a.data("ajax"), {
+                    issue: $('#issue').data("id"),
+                    assigneeid: uid
+                }, function (json) {
+                    if (json.ok) {
+                        window.location.reload();
+                    }
+                })
+            }
+            return;
+        }
+        $('#assignee').val(uid);
+        if (uid > 0) {
+            $('.clear-assignee').toggleShow();
+            $('#assigned').text($(this).find("strong").text())
+        } else {
+            $('.clear-assignee').toggleHide();
+            $('#assigned').text($('#assigned').data("no-assigned"));
+        }
+    });
+
+    // milestone
+
+    $('#issue .dropdown-menu a[data-toggle="tab"]').on("click", function (e) {
+        e.stopPropagation();
+        $(this).tab('show');
+        return false;
+    });
+
+    var $m = $('.milestone');
+    if ($m.data("milestone") > 0) {
+        $('.clear-milestone').toggleShow();
+    }
+    $('.milestone', '#issue').on('click', 'li.milestone-item', function () {
+        var id = $(this).data("id");
+        if (is_issue_bar) {
+            var m = $m.data("milestone");
+            if (id != m) {
+                $.post($m.data("ajax"), {
+                    issue: $('#issue').data("id"),
+                    milestone: id
+                }, function (json) {
+                    if (json.ok) {
+                        window.location.reload();
+                        if (id > 0) {
+                            $('.clear-milestone').toggleShow();
+                        } else {
+                            $('.clear-milestone').toggleHide();
+                        }
+                    }
+                })
+            }
+            return;
+        }
+        $('#milestone-id').val(id);
+        if (id > 0) {
+            $('.clear-milestone').toggleShow();
+            $('#milestone').text($(this).find("strong").text())
+        } else {
+            $('.clear-milestone').toggleHide();
+            $('#milestone').text($('#milestone').data("no-milestone"));
+        }
+    });
+
+    // labels
+    var removeLabels = [];
+    $('#label-manage-btn').on("click", function () {
+        var $list = $('#label-list');
+        if ($list.hasClass("managing")) {
+            var ids = [];
+            $list.find('li').each(function (i, item) {
+                var id = $(item).data("id");
+                if (id > 0) {
+                    ids.push(id);
+                }
+            });
+            $.post($list.data("ajax"), {"ids": ids.join(","), "remove": removeLabels.join(",")}, function (json) {
+                if (json.ok) {
+                    window.location.reload();
+                }
+            })
+        } else {
+            $list.addClass("managing");
+            $list.find(".count").hide();
+            $list.find(".del").show();
+            $(this).text("Save Labels");
+            $list.on('click', 'li.label-item', function () {
+                var $this = $(this);
+                $this.after($('.label-change-li').detach().show());
+                $('#label-name-change-ipt').val($this.find('.name').text());
+                var color = $this.find('.color').data("color");
+                $('.label-change-color-picker').colorpicker("setValue", color);
+                $('#label-color-change-ipt,#label-color-change-ipt2').val(color);
+                $('#label-change-id-ipt').val($this.data("id"));
+                return false;
+            });
+        }
+    });
+    var colorRegex = new RegExp("^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$");
+    $('#label-color-ipt2').on('keyup', function () {
+        var val = $(this).val();
+        if (val.length > 7) {
+            $(this).val(val.substr(0, 7));
+        }
+        if (colorRegex.test(val)) {
+            $('.label-color-picker').colorpicker("setValue", val);
+        }
+        return true;
+    });
+    $('#label-color-change-ipt2').on('keyup', function () {
+        var val = $(this).val();
+        console.log(val);
+        if (val.length > 7) {
+            $(this).val(val.substr(0, 7));
+        }
+        if (colorRegex.test(val)) {
+            $('.label-change-color-picker').colorpicker("setValue", val);
+        }
+        return true;
+    });
+    $("#label-list").on('click', '.del', function () {
+        var $p = $(this).parent();
+        removeLabels.push($p.data('id'));
+        $p.remove();
+        return false;
+    });
+    $('.label-selected').each(function (i, item) {
+        var $item = $(item);
+        var color = $item.find('.color').data('color');
+        $item.css('background-color', color);
+    });
+    $('.issue-bar .labels .dropdown-menu').on('click', 'li', function (e) {
+        var url = $('.issue-bar .labels').data("ajax");
+        var id = $(this).data('id');
+        var check = $(this).hasClass("checked");
+        $.post(url, {id: id, action: check ? 'detach' : "attach", issue: $('#issue').data('id')}, function (json) {
+            if (json.ok) {
+                window.location.reload();
+            }
+        });
+        e.stopPropagation();
+        return false;
+    })
 }
 
 function initRelease() {
@@ -550,10 +705,10 @@ function initRelease() {
     (function () {
         $('[data-ajax-name=release-preview]').on("click", function () {
             var $this = $(this);
-            $this.toggleAjax(function (json) {
-                if (json.ok) {
-                    $($this.data("preview")).html(json.content);
-                }
+            $this.toggleAjax(function (resp) {
+                $($this.data("preview")).html(resp);
+            }, function () {
+                $($this.data("preview")).html("no content");
             })
         });
         $('.release-write a[data-toggle]').on("click", function () {
@@ -570,13 +725,64 @@ function initRelease() {
     }());
 }
 
+function initRepoSetting() {
+    // repo member add
+    $('#repo-collaborator').on('keyup', function () {
+        var $this = $(this);
+        if (!$this.val()) {
+            $this.next().toggleHide();
+            return;
+        }
+        $.ajax({
+            url: '/api/v1/users/search?q=' + $this.val(),
+            dataType: "json",
+            success: function (json) {
+                if (json.ok && json.data.length) {
+                    var html = '';
+                    $.each(json.data, function (i, item) {
+                        html += '<li><img src="' + item.avatar + '">' + item.username + '</li>';
+                    });
+                    $this.next().toggleShow();
+                    $this.next().find('ul').html(html);
+                } else {
+                    $this.next().toggleHide();
+                }
+            }
+        });
+    }).on('focus', function () {
+        if (!$(this).val()) {
+            $(this).next().toggleHide();
+        }
+    }).next().on("click", 'li', function () {
+        $('#repo-collaborator').val($(this).text());
+    });
+}
+
+function initRepoCreating() {
+    // owner switch menu click
+    (function () {
+        $('#repo-owner-switch .dropdown-menu').on("click", "li", function () {
+            var uid = $(this).data('uid');
+            // set to input
+            $('#repo-owner-id').val(uid);
+            // set checked class
+            if (!$(this).hasClass("checked")) {
+                $(this).parent().find(".checked").removeClass("checked");
+                $(this).addClass("checked");
+            }
+            // set button group to show clicked owner
+            $('#repo-owner-avatar').attr("src",$(this).find('img').attr("src"));
+            $('#repo-owner-name').text($(this).text().trim());
+            console.log("set repo owner to uid :",uid,$(this).text().trim());
+        });
+    }());
+    console.log("init repo-creating scripts");
+}
+
 (function ($) {
     $(function () {
         initCore();
         var body = $("#body");
-        if (body.data("page") == "user-signup") {
-            initRegister();
-        }
         if (body.data("page") == "user") {
             initUserSetting();
         }
@@ -592,5 +798,15 @@ function initRelease() {
         if ($('#release').length) {
             initRelease();
         }
+        if ($('#repo-setting-container').length) {
+            initRepoSetting();
+        }
+        if ($('#repo-create').length) {
+            initRepoCreating();
+        }
     });
 })(jQuery);
+
+String.prototype.endsWith = function (suffix) {
+    return this.indexOf(suffix, this.length - suffix.length) !== -1;
+};

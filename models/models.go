@@ -14,11 +14,11 @@ import (
 	"github.com/go-xorm/xorm"
 	_ "github.com/lib/pq"
 
-	"github.com/gogits/gogs/modules/base"
+	"github.com/gogits/gogs/modules/setting"
 )
 
 var (
-	orm    *xorm.Engine
+	x      *xorm.Engine
 	tables []interface{}
 
 	HasEngine bool
@@ -34,20 +34,24 @@ var (
 func init() {
 	tables = append(tables, new(User), new(PublicKey), new(Repository), new(Watch),
 		new(Action), new(Access), new(Issue), new(Comment), new(Oauth2), new(Follow),
-		new(Mirror), new(Release))
+		new(Mirror), new(Release), new(LoginSource), new(Webhook), new(IssueUser),
+		new(Milestone), new(Label), new(HookTask), new(Team), new(OrgUser), new(TeamUser),
+		new(UpdateTask))
 }
 
 func LoadModelsConfig() {
-	DbCfg.Type = base.Cfg.MustValue("database", "DB_TYPE")
+	DbCfg.Type = setting.Cfg.MustValue("database", "DB_TYPE")
 	if DbCfg.Type == "sqlite3" {
 		UseSQLite3 = true
 	}
-	DbCfg.Host = base.Cfg.MustValue("database", "HOST")
-	DbCfg.Name = base.Cfg.MustValue("database", "NAME")
-	DbCfg.User = base.Cfg.MustValue("database", "USER")
-	DbCfg.Pwd = base.Cfg.MustValue("database", "PASSWD")
-	DbCfg.SslMode = base.Cfg.MustValue("database", "SSL_MODE")
-	DbCfg.Path = base.Cfg.MustValue("database", "PATH", "data/gogs.db")
+	DbCfg.Host = setting.Cfg.MustValue("database", "HOST")
+	DbCfg.Name = setting.Cfg.MustValue("database", "NAME")
+	DbCfg.User = setting.Cfg.MustValue("database", "USER")
+	if len(DbCfg.Pwd) == 0 {
+		DbCfg.Pwd = setting.Cfg.MustValue("database", "PASSWD")
+	}
+	DbCfg.SslMode = setting.Cfg.MustValue("database", "SSL_MODE")
+	DbCfg.Path = setting.Cfg.MustValue("database", "PATH", "data/gogs.db")
 }
 
 func NewTestEngine(x *xorm.Engine) (err error) {
@@ -58,15 +62,14 @@ func NewTestEngine(x *xorm.Engine) (err error) {
 	case "postgres":
 		var host, port = "127.0.0.1", "5432"
 		fields := strings.Split(DbCfg.Host, ":")
-		if len(fields) > 0 {
+		if len(fields) > 0 && len(strings.TrimSpace(fields[0])) > 0 {
 			host = fields[0]
 		}
-		if len(fields) > 1 {
+		if len(fields) > 1 && len(strings.TrimSpace(fields[1])) > 0 {
 			port = fields[1]
 		}
 		cnnstr := fmt.Sprintf("user=%s password=%s host=%s port=%s dbname=%s sslmode=%s",
 			DbCfg.User, DbCfg.Pwd, host, port, DbCfg.Name, DbCfg.SslMode)
-		//fmt.Println(cnnstr)
 		x, err = xorm.NewEngine("postgres", cnnstr)
 	case "sqlite3":
 		if !EnableSQLite3 {
@@ -86,22 +89,22 @@ func NewTestEngine(x *xorm.Engine) (err error) {
 func SetEngine() (err error) {
 	switch DbCfg.Type {
 	case "mysql":
-		orm, err = xorm.NewEngine("mysql", fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8",
+		x, err = xorm.NewEngine("mysql", fmt.Sprintf("%s:%s@tcp(%s)/%s?charset=utf8",
 			DbCfg.User, DbCfg.Pwd, DbCfg.Host, DbCfg.Name))
 	case "postgres":
 		var host, port = "127.0.0.1", "5432"
 		fields := strings.Split(DbCfg.Host, ":")
-		if len(fields) > 0 {
+		if len(fields) > 0 && len(strings.TrimSpace(fields[0])) > 0 {
 			host = fields[0]
 		}
-		if len(fields) > 1 {
+		if len(fields) > 1 && len(strings.TrimSpace(fields[1])) > 0 {
 			port = fields[1]
 		}
-		orm, err = xorm.NewEngine("postgres", fmt.Sprintf("user=%s password=%s host=%s port=%s dbname=%s sslmode=%s",
+		x, err = xorm.NewEngine("postgres", fmt.Sprintf("user=%s password=%s host=%s port=%s dbname=%s sslmode=%s",
 			DbCfg.User, DbCfg.Pwd, host, port, DbCfg.Name, DbCfg.SslMode))
 	case "sqlite3":
 		os.MkdirAll(path.Dir(DbCfg.Path), os.ModePerm)
-		orm, err = xorm.NewEngine("sqlite3", DbCfg.Path)
+		x, err = xorm.NewEngine("sqlite3", DbCfg.Path)
 	default:
 		return fmt.Errorf("Unknown database type: %s", DbCfg.Type)
 	}
@@ -111,19 +114,18 @@ func SetEngine() (err error) {
 
 	// WARNNING: for serv command, MUST remove the output to os.stdout,
 	// so use log file to instead print to stdout.
-	execDir, _ := base.ExecDir()
-	logPath := execDir + "/log/xorm.log"
+	logPath := path.Join(setting.LogRootPath, "xorm.log")
 	os.MkdirAll(path.Dir(logPath), os.ModePerm)
 
 	f, err := os.Create(logPath)
 	if err != nil {
 		return fmt.Errorf("models.init(fail to create xorm.log): %v", err)
 	}
-	orm.Logger = xorm.NewSimpleLogger(f)
+	x.Logger = xorm.NewSimpleLogger(f)
 
-	orm.ShowSQL = true
-	orm.ShowDebug = true
-	orm.ShowErr = true
+	x.ShowSQL = true
+	x.ShowDebug = true
+	x.ShowErr = true
 	return nil
 }
 
@@ -131,7 +133,7 @@ func NewEngine() (err error) {
 	if err = SetEngine(); err != nil {
 		return err
 	}
-	if err = orm.Sync(tables...); err != nil {
+	if err = x.Sync2(tables...); err != nil {
 		return fmt.Errorf("sync database struct error: %v\n", err)
 	}
 	return nil
@@ -139,24 +141,31 @@ func NewEngine() (err error) {
 
 type Statistic struct {
 	Counter struct {
-		User, PublicKey, Repo,
-		Watch, Action, Access,
-		Issue, Comment,
-		Mirror, Oauth, Release int64
+		User, PublicKey, Repo, Watch, Action, Access,
+		Issue, Comment, Mirror, Oauth, Release,
+		LoginSource, Webhook, Milestone int64
 	}
 }
 
 func GetStatistic() (stats Statistic) {
-	stats.Counter.User, _ = orm.Count(new(User))
-	stats.Counter.PublicKey, _ = orm.Count(new(PublicKey))
-	stats.Counter.Repo, _ = orm.Count(new(Repository))
-	stats.Counter.Watch, _ = orm.Count(new(Watch))
-	stats.Counter.Action, _ = orm.Count(new(Action))
-	stats.Counter.Access, _ = orm.Count(new(Access))
-	stats.Counter.Issue, _ = orm.Count(new(Issue))
-	stats.Counter.Comment, _ = orm.Count(new(Comment))
-	stats.Counter.Mirror, _ = orm.Count(new(Mirror))
-	stats.Counter.Oauth, _ = orm.Count(new(Oauth2))
-	stats.Counter.Release, _ = orm.Count(new(Release))
+	stats.Counter.User, _ = x.Count(new(User))
+	stats.Counter.PublicKey, _ = x.Count(new(PublicKey))
+	stats.Counter.Repo, _ = x.Count(new(Repository))
+	stats.Counter.Watch, _ = x.Count(new(Watch))
+	stats.Counter.Action, _ = x.Count(new(Action))
+	stats.Counter.Access, _ = x.Count(new(Access))
+	stats.Counter.Issue, _ = x.Count(new(Issue))
+	stats.Counter.Comment, _ = x.Count(new(Comment))
+	stats.Counter.Mirror, _ = x.Count(new(Mirror))
+	stats.Counter.Oauth, _ = x.Count(new(Oauth2))
+	stats.Counter.Release, _ = x.Count(new(Release))
+	stats.Counter.LoginSource, _ = x.Count(new(LoginSource))
+	stats.Counter.Webhook, _ = x.Count(new(Webhook))
+	stats.Counter.Milestone, _ = x.Count(new(Milestone))
 	return
+}
+
+// DumpDatabase dumps all data from database to file system.
+func DumpDatabase(filePath string) error {
+	return x.DumpAllToFile(filePath)
 }

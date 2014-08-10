@@ -6,12 +6,16 @@
 package log
 
 import (
+	"fmt"
+	"os"
+	"path"
+
 	"github.com/gogits/logs"
 )
 
 var (
-	logger       *logs.BeeLogger
-	Mode, Config string
+	loggers   []*logs.BeeLogger
+	GitLogger *logs.BeeLogger
 )
 
 func init() {
@@ -19,32 +23,70 @@ func init() {
 }
 
 func NewLogger(bufLen int64, mode, config string) {
-	Mode, Config = mode, config
-	logger = logs.NewLogger(bufLen)
+	logger := logs.NewLogger(bufLen)
+
+	isExist := false
+	for _, l := range loggers {
+		if l.Adapter == mode {
+			isExist = true
+			l = logger
+		}
+	}
+	if !isExist {
+		loggers = append(loggers, logger)
+	}
 	logger.SetLogFuncCallDepth(3)
-	logger.SetLogger(mode, config)
+	if err := logger.SetLogger(mode, config); err != nil {
+		Fatal("Fail to set logger(%s): %v", mode, err)
+	}
+}
+
+func NewGitLogger(logPath string) {
+	os.MkdirAll(path.Dir(logPath), os.ModePerm)
+	GitLogger = logs.NewLogger(0)
+	GitLogger.SetLogger("file", fmt.Sprintf(`{"level":0,"filename":"%s","rotate":false}`, logPath))
 }
 
 func Trace(format string, v ...interface{}) {
-	logger.Trace(format, v...)
+	for _, logger := range loggers {
+		logger.Trace(format, v...)
+	}
 }
 
 func Debug(format string, v ...interface{}) {
-	logger.Debug(format, v...)
+	for _, logger := range loggers {
+		logger.Debug(format, v...)
+	}
 }
 
 func Info(format string, v ...interface{}) {
-	logger.Info(format, v...)
+	for _, logger := range loggers {
+		logger.Info(format, v...)
+	}
 }
 
 func Error(format string, v ...interface{}) {
-	logger.Error(format, v...)
+	for _, logger := range loggers {
+		logger.Error(format, v...)
+	}
 }
 
 func Warn(format string, v ...interface{}) {
-	logger.Warn(format, v...)
+	for _, logger := range loggers {
+		logger.Warn(format, v...)
+	}
 }
 
 func Critical(format string, v ...interface{}) {
-	logger.Critical(format, v...)
+	for _, logger := range loggers {
+		logger.Critical(format, v...)
+	}
+}
+
+func Fatal(format string, v ...interface{}) {
+	Error(format, v...)
+	for _, l := range loggers {
+		l.Close()
+	}
+	os.Exit(2)
 }

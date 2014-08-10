@@ -7,6 +7,7 @@ package middleware
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/go-martini/martini"
@@ -14,8 +15,8 @@ import (
 	"github.com/gogits/git"
 
 	"github.com/gogits/gogs/models"
-	"github.com/gogits/gogs/modules/base"
 	"github.com/gogits/gogs/modules/log"
+	"github.com/gogits/gogs/modules/setting"
 )
 
 func RepoAssignment(redirect bool, args ...bool) martini.Handler {
@@ -42,17 +43,28 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 		repoName := params["reponame"]
 		refName := params["branchname"]
 
-		// get repository owner
-		ctx.Repo.IsOwner = ctx.IsSigned && ctx.User.LowerName == strings.ToLower(userName)
-
-		if !ctx.Repo.IsOwner {
-			user, err = models.GetUserByName(params["username"])
+		// TODO: need more advanced onwership and access level check.
+		// Collaborators who have write access can be seen as owners.
+		if ctx.IsSigned {
+			ctx.Repo.IsOwner, err = models.HasAccess(ctx.User.Name, userName+"/"+repoName, models.WRITABLE)
 			if err != nil {
-				if redirect {
+				ctx.Handle(500, "RepoAssignment(HasAccess)", err)
+				return
+			}
+			ctx.Repo.IsTrueOwner = ctx.User.LowerName == strings.ToLower(userName)
+		}
+
+		if !ctx.Repo.IsTrueOwner {
+			user, err = models.GetUserByName(userName)
+			if err != nil {
+				if err == models.ErrUserNotExist {
+					ctx.Handle(404, "RepoAssignment(GetUserByName)", err)
+					return
+				} else if redirect {
 					ctx.Redirect("/")
 					return
 				}
-				ctx.Handle(200, "RepoAssignment", err)
+				ctx.Handle(500, "RepoAssignment(GetUserByName)", err)
 				return
 			}
 		} else {
@@ -64,10 +76,15 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 				ctx.Redirect("/")
 				return
 			}
-			ctx.Handle(200, "RepoAssignment", errors.New("invliad user account for single repository"))
+			ctx.Handle(403, "RepoAssignment", errors.New("invliad user account for single repository"))
 			return
 		}
 		ctx.Repo.Owner = user
+
+		// Organization owner team members are true owners as well.
+		if ctx.Repo.Owner.IsOrganization() && ctx.Repo.Owner.IsOrgOwner(ctx.User.Id) {
+			ctx.Repo.IsTrueOwner = true
+		}
 
 		// get repository
 		repo, err := models.GetRepositoryByName(user.Id, repoName)
@@ -83,14 +100,19 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 			return
 		}
 
+		// Check if the mirror repository owner(mirror repository doesn't have access).
+		if ctx.IsSigned && !ctx.Repo.IsOwner && repo.OwnerId == ctx.User.Id {
+			ctx.Repo.IsOwner = true
+		}
+
 		// Check access.
-		if repo.IsPrivate {
+		if repo.IsPrivate && !ctx.Repo.IsOwner {
 			if ctx.User == nil {
 				ctx.Handle(404, "RepoAssignment(HasAccess)", nil)
 				return
 			}
 
-			hasAccess, err := models.HasAccess(ctx.User.Name, ctx.Repo.Owner.Name+"/"+repo.Name, models.AU_READABLE)
+			hasAccess, err := models.HasAccess(ctx.User.Name, ctx.Repo.Owner.Name+"/"+repo.Name, models.READABLE)
 			if err != nil {
 				ctx.Handle(500, "RepoAssignment(HasAccess)", err)
 				return
@@ -112,6 +134,7 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 		}
 
 		repo.NumOpenIssues = repo.NumIssues - repo.NumClosedIssues
+		repo.NumOpenMilestones = repo.NumMilestones - repo.NumClosedMilestones
 		ctx.Repo.Repository = repo
 		ctx.Data["IsBareRepo"] = ctx.Repo.Repository.IsBare
 
@@ -135,15 +158,20 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 		ctx.Data["Owner"] = user
 		ctx.Data["RepoLink"] = ctx.Repo.RepoLink
 		ctx.Data["IsRepositoryOwner"] = ctx.Repo.IsOwner
+		ctx.Data["IsRepositoryTrueOwner"] = ctx.Repo.IsTrueOwner
 		ctx.Data["BranchName"] = ""
 
-		ctx.Repo.CloneLink.SSH = fmt.Sprintf("%s@%s:%s/%s.git", base.RunUser, base.Domain, user.LowerName, repo.LowerName)
-		ctx.Repo.CloneLink.HTTPS = fmt.Sprintf("%s%s/%s.git", base.AppUrl, user.LowerName, repo.LowerName)
+		if setting.SshPort != 22 {
+			ctx.Repo.CloneLink.SSH = fmt.Sprintf("ssh://%s@%s/%s/%s.git", setting.RunUser, setting.Domain, user.LowerName, repo.LowerName)
+		} else {
+			ctx.Repo.CloneLink.SSH = fmt.Sprintf("%s@%s:%s/%s.git", setting.RunUser, setting.Domain, user.LowerName, repo.LowerName)
+		}
+		ctx.Repo.CloneLink.HTTPS = fmt.Sprintf("%s%s/%s.git", setting.AppUrl, user.LowerName, repo.LowerName)
 		ctx.Data["CloneLink"] = ctx.Repo.CloneLink
 
 		if ctx.Repo.Repository.IsGoget {
-			ctx.Data["GoGetLink"] = fmt.Sprintf("%s%s/%s", base.AppUrl, user.LowerName, repo.LowerName)
-			ctx.Data["GoGetImport"] = fmt.Sprintf("%s/%s/%s", base.Domain, user.LowerName, repo.LowerName)
+			ctx.Data["GoGetLink"] = fmt.Sprintf("%s%s/%s", setting.AppUrl, user.LowerName, repo.LowerName)
+			ctx.Data["GoGetImport"] = fmt.Sprintf("%s/%s/%s", setting.Domain, user.LowerName, repo.LowerName)
 		}
 
 		// when repo is bare, not valid branch
@@ -162,16 +190,16 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 					ctx.Repo.CommitId = ctx.Repo.Commit.Id.String()
 
 				} else if gitRepo.IsTagExist(refName) {
-					ctx.Repo.IsBranch = true
+					ctx.Repo.IsTag = true
 					ctx.Repo.BranchName = refName
 
-					ctx.Repo.Commit, err = gitRepo.GetCommitOfTag(refName)
+					ctx.Repo.Tag, err = gitRepo.GetTag(refName)
 					if err != nil {
 						ctx.Handle(404, "RepoAssignment invalid tag", nil)
 						return
 					}
+					ctx.Repo.Commit, _ = ctx.Repo.Tag.Commit()
 					ctx.Repo.CommitId = ctx.Repo.Commit.Id.String()
-
 				} else if len(refName) == 40 {
 					ctx.Repo.IsCommit = true
 					ctx.Repo.CommitId = refName
@@ -188,16 +216,23 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 				}
 
 			} else {
-				refName = ctx.Repo.Repository.DefaultBranch
 				if len(refName) == 0 {
-					refName = "master"
+					if gitRepo.IsBranchExist(ctx.Repo.Repository.DefaultBranch) {
+						refName = ctx.Repo.Repository.DefaultBranch
+					} else {
+						brs, err := gitRepo.GetBranches()
+						if err != nil {
+							ctx.Handle(500, "RepoAssignment(GetBranches))", err)
+							return
+						}
+						refName = brs[0]
+					}
 				}
 				goto detect
 			}
 
 			ctx.Data["IsBranch"] = ctx.Repo.IsBranch
 			ctx.Data["IsCommit"] = ctx.Repo.IsCommit
-			log.Debug("Repo.Commit: %v", ctx.Repo.Commit)
 		}
 
 		log.Debug("displayBare: %v; IsBare: %v", displayBare, ctx.Repo.Repository.IsBare)
@@ -214,6 +249,7 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 		}
 
 		ctx.Data["BranchName"] = ctx.Repo.BranchName
+		ctx.Data["TagName"] = ctx.Repo.TagName
 		brs, err := ctx.Repo.GitRepo.GetBranches()
 		if err != nil {
 			log.Error("RepoAssignment(GetBranches): %v", err)
@@ -221,5 +257,19 @@ func RepoAssignment(redirect bool, args ...bool) martini.Handler {
 		ctx.Data["Branches"] = brs
 		ctx.Data["CommitId"] = ctx.Repo.CommitId
 		ctx.Data["IsRepositoryWatching"] = ctx.Repo.IsWatching
+	}
+}
+
+func RequireTrueOwner() martini.Handler {
+	return func(ctx *Context) {
+		if !ctx.Repo.IsTrueOwner {
+			if !ctx.IsSigned {
+				ctx.SetCookie("redirect_to", "/"+url.QueryEscape(ctx.Req.RequestURI))
+				ctx.Redirect("/user/login")
+				return
+			}
+			ctx.Handle(404, ctx.Req.RequestURI, nil)
+			return
+		}
 	}
 }

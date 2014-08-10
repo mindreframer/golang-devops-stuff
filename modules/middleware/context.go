@@ -28,6 +28,7 @@ import (
 	"github.com/gogits/gogs/modules/auth"
 	"github.com/gogits/gogs/modules/base"
 	"github.com/gogits/gogs/modules/log"
+	"github.com/gogits/gogs/modules/setting"
 )
 
 // Context represents context of a request.
@@ -46,20 +47,23 @@ type Context struct {
 	csrfToken string
 
 	Repo struct {
-		IsOwner    bool
-		IsWatching bool
-		IsBranch   bool
-		IsTag      bool
-		IsCommit   bool
-		HasAccess  bool
-		Repository *models.Repository
-		Owner      *models.User
-		Commit     *git.Commit
-		GitRepo    *git.Repository
-		BranchName string
-		CommitId   string
-		RepoLink   string
-		CloneLink  struct {
+		IsOwner     bool
+		IsTrueOwner bool
+		IsWatching  bool
+		IsBranch    bool
+		IsTag       bool
+		IsCommit    bool
+		HasAccess   bool
+		Repository  *models.Repository
+		Owner       *models.User
+		Commit      *git.Commit
+		Tag         *git.Tag
+		GitRepo     *git.Repository
+		BranchName  string
+		TagName     string
+		CommitId    string
+		RepoLink    string
+		CloneLink   struct {
 			SSH   string
 			HTTPS string
 			Git   string
@@ -79,6 +83,19 @@ func (ctx *Context) Query(name string) string {
 // }
 
 // HasError returns true if error occurs in form validation.
+func (ctx *Context) HasApiError() bool {
+	hasErr, ok := ctx.Data["HasError"]
+	if !ok {
+		return false
+	}
+	return hasErr.(bool)
+}
+
+func (ctx *Context) GetErrMsg() string {
+	return ctx.Data["ErrorMsg"].(string)
+}
+
+// HasError returns true if error occurs in form validation.
 func (ctx *Context) HasError() bool {
 	hasErr, ok := ctx.Data["HasError"]
 	if !ok {
@@ -90,12 +107,12 @@ func (ctx *Context) HasError() bool {
 }
 
 // HTML calls render.HTML underlying but reduce one argument.
-func (ctx *Context) HTML(status int, name string, htmlOpt ...HTMLOptions) {
-	ctx.Render.HTML(status, name, ctx.Data, htmlOpt...)
+func (ctx *Context) HTML(status int, name base.TplName, htmlOpt ...HTMLOptions) {
+	ctx.Render.HTML(status, string(name), ctx.Data, htmlOpt...)
 }
 
 // RenderWithErr used for page has form validation but need to prompt error to users.
-func (ctx *Context) RenderWithErr(msg, tpl string, form auth.Form) {
+func (ctx *Context) RenderWithErr(msg string, tpl base.TplName, form auth.Form) {
 	if form != nil {
 		auth.AssignForm(form, ctx.Data)
 	}
@@ -106,12 +123,20 @@ func (ctx *Context) RenderWithErr(msg, tpl string, form auth.Form) {
 
 // Handle handles and logs error by given status.
 func (ctx *Context) Handle(status int, title string, err error) {
-	log.Error("%s: %v", title, err)
-	if martini.Dev != martini.Prod {
-		ctx.Data["ErrorMsg"] = err
+	if err != nil {
+		log.Error("%s: %v", title, err)
+		if martini.Dev != martini.Prod {
+			ctx.Data["ErrorMsg"] = err
+		}
 	}
 
-	ctx.HTML(status, fmt.Sprintf("status/%d", status))
+	switch status {
+	case 404:
+		ctx.Data["Title"] = "Page Not Found"
+	case 500:
+		ctx.Data["Title"] = "Internal Server Error"
+	}
+	ctx.HTML(status, base.TplName(fmt.Sprintf("status/%d", status)))
 }
 
 func (ctx *Context) Debug(msg string, args ...interface{}) {
@@ -304,14 +329,14 @@ func InitContext() martini.Handler {
 			// p:      p,
 			Req:    r,
 			Res:    res,
-			Cache:  base.Cache,
+			Cache:  setting.Cache,
 			Render: rd,
 		}
 
 		ctx.Data["PageStartTime"] = time.Now()
 
 		// start session
-		ctx.Session = base.SessionManager.SessionStart(res, r)
+		ctx.Session = setting.SessionManager.SessionStart(res, r)
 
 		// Get flash.
 		values, err := url.ParseQuery(ctx.GetCookie("gogs_flash"))
@@ -336,7 +361,7 @@ func InitContext() martini.Handler {
 		})
 
 		// Get user from session if logined.
-		user := auth.SignedInUser(ctx.Session)
+		user := auth.SignedInUser(ctx.req.Header, ctx.Session)
 		ctx.User = user
 		ctx.IsSigned = user != nil
 

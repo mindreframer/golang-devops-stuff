@@ -6,6 +6,7 @@ package models
 
 import (
 	"bufio"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gogits/gogs/modules/base"
 	"github.com/gogits/gogs/modules/log"
+	"github.com/gogits/gogs/modules/process"
 )
 
 // Diff line types.
@@ -49,6 +51,7 @@ type DiffSection struct {
 
 type DiffFile struct {
 	Name               string
+	Index              int
 	Addition, Deletion int
 	Type               int
 	IsBin              bool
@@ -66,7 +69,7 @@ func (diff *Diff) NumFiles() int {
 
 const DIFF_HEAD = "diff --git "
 
-func ParsePatch(reader io.Reader) (*Diff, error) {
+func ParsePatch(pid int64, cmd *exec.Cmd, reader io.Reader) (*Diff, error) {
 	scanner := bufio.NewScanner(reader)
 	var (
 		curFile    *DiffFile
@@ -144,6 +147,7 @@ func ParsePatch(reader io.Reader) (*Diff, error) {
 
 			curFile = &DiffFile{
 				Name:     a[strings.Index(a, "/")+1:],
+				Index:    len(diff.Files) + 1,
 				Type:     DIFF_FILE_CHANGE,
 				Sections: make([]*DiffSection, 0, 10),
 			}
@@ -166,6 +170,10 @@ func ParsePatch(reader io.Reader) (*Diff, error) {
 		}
 	}
 
+	// In case process became zombie.
+	if err := process.Kill(pid); err != nil {
+		log.Error("git_diff.ParsePatch(Kill): %v", err)
+	}
 	return diff, nil
 }
 
@@ -180,33 +188,23 @@ func GetDiff(repoPath, commitid string) (*Diff, error) {
 		return nil, err
 	}
 
+	rd, wr := io.Pipe()
+	var cmd *exec.Cmd
 	// First commit of repository.
 	if commit.ParentCount() == 0 {
-		rd, wr := io.Pipe()
-		go func() {
-			cmd := exec.Command("git", "show", commitid)
-			cmd.Dir = repoPath
-			cmd.Stdout = wr
-			cmd.Stdin = os.Stdin
-			cmd.Stderr = os.Stderr
-			cmd.Run()
-			wr.Close()
-		}()
-		defer rd.Close()
-		return ParsePatch(rd)
-	}
-
-	rd, wr := io.Pipe()
-	go func() {
+		cmd = exec.Command("git", "show", commitid)
+	} else {
 		c, _ := commit.Parent(0)
-		cmd := exec.Command("git", "diff", c.Id.String(), commitid)
-		cmd.Dir = repoPath
-		cmd.Stdout = wr
-		cmd.Stdin = os.Stdin
-		cmd.Stderr = os.Stderr
+		cmd = exec.Command("git", "diff", c.Id.String(), commitid)
+	}
+	cmd.Dir = repoPath
+	cmd.Stdout = wr
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+	go func() {
 		cmd.Run()
 		wr.Close()
 	}()
 	defer rd.Close()
-	return ParsePatch(rd)
+	return ParsePatch(process.Add(fmt.Sprintf("GetDiff(%s)", repoPath), cmd), cmd, rd)
 }

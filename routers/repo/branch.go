@@ -7,21 +7,27 @@ package repo
 import (
 	"github.com/go-martini/martini"
 
+	"github.com/gogits/gogs/modules/base"
 	"github.com/gogits/gogs/modules/middleware"
 )
 
+const (
+	BRANCH base.TplName = "repo/branch"
+)
+
 func Branches(ctx *middleware.Context, params martini.Params) {
+	ctx.Data["Title"] = "Branches"
+	ctx.Data["IsRepoToolbarBranches"] = true
+
 	brs, err := ctx.Repo.GitRepo.GetBranches()
 	if err != nil {
-		ctx.Handle(404, "repo.Branches", err)
+		ctx.Handle(500, "repo.Branches(GetBranches)", err)
 		return
 	} else if len(brs) == 0 {
-		ctx.Handle(404, "repo.Branches", nil)
+		ctx.Handle(404, "repo.Branches(GetBranches)", nil)
 		return
 	}
 
 	ctx.Data["Branches"] = brs
-	ctx.Data["IsRepoToolbarBranches"] = true
-
-	ctx.HTML(200, "repo/branches")
+	ctx.HTML(200, BRANCH)
 }
