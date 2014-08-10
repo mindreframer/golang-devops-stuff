@@ -1,47 +1,33 @@
-OSTENT
-======
+`ostent` displays current system metrics. [**Demo** here](http://demo.ostrost.com/)
 
-[**View Demo**](http://demo.ostrost.com/)
+![screenshot](https://www.ostrost.com/ostent/screenshot.png)
 
-![screenshot](https://github.com/rzab/ostent/raw/master/screenshot.png)
+Install & run with `curl -sSL https://github.com/rzab/ostent/raw/master/ostent.sh | sh`
 
-   - Memory usage
-   - Network traffic
-   - Disks usage
-   - CPU load
-   - Processes
-   - to be continued
+It's a single executable without dependecies. Once installed,
+it will self-upgrade whenever there's new release.
 
-Everything is on real-time display only, 1 second refresh.
-A hosted service with graphs, history, aggregation etc.,
-to leave the machines out of it, is bound to happen.
-ostent is inteded to be an agent of sort,
-but however it goes it's a stand-alone app
-and any service connection will be opt-in and optional.
+Platforms
+---------
 
-Download
---------
-
-   - [Linux 64bits](https://OSTROST.COM/ostent/releases/latest/Linux x86_64/ostent)
-   - [Linux 32bits](https://OSTROST.COM/ostent/releases/latest/Linux i686/ostent)
-   - [Darwin](https://OSTROST.COM/ostent/releases/latest/Darwin x86_64/ostent)
+   - Linux [64-bit](https://github.com/rzab/ostent/releases/download/v0.1.8/Linux.x86_64) | [32-bit](https://github.com/rzab/ostent/releases/download/v0.1.8/Linux.i686)
+   - [Darwin](https://github.com/rzab/ostent/releases/download/v0.1.8/Darwin.x86_64)
    - _Expect \*BSD builds surely_
 
-A single executable without dependecies, has no config, makes no files of it's own.
-Self-updates: new releases will be deployed automatically, sans page reload yet.
+Binaries distributed by [GitHub Releases](https://github.com/rzab/ostent/releases)
 
-Laziest install: `curl -sSL https://github.com/rzab/ostent/raw/master/lazyinstall.sh | sh -e`
+Usage
+-----
 
-`ostent` accepts optional `-b[ind]` argument to set specific IP and/or port to bind to, otherwise any machine IP and port 8050 by default.
+`ostent` accepts optional `-bind` argument to set specific IP and/or port to bind to, otherwise any machine IP and port 8050 by default.
 
    - `ostent -bind 127.1` # [http://127.0.0.1:8050/](http://127.0.0.1:8050/)
    - `ostent -bind 192.168.1.10:8051` # port 8051
    - `ostent -bind 8052` # any IP, port 8052
 
-Feedback & contribute
----------------------
+`-update` sets collection interval (1 second by default), append `s` for seconds, `m` for minutes: `5s`, `1m` etc.
 
-[Please do](https://github.com/rzab/ostent/issues/new). Ideas, bugs, pull requests, anything.
+Run it, it'll give the link(s) to open in a browser.
 
 Running the code
 ----------------
@@ -52,48 +38,53 @@ Running the code
 
 3. **`export GOPATH=$GOPATH:$PWD`** `# the current directory into $GOPATH`
 
-4. **`go get github.com/jteeuwen/go-bindata/go-bindata`**
+4. **`make bootstrap`**
+   GNU make here. Will:
+   - install required Go packages
+   - generate required `src/share/{assets,templates.html}/bindata.devel.go`
+     These files will contain absolute local paths.
 
-5. **`scons`** to generate required `src/ostential/{assets,view}/bindata.devel.go`. It's either scons, or run **manually**:
-   ```sh
-      go-bindata -pkg view   -o src/ostential/view/bindata.devel.go   -tags '!production' -debug -prefix templates.min templates.min/...
-      go-bindata -pkg assets -o src/ostential/assets/bindata.devel.go -tags '!production' -debug -prefix assets        assets/...
-   ```
-
-6. Using [rerun](https://github.com/skelterjohn/rerun), it'll go get the remaining dependecies:
-
-	**`go get github.com/skelterjohn/rerun`**
-
-7. **`rerun ostent`**
+5. Either **`rerun ostent`** (see [rerun](https://github.com/skelterjohn/rerun)) to run or **`make`** to build.
 
 Go packages
 -----------
 
-`[src/]ostential` is the core package.
-
-`[src/]ostent` is the main (as in [Go Program execution](http://golang.org/ref/spec#Program_execution)) package:
+`[src/]ostent` is the main (_as in [Go Program execution](http://golang.org/ref/spec#Program_execution)_) package:
 rerun will find `main.devel.go` file; the other `main.production.go` (used when building with `-tags production`)
-is the init code for the distributed [binaries](#download): also includes
-[goagain](https://github.com/rcrowley/goagain) recovering and self-updating via [go-update](https://github.com/inconshreveable/go-update).
+is the init code for the distributed binaries: also includes
+[goagain](https://github.com/rcrowley/goagain) recovering and self-upgrading via [go-update](https://github.com/inconshreveable/go-update).
 
-Templates
----------
+`[src/]amberp/amberpp` is templates compiler, used with make.
 
-HTML templates in this repository are actually **generated** outside.
-I'm OK with publishing the source templates, but the generation depends on
-[amber](https://github.com/eknkc/amber),
-[react-tools](https://www.npmjs.org/package/react-tools) with Node.js and
-another set of scons rules.
-The generation makes the HTML templates and propagates the layout into
-[React.js](http://facebook.github.io/react/) objects (`assets/js/gen/build.js`).
-It's just not that straight-forward.
+Make
+----
 
-So for now, the repo has `assets/js/gen/build.js`, `templates.min/` -- the _actual_ templates
-and _somewhat readable_ `templates/` for reference.
+GNU make to rebuild the assets and build the program.
+
+Additional required tools here:
+- [Sass](http://sass-lang.com/install)
+- [react-tools](https://www.npmjs.org/package/react-tools) for jsx(1): `npm install react-tools #--global`
+- [uglify-js](https://www.npmjs.org/package/uglify-js) for production js assets:  `npm install uglify-js #--global`
+
+`make` rebuilds these **commited to the repo** files:
+- `src/share/templates.html/bindata.production.go`
+- `src/share/assets/bindata.production.go`
+- `src/share/assets/js/devel/milk/*.js`
+- `src/share/assets/js/devel/gen/*.js`
+- `src/share/templates.html/*.html`
+- `src/share/assets/css/*.css`
+- `src/share/tmp/jsassets.d`
+- `src/share/tmp/*.jsx`
+
+If you don't change source files, content re-generated should not differ from the commited.
+Whenever amber.templates or style of coffee change, you have to re-run `make`.
+
+`make` compiles everything and produces final binary.
 
 The assets
 ----------
 
-The [binaries](#download), to be stand-alone, have the assets (including `templates.min/`) embeded.
-Unless you specifically `go build` with `-tags production`, they are not embeded for the ease of development:
+The binaries, to be stand-alone, have the assets (including `templates.html/`) embeded.
+Unless you specifically `go build` with `-tags production` (e.g with make),
+they are not embeded for the ease of development:
 with `rerun ostent`, asset requests are served from the actual files.

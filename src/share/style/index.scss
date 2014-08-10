@@ -1,0 +1,169 @@
+@import 'bootstrap-3.1.1.scss';
+
+body {
+  font-size: 12px;
+}
+
+// https://stackoverflow.com/q/9742166
+* {
+  -webkit-border-radius: 0 !important;
+     -moz-border-radius: 0 !important;
+          border-radius: 0 !important;
+}
+
+// https://stackoverflow.com/q/20648451
+.headroom {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  transition: all .2s ease-in-out;
+}
+.headroom--pinned   { top: 0; }
+.headroom--unpinned { top: -100px; }
+
+.padding-top71 { padding-top: 71px; } // 51 for navbar(50+1(border)) + regular 20 padding-top
+
+.panel1 {
+  @extend .panel;
+  @extend .panel-default;
+
+//header.draggable { cursor: move; } // not yet
+  header {
+    @extend .panel-heading;
+    // padding-right: 5px; // for regular text
+    padding: 0px 0px;      // for btn-header-block
+    a {
+      color:            inherit; // use the text colors
+      background-color: inherit;
+      border-color:     inherit;
+    }
+    a.btn-header-block {
+      border-color: #f5f5f5; // .btn-header background color
+    }
+    a.btn-header-block:hover,
+    a.btn-header-block:active,
+    a.btn-header-block.active {
+      border-color: #adadad; // inherit;
+      // .btn-default.active colors
+    }
+  }
+  form.border-bottom-form {
+    border-bottom: 1px solid #ddd; // table border styling
+  }
+}
+
+.table2, .table1 {
+  @extend .table;
+  @extend .table-condensed;
+  margin-bottom: 0px;
+
+  .text-right sup { // or any sup?
+    font-size: 100%;
+  }
+}
+.table2 {
+  @extend .table-hover;
+}
+
+// .stripe-table > tbody > tr:nth-child(odd)  > th,
+   .stripe-table > tbody > tr:nth-child(even) > td {
+  background-color: #f9f9f9;
+}
+
+.nowrap { white-space: nowrap; }
+
+#generic-uptime { white-space: pre; }
+
+.unit { // "code" colors
+  color:            #333;
+  background-color: #f4f4f4;
+}
+
+table thead th { font-weight: normal; }
+table .bold    { font-weight: bold;   }
+
+table thead tr .header a {
+  color: black;
+  &:hover {
+    // @extend a; @extend a:hover;
+    color: #428bca;
+    text-decoration: none;
+  }
+  &.state.current {
+    white-space: nowrap;
+    font-weight: bold;
+    // https://stackoverflow.com/q/8376795
+    vertical-align: middle; // this DOES NOT make the line 1px higher
+  }
+}
+
+.table > thead > tr > th,
+.table > tbody > tr > th,
+.table > tfoot > tr > th,
+.table > thead > tr > td,
+.table > tbody > tr > td,
+.table > tfoot > tr > td {
+    // same as the table theader tr .header a.state.current
+    vertical-align: middle;
+}
+
+// .badge-default { @extend .badge; background:
+.badge-primary { @extend .badge; background: #428bca; }
+.badge-success { @extend .badge; background: #5cb85c; }
+.badge-info    { @extend .badge; background: #5bc0de; }
+.badge-warning { @extend .badge; background: #f0ad4e; }
+.badge-danger  { @extend .badge; background: #d9534f; }
+
+span.tooltipabledots {
+  cursor: pointer;
+}
+
+.btn-header {
+  @extend .btn;
+  @extend .btn-default;
+  font-size: 12px; // body font-size
+
+  // panel-heading colors
+  color:            #333;
+  background-color: #f5f5f5;
+  border-color:     #f5f5f5; // #ddd;
+}
+
+.btn-header-block {
+  @extend .btn-header;
+  @extend .btn-block;
+  text-align: left;
+  padding: 10px 15px; // panel heading padding
+}
+
+.horizontal-form {
+  @extend .form-horizontal;
+  padding: 10px 15px;
+}
+
+.inline-form     {
+  @extend .form-inline;
+  padding: 10px 15px;
+
+  .form-group {
+    margin-bottom: 15px;
+  }
+
+//.input-group > .input-group-btn,
+  .input-group > .input-group-addon {
+    width: auto;
+  }
+}
+
+.form-group-padded {
+  @extend .form-group;
+  padding-right: 15px;
+  padding-left:  15px;
+}
+.form-group-padded:last-child {
+  padding-right: 0px;
+}
+
+.refresh-input,
+.input-group > .form-control.refresh-input {
+  width: 4em;
+}

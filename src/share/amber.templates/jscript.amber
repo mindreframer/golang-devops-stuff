@@ -1,0 +1,26 @@
+/** @jsx React.DOM */ [[/* -*- indent-tabs-mode: nil -*- */]]
+script
+  function mem_rows       (Data, $mem)  { return ([[template "define_memrows"         .]]); }
+  function mem_table      (Data, rows)  { return ([[template "define_memtable"        (dot . `rows`)]]); }
+
+  function ifbytes_rows   (Data, $if)   { return ([[template "define_ifbytes_rows"    .]]); }
+  function ifbytes_table  (Data, rows)  { return ([[template "define_ifbytes_table"   (dot . `rows`)]]); }
+  function iferrors_rows  (Data, $if)   { return ([[template "define_iferrors_rows"   .]]); }
+  function iferrors_table (Data, rows)  { return ([[template "define_iferrors_table"  (dot . `rows`)]]); }
+  function ifpackets_rows (Data, $if)   { return ([[template "define_ifpackets_rows"  .]]); }
+  function ifpackets_table(Data, rows)  { return ([[template "define_ifpackets_table" (dot . `rows`)]]); }
+
+  function cpu_rows       (Data, $core) { return ([[template "define_cpurows"         .]]); }
+  function cpu_table      (Data, rows)  { return ([[template "define_cputable"        (dot . `rows`)]]); }
+
+  function dfbytes_rows   (Data, $disk) { return ([[template "define_dfbytes_rows"    .]]); }
+  function dfbytes_table  (Data, rows)  { return ([[template "define_dfbytes_table"   (dot . `rows`)]]); }
+  function dfinodes_rows  (Data, $disk) { return ([[template "define_dfinodes_rows"   .]]); }
+  function dfinodes_table (Data, rows)  { return ([[template "define_dfinodes_table"  (dot . `rows`)]]); }
+
+  function ps_rows        (Data, $proc) { return ([[template "define_psrows"          .]]); }
+  function ps_table       (Data, rows)  { return ([[template "define_pstable"         (dot . `rows`)]]); }
+
+  function vagrant_rows(Data, $machine) { return ([[template "define_vgrows"    .]]); }
+  function vagrant_error  (Data)        { return ([[template "define_vgerror"   .]]); }
+  function vagrant_table  (Data, rows)  { return ([[template "define_vgtable"   (dot . `rows`)]]); }

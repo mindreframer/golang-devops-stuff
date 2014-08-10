@@ -2,9 +2,10 @@
 
 package main
 import (
-	"ostential"
+	"libostent"
 
 	"os"
+	"net"
 	"log"
 	"fmt"
 	"flag"
@@ -12,9 +13,11 @@ import (
  	"syscall"
 	"runtime"
 	"strings"
+	"net/url"
+	"net/http"
 	"math/rand"
+	"path/filepath"
 
-	"github.com/codegangsta/martini"
 	"github.com/rcrowley/goagain"
 
 	"github.com/inconshreveable/go-update"
@@ -25,23 +28,55 @@ func init() {
 	log.SetPrefix(fmt.Sprintf("[%d] ", os.Getpid()))
 }
 
-func update_loop() {
+func upgrade_loop() {
 	const dlimit = time.Hour
 	delta := time.Duration(rand.Int63n(int64(dlimit)))
 	for {
 		select {
 		case <-time.After(time.Hour * 1 + delta): // 1.5 +- 0.5 h
-			if update_once(true) {
+			if upgrade_once(true) {
 				break
 			}
 		}
 	}
 }
 
-const update_from = "0.1.1"
-func update_once(kill bool) bool {
+func newer_version() string {
+	// 1. https://github.com/rzab/ostent/releases/latest # redirects, NOT followed
+	// 2. https://github.com/rzab/ostent/releases/vX.Y.Z # Redirect location
+	// 3. return "vX.Y.Z" # basename of the location
 
-	host := "https://OSTROST.COM"
+	type redirected struct {
+		error
+		url url.URL
+	}
+	checkRedirect := func(req *http.Request, _via []*http.Request) error {
+		return redirected{url: *req.URL,}
+	}
+
+	client := &http.Client{CheckRedirect: checkRedirect,}
+	resp, err := client.Get("https://github.com/rzab/ostent/releases/latest")
+	if err == nil {
+		resp.Body.Close()
+		return ""
+	}
+	urlerr, ok := err.(*url.Error)
+	if !ok {
+		fmt.Fprintln(os.Stderr, err)
+		return ""
+	}
+	if resp != nil && resp.Body != nil {
+		resp.Body.Close()
+	}
+	redir, ok := urlerr.Err.(redirected)
+	if !ok {
+		fmt.Fprintln(os.Stderr, err)
+		return ""
+	}
+	return filepath.Base(redir.url.Path)
+}
+
+func upgrade_once(kill bool) bool {
 
 	mach := runtime.GOARCH
 	if mach == "amd64" {
@@ -49,14 +84,19 @@ func update_once(kill bool) bool {
 	} else if mach == "386" {
 		mach = "i686"
 	}
-	url := fmt.Sprintf("%s/ostent/releases/%s/%s %s/newer", host, update_from, strings.Title(runtime.GOOS), mach)
-
-	err, _ := update.FromUrl(url) // , snderr
-	if err != nil ||  err != nil {
-		// log.Printf("Update failed: %v|%v\n", err, snderr)
+	new_version := newer_version()
+	if new_version == "" || new_version == "v"+ ostent.VERSION {
 		return false
 	}
-	log.Println("Successfull UPDATE, relaunching")
+// 	url := fmt.Sprintf("https://ostrost.com"+ "/ostent/releases/%s/%s %s/newer",    ostent.VERSION, strings.Title(runtime.GOOS), mach) // before v0.1.3
+	url := fmt.Sprintf("https://github.com/rzab/ostent/releases/download/%s/%s.%s", new_version,  strings.Title(runtime.GOOS), mach)
+
+	err, _ := update.New().FromUrl(url) // , snderr
+	if err != nil ||  err != nil {
+		// log.Printf("Upgrade failed: %v|%v\n", err, snderr)
+		return false
+	}
+	log.Println("Successfull UPGRADE, relaunching")
 	if kill {
 		syscall.Kill(os.Getpid(), syscall.SIGUSR2)
 	}
@@ -64,42 +104,42 @@ func update_once(kill bool) bool {
 }
 
 func main() {
-	updatelater := flag.Bool("updatelater", false, "Update later")
+	upgradelater := flag.Bool("upgradelater", false, "Upgrade later")
+
 	flag.Parse()
 
-	had_update := false
-	if !*updatelater && os.Getenv("GOAGAIN_PPID") == "" { // not after gone again
-		log.Println("Initial check for updates; run with -updatelater to disable")
-		had_update = update_once(false)
+	had_upgrade := false
+	if !*upgradelater && os.Getenv("GOAGAIN_PPID") == "" { // not after gone again
+		log.Println("Initial check for upgrades; run with -ugradelater to disable")
+		had_upgrade = upgrade_once(false)
 	}
 
-	martini.Env = martini.Prod
+	if !had_upgrade { // start the background routine unless just had an upgrade and gonna relaunch anyway
+		go ostent.Loop()
+		// go ostent.CollectdLoop()
+	}
+
 	listen, err := goagain.Listener()
 	if err != nil {
-		listen, err = ostential.Listen()
+		listen, err = net.Listen("tcp", ostent.OstentBindFlag.String())
 		if err != nil {
-			if _, ok := err.(ostential.FlagError); ok {
-				flag.Usage()
-				os.Exit(2)
-				return
-			}
 			log.Fatalln(err)
 		}
 
-		if had_update { // goagain
+		if had_upgrade { // goagain
 			go func() {
 				time.Sleep(time.Second) // not before goagain.Wait
 				syscall.Kill(os.Getpid(), syscall.SIGUSR2)
 				// goagain.ForkExec(listen)
 			}()
 		} else {
-			go update_loop()
-			go ostential.Serve(listen, ostential.LogOne, nil)
+			go upgrade_loop()
+			go ostent.Serve(listen, true, nil)
 		}
 
 	} else {
-		go update_loop()
-		go ostential.Serve(listen, ostential.LogOne, nil)
+		go upgrade_loop()
+		go ostent.Serve(listen, true, nil)
 
 		if err := goagain.Kill(); err != nil {
 			log.Fatalln(err)
@@ -109,6 +149,13 @@ func main() {
 	if _, err := goagain.Wait(listen); err != nil { // signals before won't be catched
 		log.Fatalln(err)
 	}
+
+	// shutting down
+
+	if ostent.Connections.Reload() {
+		time.Sleep(time.Second)
+	} // */
+
 	if err := listen.Close(); err != nil {
 		log.Fatalln(err)
 	}

@@ -2,33 +2,30 @@
 
 package main
 import (
-	"ostential"
+	"libostent"
 
-	"os"
+	"net"
 	"log"
 	"flag"
 	pprof "net/http/pprof"
-
-	"github.com/codegangsta/martini"
 )
 
 func main() {
-	martini.Env = martini.Dev
+	flag.Parse()
 
-	listen, err := ostential.Listen()
-	if err == nil {
-		log.Fatal(ostential.Serve(listen, ostential.LogAll, func(m *ostential.Modern) {
-			m.Any("/debug/pprof/cmdline", pprof.Cmdline)
-			m.Any("/debug/pprof/profile", pprof.Profile)
-			m.Any("/debug/pprof/symbol",  pprof.Symbol)
-			m.Any("/debug/pprof/.*",      pprof.Index)
-		}))
-	}
-	if _, ok := err.(ostential.FlagError); !ok {
+	go ostent.Loop()
+	// go ostent.CollectdLoop()
+
+	listen, err := net.Listen("tcp", ostent.OstentBindFlag.String())
+	if err != nil {
 		log.Fatal(err)
 	}
-	flag.Usage()
-	os.Exit(2)
+	log.Fatal(ostent.Serve(listen, false, ostent.Muxmap{
+		"/debug/pprof/{name}":  pprof.Index,
+		"/debug/pprof/cmdline": pprof.Cmdline,
+		"/debug/pprof/profile": pprof.Profile,
+		"/debug/pprof/symbol":  pprof.Symbol,
+	}))
 }
 
 

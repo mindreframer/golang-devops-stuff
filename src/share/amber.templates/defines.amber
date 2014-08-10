@@ -1,0 +1,298 @@
+[[/* -*- indent-tabs-mode: nil -*- */]]
+
+[[define "define_usepercent"]]
+  $classname = or(CLASSNAME, "class")
+  | <span #{$classname}=#{Class}>#{Value}%</span>
+[[end]]
+
+[[define "define_tooltipable"]]
+  span
+    span.tooltipable
+      //- [data-toggle="tooltip"|"popover"] // done in js now
+      [data-placement="auto left"]
+      [data-content=Full]
+      | #{Short}
+    span.tooltipabledots.unit
+      [data-placement="auto left"]
+      [data-content=Full]
+      | ...
+[[end]]
+
+[[define "define_ifbytes_rows"]]
+  [[with .dot]][[.]][[else]]
+  each $if in Data.IFbytes.List
+    |<tr key=#{$if.NameKey}>
+      td #{$if.NameHTML}
+      td.text-right #{$if.DeltaIn}
+      td.text-right #{$if.DeltaOut}
+      td.text-right #{$if.In}
+      td.text-right #{$if.Out}
+    |</tr>
+[[end]][[end]]
+
+[[define "define_iferrors_rows"]]
+  [[with .dot]][[.]][[else]]
+  each $if in Data.IFerrors.List
+    |<tr key=#{$if.NameKey}>
+      td #{$if.NameHTML}
+      td.text-right #{$if.DeltaIn}
+      td.text-right #{$if.DeltaOut}
+      td.text-right #{$if.In}
+      td.text-right #{$if.Out}
+    |</tr>
+[[end]][[end]]
+
+[[define "define_ifpackets_rows"]]
+  [[with .dot]][[.]][[else]]
+  each $if in Data.IFpackets.List
+    |<tr key=#{$if.NameKey}>
+      td #{$if.NameHTML}
+      td.text-right #{$if.DeltaIn}
+      td.text-right #{$if.DeltaOut}
+      td.text-right #{$if.In}
+      td.text-right #{$if.Out}
+    |</tr>
+[[end]][[end]]
+
+[[define "define_ifbytes_table"]]
+  table.table1.stripe-table
+    thead
+      tr
+        th Interface
+        th.text-right.nowrap[title="BITS per second"] In
+          span.unit
+            i b
+            | ps
+        th.text-right.nowrap[title="BITS per second"] Out
+          span.unit
+            i b
+            | ps
+        th.text-right.nowrap[title="total BYTES modulo 4G"] In
+          span.unit
+            i B
+            | %4G
+        th.text-right.nowrap[title="total BYTES modulo 4G"] Out
+          span.unit
+            i B
+            | %4G
+    tbody
+      [[template "define_ifbytes_rows" .]]
+[[end]]
+
+[[define "define_ifpackets_table"]]
+  table.table1.stripe-table
+    thead
+      tr
+        th Interface
+        th.text-right.nowrap[title="per second"] In&nbsp;
+          span.unit ps
+        th.text-right.nowrap[title="per second"] Out&nbsp;
+          span.unit ps
+        th.text-right.nowrap[title="total modulo 4G"] In&nbsp;
+          span.unit %4G
+        th.text-right.nowrap[title="total modulo 4G"] Out&nbsp;
+          span.unit %4G
+    tbody
+      [[template "define_ifpackets_rows" .]]
+[[end]]
+
+[[define "define_iferrors_table"]]
+  table.table1.stripe-table
+    thead
+      tr
+        th Interface
+        th.text-right.nowrap[title="per second"] In&nbsp;
+          span.unit ps
+        th.text-right.nowrap[title="per second"] Out&nbsp;
+          span.unit ps
+        th.text-right.nowrap[title="modulo 4G"] In&nbsp;
+          span.unit %4G
+        th.text-right.nowrap[title="modulo 4G"] Out&nbsp;
+          span.unit %4G
+    tbody
+      [[template "define_iferrors_rows" .]]
+[[end]]
+
+[[define "define_dfbytes_rows"]]
+  [[with .dot]][[.]][[else]]
+  $classname = or(CLASSNAME, "class")
+  each $disk in Data.DFbytes.List
+    | <tr key=#{$disk.DirNameKey}>
+
+      td.nowrap #{$disk.DiskNameHTML}
+      td.nowrap #{$disk.DirNameHTML}
+      td.text-right #{$disk.Avail}
+      td.text-right #{$disk.Used}&nbsp;
+        sup <span #{$classname}=#{$disk.UsePercentClass}>#{$disk.UsePercent}%</span>
+      td.text-right #{$disk.Total}
+    | </tr>
+[[end]][[end]]
+
+[[define "define_dfinodes_rows"]]
+  [[with .dot]][[.]][[else]]
+  $classname = or(CLASSNAME, "class")
+  each $disk in Data.DFinodes.List
+    | <tr key=#{$disk.DirNameKey}>
+
+      td.nowrap #{$disk.DiskNameHTML}
+      td.nowrap #{$disk.DirNameHTML}
+      td.text-right #{$disk.Ifree}
+      td.text-right #{$disk.Iused}&nbsp;
+        sup <span #{$classname}=#{$disk.IusePercentClass}>#{$disk.IusePercent}%</span>
+      td.text-right #{$disk.Inodes}
+    | </tr>
+[[end]][[end]]
+
+[[define "define_dfbytes_table"]]
+  $classname = or(CLASSNAME, "class")
+  table.table1.stripe-table
+    thead
+      tr
+        $L = Data.DFlinks
+        th.header <a href=#{$L.DiskName.Href} #{$classname}=#{$L.DiskName.Class}>Device<span  #{$classname}=#{$L.DiskName.CaretClass} /></a>
+        th.header <a href=#{$L.DirName.Href}  #{$classname}=#{$L.DirName.Class} >Mounted<span #{$classname}=#{$L.DirName.CaretClass}  /></a>
+        th.header.text-right <a href=#{$L.Avail.Href} #{$classname}=#{$L.Avail.Class}>Avail<span #{$classname}=#{$L.Avail.CaretClass} /></a>
+        th.header.text-right <a href=#{$L.Used.Href}  #{$classname}=#{$L.Used.Class} >Used<span  #{$classname}=#{$L.Used.CaretClass}  /></a>
+        th.header.text-right <a href=#{$L.Total.Href} #{$classname}=#{$L.Total.Class}>Total<span #{$classname}=#{$L.Total.CaretClass} /></a>
+    tbody
+      [[template "define_dfbytes_rows" .]]
+[[end]]
+
+[[define "define_dfinodes_table"]]
+  table.table1.stripe-table
+    thead
+      tr
+        th.header Device
+        th.header Mounted
+        th.header.text-right Avail
+        th.header.text-right Used
+        th.header.text-right Total
+    tbody
+      [[template "define_dfinodes_rows" .]]
+[[end]]
+
+[[define "define_memrows"]]
+  [[with .dot]][[.]][[else]]
+  each $i, $mem in Data.MEM.List
+    |<tr key=#{$mem.Kind}>
+      td #{$mem.Kind}
+      td.text-right #{$mem.Free}
+      td.text-right #{$mem.Used}&nbsp;
+        sup #{$mem.UsePercentHTML}
+      td.text-right #{$mem.Total}
+    |</tr>
+[[end]][[end]]
+
+[[define "define_memtable"]]
+  table.table1.stripe-table
+    thead
+      tr
+        th
+        th.text-right Free
+        th.text-right Used
+        th.text-right Total
+    tbody
+      [[template "define_memrows" .]]
+[[end]]
+
+[[define "define_cpurows"]]
+  [[with .dot]][[.]][[else]]
+  $classname = or(CLASSNAME, "class")
+  each $i, $core in Data.CPU.List
+    |<tr key=#{$core.N}>
+      td.text-right.nowrap #{$core.N}
+      //- td.text-right #{$core.UserSpark}
+      td.text-right <span #{$classname}=#{$core.UserClass}>#{$core.User}</span>
+      td.text-right <span #{$classname}=#{$core.SysClass}>#{$core.Sys}</span>
+      td.text-right <span #{$classname}=#{$core.IdleClass}>#{$core.Idle}</span>
+    |</tr>
+[[end]][[end]]
+
+[[define "define_cputable"]]
+  table.table1.stripe-table
+    thead
+      tr
+        th
+        //- th.text-right.nowrap[colspan="2"] User
+        th.text-right.nowrap User
+          span.unit %
+        th.text-right.nowrap Sys
+          span.unit %
+        th.text-right.nowrap Idle
+          span.unit %
+    tbody
+      [[template "define_cpurows" .]]
+[[end]]
+
+[[define "define_psrows"]]
+  [[with .dot]][[.]][[else]]
+  each $proc in Data.PStable.List
+    | <tr key=#{$proc.PID}>
+      td.text-right #{$proc.PID}
+      td.text-right #{$proc.UserHTML}
+      td.text-right #{$proc.Priority}
+      td.text-right #{$proc.Nice}
+      td.text-right #{$proc.Size}
+      td.text-right #{$proc.Resident}
+      td.text-center #{$proc.Time}
+      td.nowrap #{$proc.NameHTML}
+    | </tr>
+[[end]][[end]]
+
+[[define "define_pstable"]]
+  $classname = or(CLASSNAME, "class")
+  table.table2.stripe-table
+    thead
+      tr
+        $L = Data.PSlinks
+        th.header.text-right <a href=#{$L.PID.Href}      #{$classname}=#{$L.PID.Class}     >PID<span  #{$classname}=#{$L.PID.CaretClass}      /></a>
+        th.header.text-right <a href=#{$L.User.Href}     #{$classname}=#{$L.User.Class}    >USER<span #{$classname}=#{$L.User.CaretClass}     /></a>
+        th.header.text-right <a href=#{$L.Priority.Href} #{$classname}=#{$L.Priority.Class}>PR<span   #{$classname}=#{$L.Priority.CaretClass} /></a>
+        th.header.text-right <a href=#{$L.Nice.Href}     #{$classname}=#{$L.Nice.Class}    >NI<span   #{$classname}=#{$L.Nice.CaretClass}     /></a>
+        th.header.text-right <a href=#{$L.Size.Href}     #{$classname}=#{$L.Size.Class}    >VIRT<span #{$classname}=#{$L.Size.CaretClass}     /></a>
+        th.header.text-right <a href=#{$L.Resident.Href} #{$classname}=#{$L.Resident.Class}>RES<span  #{$classname}=#{$L.Resident.CaretClass} /></a>
+        th.header.text-center <a href=#{$L.Time.Href}     #{$classname}=#{$L.Time.Class}    >TIME<span    #{$classname}=#{$L.Time.CaretClass}    /></a>
+        th.header <a href=#{$L.Name.Href} #{$classname}=#{$L.Name.Class}>COMMAND<span #{$classname}=#{$L.Name.CaretClass} /></a>
+
+    tbody
+      [[template "define_psrows" .]]
+[[end]]
+
+[[define "define_vgerror"]]
+  | <tr key="vgerror">
+    td[colspan="5"] #{Data.VagrantError}
+  | </tr>
+[[end]]
+
+[[define "define_vgswitch"]]
+  [[with .dot]][[.]][[else]]
+  if json(Data.VagrantErrord) == "true"
+    [[template "define_vgerror" .]]
+  else
+    [[template "define_vgrows" .]]
+[[end]][[end]]
+
+[[define "define_vgrows"]]
+  each $uuid, $machine in Data.VagrantMachines.List
+    | <tr key=#{$machine.UUID}>
+      td #{$machine.UUIDHTML}
+      td #{$machine.Name}
+      td #{$machine.Provider}
+      td #{$machine.State}
+      td.nowrap #{$machine.Vagrantfile_pathHTML}
+    | </tr>
+[[end]]
+
+[[define "define_vgtable"]]
+  table.table1.stripe-table#vgtable
+    thead
+      tr
+        th id
+        th name
+        th provider
+        th state
+        th directory
+
+    tbody
+      [[template "define_vgswitch" .]]
+[[end]]

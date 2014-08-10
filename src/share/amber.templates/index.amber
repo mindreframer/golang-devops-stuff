@@ -1,0 +1,302 @@
+[[/* -*- indent-tabs-mode: nil -*- */]]
+
+mixin refresh_input($placeholder, $value)
+  div.input-group.input-group-sm.refresh-group
+    span.input-group-addon Refresh
+    input.form-control.refresh-input
+      [type="text"]
+      [placeholder=$placeholder]
+      [value=$value] ? json($value) != json($placeholder)
+
+!!! 5
+html
+  head
+    title #{Data.Generic.Hostname} ostent
+    meta[name="viewport"][content="width=device-width, initial-scale=1"]
+    meta[charset="utf-8"]
+
+    //- meta[itemprop="image"][content="/favicon.png"]
+    link[rel="icon"][type="image/png"][href="/favicon.png"]
+    link[rel="stylesheet"][type="text/css"][href="/css/index.css"]
+
+    each $script in SCRIPTS
+      script[type="text/javascript"][charset="utf-8"][src=$script]
+
+  body
+    script
+      $(ready);
+
+    div#client
+
+    div.container-fluid
+      div.row.collapse#alert-parent
+        div.alert.alert-danger.alert-dismissable
+          button.close[type="button"][data-dismiss="alert"][aria-hidden="true"] &times;
+          span#alert-message Alert
+
+    nav.navbar.navbar-default.navbar-fixed-top[role="navigation"]
+      div.container-fluid
+        div.navbar-header
+          div.navbar-brand
+            a#generic-hostname
+              [href="/"]
+              [data-toggle="popover"]
+              [data-trigger="hover focus"]
+              [data-placement="bottom"]
+              //- "auto bottom" does not do the trick
+              [data-container="#distrib-popover"]
+              [data-content="running "+ Data.DISTRIB]
+              | #{Data.Generic.Hostname}
+          //- the span for the popover to attach to
+          span#distrib-popover
+
+        div.collapse.navbar-collapse#navbar-collapse
+          //- hidden div for popover to be the content source
+          div.collapse#uptime
+            | uptime&nbsp;
+            span#generic-uptime #{Data.Generic.Uptime}
+
+          ul.nav.navbar-nav
+            li.navbar-text#generic-ip #{Data.Generic.IP}
+            li.navbar-text#generic-la #{Data.Generic.LA}
+
+          ul.nav.navbar-nav.navbar-right
+            li.navbar-text
+              ul.list-inline.navbar-nav
+                li
+                  a[href="#top"] #top
+                li
+                  a[href="#ps"] #ps
+                li
+                  a[href="#vg"] #vagrant
+
+            li.active
+              a[href="https://www.ostrost.com/ostent/releases/latest"][title="version "+ Data.VERSION] OSTENT
+
+    div.container-fluid.padding-top71#top
+      div.row
+        div.block.col-md-2.col-md-offset-1
+          div.panel1
+            header.draggable
+              a.btn-header-block[href="#mem"] Memory
+                [class="active"] ? (json(Data.Client.HideconfigMEM) == "false")
+
+            //- a div for collapse to animate properly
+            div
+              div.collapse#memconfig
+                [class="in"] ? (json(Data.Client.HideconfigMEM) == "false")
+                form.horizontal-form.border-bottom-form
+                  div.form-group-padded
+                    div.btn-group.btn-group-sm[data-toggle="buttons"]
+                      label.btn.btn-default.hiding
+                        input[type="checkbox"]
+                        | Hidden
+                      label.btn.btn-default[href="#hideswap"]
+                        [class="active"] ? (json(Data.Client.HideSWAP) == "false")
+                        input[type="checkbox"]
+                        | Hide swap
+
+                  div.form-group-padded
+                    +refresh_input(Data.PeriodDuration, Data.Client.RefreshMEM)
+
+            div.collapse#mem
+              [class="in"] ? (json(Data.Client.HideMEM) == "false")
+              span#mem-table
+                [[template "define_memtable" .]]
+
+        div.block.col-md-3
+          div.panel1
+            header.draggable
+              a.btn-header-block[href="#if"] #{Data.Client.TabTitleIF}
+                [class="active"] ? (json(Data.Client.HideconfigIF) == "false")
+
+            //- a div for collapse to animate properly
+            div
+              div.collapse#ifconfig
+                [class="in"] ? (json(Data.Client.HideconfigIF) == "false")
+                form.horizontal-form
+                  div.form-group-padded
+                     div.btn-group.btn-group-sm[data-toggle="buttons"]
+                      label.btn.btn-default.hiding
+                        input[type="checkbox"]
+                        | Hidden
+                      label.btn.btn-default[href="#if"]
+                        [class="disabled"] ? (json(Data.Client.ExpandableIF) != "true")
+                        input[type="checkbox"]
+                        | #{Data.Client.ExpandtextIF}
+
+                  div.form-group-padded
+                    +refresh_input(Data.PeriodDuration, Data.Client.RefreshIF)
+
+                ul.nav.nav-tabs
+                  li.if-switch
+                    [data-tabid=Data.IFTABS.IFpackets]
+                      a[href="#ifpackets"] Packets
+                  li.if-switch
+                    [data-tabid=Data.IFTABS.IFerrors]
+                      a[href="#iferrors"] Errors
+                  li.if-switch.active
+                    [data-tabid=Data.IFTABS.IFbytes]
+                      a[href="#ifbytes"] Bytes
+
+            //- panels selected by .if-tab
+            div.if-tab.collapse#ifpackets
+              [class="in"] ? (json(Data.IFTABS.IFpackets) == json(Data.Client.TabIF))
+              [data-title=Data.IFTABS.IFpacketsTitle]
+              [data-tabid=Data.IFTABS.IFpackets]
+              span#ifpackets-table
+                [[template "define_ifpackets_table" .]]
+
+            div.if-tab.collapse#iferrors
+              [class="in"] ? (json(Data.IFTABS.IFerrors) == json(Data.Client.TabIF))
+              [data-title=Data.IFTABS.IFerrorsTitle]
+              [data-tabid=Data.IFTABS.IFerrors]
+              span#iferrors-table
+                [[template "define_iferrors_table" .]]
+
+            div.if-tab.collapse#ifbytes
+              [class="in"] ? (json(Data.IFTABS.IFbytes) == json(Data.Client.TabIF))
+              [data-title=Data.IFTABS.IFbytesTitle]
+              [data-tabid=Data.IFTABS.IFbytes]
+              span#ifbytes-table
+                [[template "define_ifbytes_table" .]]
+
+        div.block.col-md-2
+          div.panel1
+            header.draggable
+              a.btn-header-block[href="#cpu"] CPU
+                [class="active"] ? (json(Data.Client.HideconfigCPU) == "false")
+
+            div.collapse#cpuconfig
+              [class="in"] ? (json(Data.Client.HideconfigCPU) == "false")
+              form.horizontal-form.border-bottom-form
+                div.form-group-padded
+                  div.btn-group.btn-group-sm[data-toggle="buttons"]
+                    label.btn.btn-default.hiding
+                      input[type="checkbox"]
+                      | Hidden
+                    label.btn.btn-default[href="#cpu"]
+                      [class="disabled"] ? (json(Data.Client.ExpandableCPU) != "true")
+                      input[type="checkbox"]
+                      | #{Data.Client.ExpandtextCPU}
+
+                div.form-group-padded
+                  +refresh_input(Data.PeriodDuration, Data.Client.RefreshCPU)
+
+            div.collapse#cpu
+              [class="in"] ? (json(Data.Client.HideCPU) == "false")
+              span#cpu-table
+                [[template "define_cputable" .]]
+
+        div.block.col-md-3
+          div.panel1
+            header.draggable
+              a.btn-header-block[href="#df"] #{Data.Client.TabTitleDF}
+                [class="active"] ? (json(Data.Client.HideconfigDF) == "false")
+
+            //- a div for collapse to animate properly
+            div
+              div.collapse#dfconfig
+                [class="in"] ? (json(Data.Client.HideconfigDF) == "false")
+                form.horizontal-form
+                  div.form-group-padded
+                    div.btn-group.btn-group-sm[data-toggle="buttons"]
+                      label.btn.btn-default.hiding
+                        input[type="checkbox"]
+                        | Hidden
+                      label.btn.btn-default[href="#df"]
+                        [class="disabled"] ? (json(Data.Client.ExpandableDF) != "true")
+                        input[type="checkbox"]
+                        | #{Data.Client.ExpandtextDF}
+
+                  div.form-group-padded
+                    +refresh_input(Data.PeriodDuration, Data.Client.RefreshDF)
+
+                ul.nav.nav-tabs
+                  li.df-switch
+                    [data-tabid=Data.DFTABS.DFinodes]
+                      a[href="#dfinodes"] Inodes
+                  li.df-switch.active
+                    [data-tabid=Data.DFTABS.DFbytes]
+                      a[href="#dfbytes"] Bytes
+
+            //- panels selected by .df-tab
+            div.df-tab.collapse#dfinodes
+              [class="in"] ? (json(Data.DFTABS.DFinodes) == json(Data.Client.TabDF))
+              [data-title=Data.DFTABS.DFinodesTitle]
+              [data-tabid=Data.DFTABS.DFinodes]
+              span#dfinodes-table
+                [[template "define_dfinodes_table" .]]
+
+            div.df-tab.collapse#dfbytes
+              [class="in"] ? (json(Data.DFTABS.DFbytes) == json(Data.Client.TabDF))
+              [data-title=Data.DFTABS.DFbytesTitle]
+              [data-tabid=Data.DFTABS.DFbytes]
+              span#dfbytes-table
+                [[template "define_dfbytes_table" .]]
+
+    div.container-fluid
+      div.row
+        div.block.col-md-8.col-md-offset-2
+          div.panel1
+            header.NOTdraggable
+              a.btn-header-block[href="#ps"] Processes
+                [class="active"] ? (json(Data.Client.HideconfigPS) == "false")
+
+              //- div.btn-group.btn-group-xs
+              //-   label.btn.btn-sm.btn-default
+              //-     [class="collapse"] ifempty Data.Client.UserProcesses
+              //-     | User #{Data.Client.UserProcesses} &times;
+
+            div.collapse#psconfig
+              [class="in"] ? (json(Data.Client.HideconfigPS) == "false")
+              form.inline-form.border-bottom-form.text-right
+                div.form-group-padded
+                  +refresh_input(Data.PeriodDuration, Data.Client.RefreshPS)
+
+                div.form-group-padded
+                  div.btn-group.btn-group-sm[data-toggle="buttons"]
+                    label.btn.btn-default.hiding
+                      input[type="checkbox"]
+                      | Hidden
+                    label.btn.btn-default.less[href="#psless"]
+                      [class="disabled"] ? (json(Data.Client.PSnotDecreasable) != "false")
+                      input[type="checkbox"]
+                      | -
+                    label.btn.btn-default.more[href="#psmore"]
+                      [class="disabled"] ? (json(Data.Client.PSnotExpandable) != "false")
+                      input[type="checkbox"]
+                      | #{Data.Client.PSplusText}
+
+            div.collapse#ps
+              [class="in"] ? (json(Data.Client.HidePS) == "false")
+              span#ps-table
+                [[template "define_pstable" .]]
+
+    div.container-fluid
+      div.row
+        div.block.col-md-8.col-md-offset-2
+          div.panel1
+            header.NOTdraggable
+              a.btn-header-block[href="#vg"] Vagrant global-status
+                [class="active"] ? (json(Data.Client.HideconfigVG) == "false")
+
+            div.collapse#vgconfig
+              [class="in"] ? (json(Data.Client.HideconfigVG) == "false")
+              form.inline-form.border-bottom-form.text-right
+                div.form-group-padded
+                  +refresh_input(Data.PeriodDuration, Data.Client.RefreshVG)
+
+                div.form-group-padded
+                  div.btn-group.btn-group-sm[data-toggle="buttons"]
+                    label.btn.btn-default.hiding
+                      input[type="checkbox"]
+                      | Hidden
+
+            div.collapse#vg
+              [class="in"] ? (json(Data.Client.HideVG) == "false")
+              span#vg-table
+                [[template "define_vgtable" .]]
+
+    script
+      var Data = #{Data};
