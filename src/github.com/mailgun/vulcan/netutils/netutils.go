@@ -1,3 +1,4 @@
+// Network related utilities
 package netutils
 
 import (
@@ -47,6 +48,14 @@ func RemoveHeaders(names []string, headers http.Header) {
 	}
 }
 
+func MustParseUrl(inUrl string) *url.URL {
+	u, err := ParseUrl(inUrl)
+	if err != nil {
+		panic(err)
+	}
+	return u
+}
+
 // Standard parse url is very generous,
 // parseUrl wrapper makes it more strict
 // and demands scheme and host to be set
@@ -65,6 +74,11 @@ func ParseUrl(inUrl string) (*url.URL, error) {
 type BasicAuth struct {
 	Username string
 	Password string
+}
+
+func (ba *BasicAuth) String() string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", ba.Username, ba.Password)))
+	return fmt.Sprintf("Basic %s", encoded)
 }
 
 func ParseAuthHeader(header string) (*BasicAuth, error) {

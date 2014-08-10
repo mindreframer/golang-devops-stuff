@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	. "gopkg.in/check.v1"
 	"io"
 	"io/ioutil"
-	. "launchpad.net/gocheck"
 	"os"
 )
 

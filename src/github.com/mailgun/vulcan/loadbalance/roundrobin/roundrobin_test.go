@@ -1,197 +1,296 @@
 package roundrobin
 
 import (
-	"github.com/mailgun/vulcan/loadbalance"
-	"github.com/mailgun/vulcan/timeutils"
-	. "launchpad.net/gocheck"
+	"fmt"
+	timetools "github.com/mailgun/gotools-time"
+	. "github.com/mailgun/vulcan/endpoint"
+	. "github.com/mailgun/vulcan/metrics"
+	. "github.com/mailgun/vulcan/request"
+	. "gopkg.in/check.v1"
 	"testing"
 	"time"
 )
 
-type E struct {
-	id     string
-	active bool
-}
-
-func (e *E) Id() string {
-	return e.id
-}
-
-func (e *E) IsActive() bool {
-	return e.active
-}
-
 func Test(t *testing.T) { TestingT(t) }
 
 type RoundRobinSuite struct {
-	timeProvider *timeutils.FreezedTime
+	tm  *timetools.FreezedTime
+	req Request
 }
 
 var _ = Suite(&RoundRobinSuite{})
 
 func (s *RoundRobinSuite) SetUpSuite(c *C) {
-	currentDay := time.Date(2012, 3, 4, 5, 6, 7, 0, time.UTC)
-	s.timeProvider = &timeutils.FreezedTime{CurrentTime: currentDay}
+	s.tm = &timetools.FreezedTime{
+		CurrentTime: time.Date(2012, 3, 4, 5, 6, 7, 0, time.UTC),
+	}
+	s.req = &BaseRequest{}
+}
+
+func (s *RoundRobinSuite) newRR() *RoundRobin {
+	handler, err := NewFSMHandlerWithOptions(s.tm)
+	if err != nil {
+		panic(err)
+	}
+
+	r, err := NewRoundRobinWithOptions(Options{TimeProvider: s.tm, FailureHandler: handler})
+	if err != nil {
+		panic(err)
+	}
+	return r
 }
 
 func (s *RoundRobinSuite) TestNoEndpoints(c *C) {
-	r := NewRoundRobin(s.timeProvider)
-	_, err := r.NextEndpoint([]loadbalance.Endpoint{})
+	r := s.newRR()
+	_, err := r.NextEndpoint(s.req)
 	c.Assert(err, NotNil)
 }
 
-func (s *RoundRobinSuite) TestOneActiveEndpoint(c *C) {
-	r := NewRoundRobin(s.timeProvider)
-	epts := endpoints(&E{id: "a", active: true})
-
-	e, err := r.NextEndpoint(epts)
+func (s *RoundRobinSuite) TestDefaultArgs(c *C) {
+	r, err := NewRoundRobin()
 	c.Assert(err, IsNil)
-	endpoint := e.(*E)
-	c.Assert(endpoint.id, Equals, "a")
 
-	e, err = r.NextEndpoint(epts)
-	endpoint = e.(*E)
-	c.Assert(endpoint.id, Equals, "a")
-}
+	a := MustParseUrl("http://localhost:5000")
+	b := MustParseUrl("http://localhost:5001")
 
-func (s *RoundRobinSuite) TestOneUnavailableEndpoint(c *C) {
-	r := NewRoundRobin(s.timeProvider)
-	epts := endpoints(&E{id: "a", active: false})
-	_, err := r.NextEndpoint(epts)
-	c.Assert(err, NotNil)
-}
+	r.AddEndpoint(a)
+	r.AddEndpoint(b)
 
-func (s *RoundRobinSuite) TestRoundRobinPair(c *C) {
-	r := NewRoundRobin(s.timeProvider)
-	epts := endpoints(&E{id: "a", active: true}, &E{id: "b", active: true})
-
-	e, err := r.NextEndpoint(epts)
+	u, err := r.NextEndpoint(s.req)
 	c.Assert(err, IsNil)
-	endpoint := e.(*E)
-	c.Assert(endpoint.id, Equals, "a")
+	c.Assert(u, Equals, a)
 
-	e, err = r.NextEndpoint(epts)
-	endpoint = e.(*E)
-	c.Assert(endpoint.id, Equals, "b")
-
-	e, err = r.NextEndpoint(epts)
-	endpoint = e.(*E)
-	c.Assert(endpoint.id, Equals, "a")
-}
-
-func (s *RoundRobinSuite) TestRoundRobinEndpointGoesDown(c *C) {
-	r := NewRoundRobin(s.timeProvider)
-	a, b := &E{id: "a", active: true}, &E{id: "b", active: true}
-	epts := endpoints(a, b)
-
-	e, err := r.NextEndpoint(epts)
+	u, err = r.NextEndpoint(s.req)
 	c.Assert(err, IsNil)
-	endpoint := e.(*E)
-	c.Assert(endpoint.id, Equals, "a")
+	c.Assert(u, Equals, b)
 
-	e, err = r.NextEndpoint(epts)
-	endpoint = e.(*E)
-	c.Assert(endpoint.id, Equals, "b")
-
-	// A goes down
-	a.active = false
-	e, err = r.NextEndpoint(epts)
-	endpoint = e.(*E)
-	c.Assert(endpoint.id, Equals, "b")
-
-	// And it comes back
-	a.active = true
-	e, err = r.NextEndpoint(epts)
-	endpoint = e.(*E)
-	c.Assert(endpoint.id, Equals, "a")
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, a)
 }
 
-func (s *RoundRobinSuite) TestRoundRobinMulti(c *C) {
-	r := NewRoundRobin(s.timeProvider)
-	a, b, z := &E{id: "a", active: true}, &E{id: "b", active: true}, &E{id: "c", active: true}
-	epts := endpoints(a, b, z)
+// Subsequent calls to load balancer with 1 endpoint are ok
+func (s *RoundRobinSuite) TestSingleEndpoint(c *C) {
+	r := s.newRR()
 
-	e, _ := r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "a")
+	u := MustParseUrl("http://localhost:5000")
+	r.AddEndpoint(u)
 
-	e, _ = r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "b")
+	u2, err := r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u2, Equals, u)
 
-	e, _ = r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "c")
-
-	e, _ = r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "a")
+	u3, err := r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u3, Equals, u)
 }
 
-// Make sure that multiple endpoint combinations operate independently from each other
-func (s *RoundRobinSuite) TestRoundRobinCombinations(c *C) {
-	r := NewRoundRobin(s.timeProvider)
-	a, b, z := &E{id: "a", active: true}, &E{id: "b", active: true}, &E{id: "c", active: true}
-	epts := endpoints(a, b, z)
-	epts2 := endpoints(a, z)
+// Make sure that load balancer round robins requests
+func (s *RoundRobinSuite) TestMultipleEndpoints(c *C) {
+	r := s.newRR()
 
-	e, _ := r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "a")
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5001")
+	r.AddEndpoint(uA)
+	r.AddEndpoint(uB)
 
-	e, _ = r.NextEndpoint(epts2)
-	c.Assert(e.Id(), Equals, "a")
+	u, err := r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uA)
 
-	e, _ = r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "b")
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uB)
 
-	e, _ = r.NextEndpoint(epts2)
-	c.Assert(e.Id(), Equals, "c")
-
-	e, _ = r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "c")
-
-	e, _ = r.NextEndpoint(epts2)
-	c.Assert(e.Id(), Equals, "a")
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uA)
 }
 
-// Make sure unused cursors are cleaned up
-func (s *RoundRobinSuite) TestRoundRobinGc(c *C) {
-	start := time.Date(2012, 3, 4, 5, 6, 7, 0, time.UTC)
-	timeProvider := &timeutils.FreezedTime{CurrentTime: start}
+// Make sure that adding endpoints during load balancing works fine
+func (s *RoundRobinSuite) TestAddEndpoints(c *C) {
+	r := s.newRR()
 
-	r := NewRoundRobin(timeProvider)
-	a, b, z := &E{id: "a", active: true}, &E{id: "b", active: true}, &E{id: "c", active: true}
-	epts := endpoints(a, b, z)
-	epts2 := endpoints(a, z)
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5001")
+	r.AddEndpoint(uA)
 
-	e, _ := r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "a")
+	u, err := r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uA)
 
-	e, _ = r.NextEndpoint(epts2)
-	c.Assert(e.Id(), Equals, "a")
+	r.AddEndpoint(uB)
 
-	// in 10 seconds we've touched the second cursor, but not the first one
-	timeProvider.CurrentTime = start.Add(time.Duration(10) * time.Second)
+	// index was reset after altering endpoints
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uA)
 
-	e, _ = r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "b")
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uB)
+}
 
-	// Now it's time for gc, epts2 should go away
-	timeProvider.CurrentTime = start.Add(time.Duration(ExpirySeconds+1) * time.Second)
+// Removing endpoints from the load balancer works fine as well
+func (s *RoundRobinSuite) TestRemoveEndpoint(c *C) {
+	r := s.newRR()
 
-	e, _ = r.NextEndpoint(epts)
-	c.Assert(e.Id(), Equals, "c")
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5001")
+	r.AddEndpoint(uA)
+	r.AddEndpoint(uB)
 
-	// Let's inspect and make sure the first one was deleted
-	c.Assert(len(r.cursors.cursors), Equals, 1)
-	c.Assert(len(*r.cursors.expiryTimes), Equals, 1)
+	u, err := r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uA)
 
-	// Make sure the remaining one is correct
-	for _, cr := range r.cursors.cursors {
-		c.Assert(cr[0].endpointIds, DeepEquals, []string{"a", "b", "c"})
+	// Removing endpoint resets the counter
+	r.RemoveEndpoint(uB)
+
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uA)
+}
+
+func (s *RoundRobinSuite) TestAddSameEndpoint(c *C) {
+	r := s.newRR()
+
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5000")
+	r.AddEndpoint(uA)
+	c.Assert(r.AddEndpoint(uB), NotNil)
+}
+
+func (s *RoundRobinSuite) TestFindEndpoint(c *C) {
+	r := s.newRR()
+
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5001")
+	r.AddEndpoint(uA)
+	r.AddEndpoint(uB)
+
+	c.Assert(r.FindEndpointById(""), IsNil)
+	c.Assert(r.FindEndpointById(uA.GetId()).GetId(), Equals, uA.GetId())
+	c.Assert(r.FindEndpointByUrl(uA.GetUrl().String()).GetId(), Equals, uA.GetId())
+	c.Assert(r.FindEndpointByUrl(""), IsNil)
+	c.Assert(r.FindEndpointByUrl("http://localhost wrong url 5000"), IsNil)
+}
+
+func (s *RoundRobinSuite) advanceTime(d time.Duration) {
+	s.tm.CurrentTime = s.tm.CurrentTime.Add(d)
+}
+
+func (s *RoundRobinSuite) TestReactsOnFailures(c *C) {
+	handler, err := NewFSMHandlerWithOptions(s.tm)
+	c.Assert(err, IsNil)
+
+	r, err := NewRoundRobinWithOptions(
+		Options{
+			TimeProvider:   s.tm,
+			FailureHandler: handler,
+		})
+	c.Assert(err, IsNil)
+
+	a := MustParseUrl("http://localhost:5000")
+	aM := &TestMeter{Rate: 0.5}
+
+	b := MustParseUrl("http://localhost:5001")
+	bM := &TestMeter{Rate: 0}
+
+	r.AddEndpointWithOptions(a, EndpointOptions{Meter: aM})
+	r.AddEndpointWithOptions(b, EndpointOptions{Meter: bM})
+
+	countA, countB := 0, 0
+	for i := 0; i < 100; i += 1 {
+		e, err := r.NextEndpoint(s.req)
+		if e.GetId() == a.GetId() {
+			countA += 1
+		} else {
+			countB += 1
+		}
+		c.Assert(e, NotNil)
+		c.Assert(err, IsNil)
+		s.advanceTime(time.Duration(time.Second))
+		r.ObserveResponse(s.req, &BaseAttempt{Endpoint: e})
 	}
+	c.Assert(countB > countA*2, Equals, true)
 }
 
-func endpoints(epts ...*E) []loadbalance.Endpoint {
-	toReturn := make([]loadbalance.Endpoint, len(epts))
-	for i, e := range epts {
-		toReturn[i] = e
+// Make sure that failover avoids to hit the same endpoint
+func (s *RoundRobinSuite) TestFailoverAvoidsSameEndpoint(c *C) {
+	r := s.newRR()
+
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5001")
+	r.AddEndpoint(uA)
+	r.AddEndpoint(uB)
+
+	failedRequest := &BaseRequest{
+		Attempts: []Attempt{
+			&BaseAttempt{
+				Endpoint: uA,
+				Error:    fmt.Errorf("Something failed"),
+			},
+		},
 	}
-	return toReturn
+
+	u, err := r.NextEndpoint(failedRequest)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uB)
+}
+
+// Make sure that failover avoids to hit the same endpoints in case if there are multiple consequent failures
+func (s *RoundRobinSuite) TestFailoverAvoidsSameEndpointMultipleFailures(c *C) {
+	r := s.newRR()
+
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5001")
+	uC := MustParseUrl("http://localhost:5002")
+	r.AddEndpoint(uA)
+	r.AddEndpoint(uB)
+	r.AddEndpoint(uC)
+
+	failedRequest := &BaseRequest{
+		Attempts: []Attempt{
+			&BaseAttempt{
+				Endpoint: uA,
+				Error:    fmt.Errorf("Something failed"),
+			},
+			&BaseAttempt{
+				Endpoint: uB,
+				Error:    fmt.Errorf("Something failed"),
+			},
+		},
+	}
+
+	u, err := r.NextEndpoint(failedRequest)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uC)
+}
+
+// Removing endpoints from the load balancer works fine as well
+func (s *RoundRobinSuite) TestRemoveMultipleEndpoints(c *C) {
+	r := s.newRR()
+
+	uA := MustParseUrl("http://localhost:5000")
+	uB := MustParseUrl("http://localhost:5001")
+	uC := MustParseUrl("http://localhost:5002")
+	r.AddEndpoint(uA)
+	r.AddEndpoint(uB)
+	r.AddEndpoint(uC)
+
+	u, err := r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uC)
+
+	// There's only one endpoint left
+	r.RemoveEndpoint(uA)
+	r.RemoveEndpoint(uB)
+	u, err = r.NextEndpoint(s.req)
+	c.Assert(err, IsNil)
+	c.Assert(u, Equals, uC)
 }
