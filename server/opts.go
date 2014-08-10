@@ -4,8 +4,8 @@ package server
 
 import (
 	"fmt"
-
 	"io/ioutil"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -98,6 +98,8 @@ func ProcessConfigFile(configFile string) (*Options, error) {
 			opts.LogFile = v.(string)
 		case "pidfile", "pid_file":
 			opts.PidFile = v.(string)
+		case "prof_port":
+			opts.ProfPort = int(v.(int64))
 		}
 	}
 	return opts, nil
@@ -198,7 +200,83 @@ func MergeOptions(fileOpts, flagOpts *Options) *Options {
 	if flagOpts.PidFile != "" {
 		opts.PidFile = flagOpts.PidFile
 	}
+	if flagOpts.ProfPort != 0 {
+		opts.ProfPort = flagOpts.ProfPort
+	}
 	return &opts
+}
+
+func RemoveSelfReference(routes []*url.URL) []*url.URL {
+	var cleanRoutes []*url.URL
+
+	selfIPs := getInterfaceIPs()
+	for i := 0; i < len(routes); i++ {
+		for _, routeIP := range getUrlIp(routes[i]) {
+			if !isIpInList(selfIPs, routeIP) {
+				cleanRoutes = append(cleanRoutes, routes[i])
+			} else {
+				Log("Self referencing IP found: ", routes[i])
+			}
+		}
+	}
+
+	return cleanRoutes
+}
+
+func isIpInList(list []net.IP, ip net.IP) bool {
+	for _, selfIP := range list {
+		if selfIP.Equal(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func getUrlIp(u *url.URL) []net.IP {
+	var ipList []net.IP
+	ipStr, _, err := net.SplitHostPort(u.Host)
+	if err != nil {
+		Log("Error splitting host/port in route address: ", err)
+		return ipList
+	}
+
+	ip := net.ParseIP(ipStr)
+	if ip != nil {
+		ipList = append(ipList, ip)
+	} else {
+		hostAddr, err := net.LookupHost(ipStr)
+		if err != nil {
+			Log("Error looking up host with route hostname: ", err)
+			return ipList
+		}
+		for _, addr := range hostAddr {
+			ip = net.ParseIP(addr)
+			if ip != nil {
+				ipList = append(ipList, ip)
+			}
+		}
+	}
+	return ipList
+}
+
+func getInterfaceIPs() []net.IP {
+	var localIPs []net.IP
+
+	interfaceAddr, err := net.InterfaceAddrs()
+	if err != nil {
+		Log("Error getting self referencing address: ", err)
+		return localIPs
+	}
+
+	for i := 0; i < len(interfaceAddr); i++ {
+		interfaceIP, _, _ := net.ParseCIDR(interfaceAddr[i].String())
+		if net.ParseIP(interfaceIP.String()) != nil {
+			localIPs = append(localIPs, interfaceIP)
+		} else {
+			Log("Error parsing self referencing address: ", err)
+		}
+	}
+	return localIPs
 }
 
 func processOptions(opts *Options) {
@@ -208,6 +286,9 @@ func processOptions(opts *Options) {
 	}
 	if opts.Port == 0 {
 		opts.Port = DEFAULT_PORT
+	} else if opts.Port == RANDOM_PORT {
+		// Choose randomly inside of net.Listen
+		opts.Port = 0
 	}
 	if opts.MaxConn == 0 {
 		opts.MaxConn = DEFAULT_MAX_CONNECTIONS
