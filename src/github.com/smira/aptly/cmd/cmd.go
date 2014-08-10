@@ -3,28 +3,26 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
 	"github.com/smira/aptly/aptly"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 	"os"
 	"time"
 )
 
 // ListPackagesRefList shows list of packages in PackageRefList
-func ListPackagesRefList(reflist *debian.PackageRefList) (err error) {
+func ListPackagesRefList(reflist *deb.PackageRefList) (err error) {
 	fmt.Printf("Packages:\n")
 
 	if reflist == nil {
 		return
 	}
 
-	packageCollection := debian.NewPackageCollection(context.database)
-
 	err = reflist.ForEach(func(key []byte) error {
-		p, err := packageCollection.ByKey(key)
-		if err != nil {
-			return err
+		p, err2 := context.CollectionFactory().PackageCollection().ByKey(key)
+		if err2 != nil {
+			return err2
 		}
 		fmt.Printf("  %s\n", p)
 		return nil
@@ -45,7 +43,14 @@ func RootCommand() *commander.Command {
 aptly is a tool to create partial and full mirrors of remote
 repositories, manage local repositories, filter them, merge,
 upgrade individual packages, take snapshots and publish them
-back as Debian repositories.`,
+back as Debian repositories.
+
+aptly's goal is to establish repeatability and controlled changes
+in a package-centric environment. aptly allows to fix a set of packages
+in a repository, so that package installation and upgrade becomes
+deterministic. At the same time aptly allows to perform controlled,
+fine-grained changes in repository contents to transition your
+package environment to new version.`,
 		Flag: *flag.NewFlagSet("aptly", flag.ExitOnError),
 		Subcommands: []*commander.Command{
 			makeCmdDb(),

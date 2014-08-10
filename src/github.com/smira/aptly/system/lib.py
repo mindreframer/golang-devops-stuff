@@ -66,6 +66,7 @@ class BaseTest(object):
     configFile = {
         "rootDir": "%s/.aptly" % os.environ["HOME"],
         "downloadConcurrency": 4,
+        "downloadSpeedLimit": 0,
         "architectures": [],
         "dependencyFollowSuggests": False,
         "dependencyFollowRecommends": False,
@@ -73,13 +74,18 @@ class BaseTest(object):
         "dependencyFollowSource": False,
         "gpgDisableVerify": False,
         "gpgDisableSign": False,
+        "ppaDistributorID": "ubuntu",
+        "ppaCodename": "",
     }
     configOverride = {}
+    environmentOverride = {}
 
     fixtureDBDir = os.path.join(os.environ["HOME"], "aptly-fixture-db")
     fixturePoolDir = os.path.join(os.environ["HOME"], "aptly-fixture-pool")
 
     outputMatchPrepare = None
+
+    captureResults = False
 
     def test(self):
         self.prepare()
@@ -133,7 +139,8 @@ class BaseTest(object):
             self.run_cmd(["gpg", "--no-default-keyring", "--trust-model", "always", "--batch", "--keyring", "aptlytest.gpg", "--import",
                           os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files", "debian-archive-keyring.gpg"),
                           os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files", "launchpad.key"),
-                          os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files", "flat.key")])
+                          os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files", "flat.key"),
+                          os.path.join(os.path.dirname(inspect.getsourcefile(BaseTest)), "files", "jenkins.key")])
 
         if hasattr(self, "fixtureCmds"):
             for cmd in self.fixtureCmds:
@@ -158,6 +165,7 @@ class BaseTest(object):
                 command = shlex.split(command)
             environ = os.environ.copy()
             environ["LC_ALL"] = "C"
+            environ.update(self.environmentOverride)
             proc = subprocess.Popen(command, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, env=environ)
             output, _ = proc.communicate()
             #print "CMD %s: %.2f" % (" ".join(command), time.time()-start)
@@ -176,27 +184,62 @@ class BaseTest(object):
     def expand_environ(self, gold):
         return string.Template(gold).substitute(os.environ)
 
+    def get_gold_filename(self, gold_name="gold"):
+        return os.path.join(os.path.dirname(inspect.getsourcefile(self.__class__)), self.__class__.__name__ + "_" + gold_name)
+
     def get_gold(self, gold_name="gold"):
-        gold = os.path.join(os.path.dirname(inspect.getsourcefile(self.__class__)), self.__class__.__name__ + "_" + gold_name)
-        return self.gold_processor(open(gold, "r").read())
+        return self.gold_processor(open(self.get_gold_filename(gold_name), "r").read())
 
     def check_output(self):
-        self.verify_match(self.get_gold(), self.output, match_prepare=self.outputMatchPrepare)
+        try:
+            self.verify_match(self.get_gold(), self.output, match_prepare=self.outputMatchPrepare)
+        except:
+            if self.captureResults:
+                with open(self.get_gold_filename(), "w") as f:
+                    f.write(self.output)
+            else:
+                raise
 
     def check_cmd_output(self, command, gold_name, match_prepare=None, expected_code=0):
-        self.verify_match(self.get_gold(gold_name), self.run_cmd(command, expected_code=expected_code), match_prepare)
+        try:
+            output = self.run_cmd(command, expected_code=expected_code)
+            self.verify_match(self.get_gold(gold_name), output, match_prepare)
+        except:
+            if self.captureResults:
+                with open(self.get_gold_filename(gold_name), "w") as f:
+                    f.write(output)
+            else:
+                raise
 
     def read_file(self, path):
         with open(os.path.join(os.environ["HOME"], ".aptly", path), "r") as f:
             return f.read()
 
+    def delete_file(self, path):
+        os.unlink(os.path.join(os.environ["HOME"], ".aptly", path))
+
     def check_file_contents(self, path, gold_name, match_prepare=None):
         contents = self.read_file(path)
+        try:
 
-        self.verify_match(self.get_gold(gold_name), contents, match_prepare=match_prepare)
+            self.verify_match(self.get_gold(gold_name), contents, match_prepare=match_prepare)
+        except:
+            if self.captureResults:
+                with open(self.get_gold_filename(gold_name), "w") as f:
+                    f.write(contents)
+            else:
+                raise
 
     def check_file(self):
-        self.verify_match(self.get_gold(), open(self.checkedFile, "r").read())
+        contents = open(self.checkedFile, "r").read()
+        try:
+            self.verify_match(self.get_gold(), contents)
+        except:
+            if self.captureResults:
+                with open(self.get_gold_filename(), "w") as f:
+                    f.write(contents)
+            else:
+                raise
 
     def check_exists(self, path):
         if not os.path.exists(os.path.join(os.environ["HOME"], ".aptly", path)):

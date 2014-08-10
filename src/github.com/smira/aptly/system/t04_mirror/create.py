@@ -188,3 +188,88 @@ class CreateMirror17Test(BaseTest):
     def check(self):
         self.check_output()
         self.check_cmd_output("aptly mirror show mirror17", "mirror_show")
+
+
+class CreateMirror18Test(BaseTest):
+    """
+    create mirror: mirror with ppa URL
+    """
+    fixtureGpg = True
+    outputMatchPrepare = lambda _, s: re.sub(r'Signature made .* using', '', s)
+
+    configOverride = {
+        "ppaDistributorID": "ubuntu",
+        "ppaCodename": "maverick",
+    }
+
+    runCmd = "aptly mirror create -keyring=aptlytest.gpg mirror18 ppa:gladky-anton/gnuplot"
+
+    def check(self):
+        self.check_output()
+        self.check_cmd_output("aptly mirror show mirror18", "mirror_show")
+
+
+class CreateMirror19Test(BaseTest):
+    """
+    create mirror: mirror with / in distribution
+    """
+    fixtureGpg = True
+    outputMatchPrepare = lambda _, s: re.sub(r'Signature made .* using', '', s)
+
+    runCmd = "aptly -architectures='i386' mirror create -keyring=aptlytest.gpg -with-sources mirror19 http://security.debian.org/ wheezy/updates main"
+
+    def check(self):
+        def removeDates(s):
+            return re.sub(r"(Date|Valid-Until): [,0-9:+A-Za-z -]+\n", "", s)
+
+        self.check_output()
+        self.check_cmd_output("aptly mirror show mirror19", "mirror_show", match_prepare=removeDates)
+
+
+class CreateMirror20Test(BaseTest):
+    """
+    create mirror: using failing HTTP_PROXY
+    """
+    fixtureGpg = True
+
+    runCmd = "aptly -architectures='i386' mirror create -keyring=aptlytest.gpg -with-sources mirror20 http://security.debian.org/ wheezy/updates main"
+    environmentOverride = {"HTTP_PROXY": "127.0.0.1:3137"}
+    expectedCode = 1
+
+
+class CreateMirror21Test(BaseTest):
+    """
+    create mirror: flat repository in subdir
+    """
+    runCmd = "aptly mirror create -keyring=aptlytest.gpg mirror21 http://pkg.jenkins-ci.org/debian-stable binary/"
+    fixtureGpg = True
+    outputMatchPrepare = lambda _, s: re.sub(r'Signature made .* using', '', s)
+
+    def check(self):
+        def removeSHA512(s):
+            return re.sub(r"SHA512: .+\n", "", s)
+
+        self.check_output()
+        self.check_cmd_output("aptly mirror show mirror21", "mirror_show", match_prepare=removeSHA512)
+
+
+class CreateMirror22Test(BaseTest):
+    """
+    create mirror: mirror with filter
+    """
+    runCmd = "aptly mirror create -ignore-signatures -filter='nginx | Priority (required)' mirror22 http://security.debian.org/ wheezy/updates main"
+
+    def check(self):
+        def removeDates(s):
+            return re.sub(r"(Date|Valid-Until): [,0-9:+A-Za-z -]+\n", "", s)
+
+        self.check_output()
+        self.check_cmd_output("aptly mirror show mirror22", "mirror_show", match_prepare=removeDates)
+
+
+class CreateMirror23Test(BaseTest):
+    """
+    create mirror: mirror with wrong filter
+    """
+    runCmd = "aptly mirror create -ignore-signatures -filter='nginx | ' mirror23 http://security.debian.org/ wheezy/updates main"
+    expectedCode = 1

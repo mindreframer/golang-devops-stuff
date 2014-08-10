@@ -2,133 +2,207 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/aptly"
+	"github.com/smira/aptly/deb"
 	"github.com/smira/aptly/utils"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 	"strings"
 )
 
-func aptlyPublishSnapshot(cmd *commander.Command, args []string) error {
+func aptlyPublishSnapshotOrRepo(cmd *commander.Command, args []string) error {
 	var err error
-	if len(args) < 1 || len(args) > 2 {
+
+	components := strings.Split(context.flags.Lookup("component").Value.String(), ",")
+
+	if len(args) < len(components) || len(args) > len(components)+1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
-	name := args[0]
-
-	var prefix string
-	if len(args) == 2 {
-		prefix = args[1]
+	var param string
+	if len(args) == len(components)+1 {
+		param = args[len(components)]
+		args = args[0 : len(args)-1]
 	} else {
-		prefix = ""
+		param = ""
 	}
+	storage, prefix := parsePrefix(param)
 
-	publishedCollecton := debian.NewPublishedRepoCollection(context.database)
+	var (
+		sources = []interface{}{}
+		message string
+	)
 
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
-	snapshot, err := snapshotCollection.ByName(name)
-	if err != nil {
-		return fmt.Errorf("unable to publish: %s", err)
-	}
+	if cmd.Name() == "snapshot" {
+		var (
+			snapshot     *deb.Snapshot
+			emptyWarning = false
+			parts        = []string{}
+		)
 
-	err = snapshotCollection.LoadComplete(snapshot)
-	if err != nil {
-		return fmt.Errorf("unable to publish: %s", err)
-	}
+		for _, name := range args {
+			snapshot, err = context.CollectionFactory().SnapshotCollection().ByName(name)
+			if err != nil {
+				return fmt.Errorf("unable to publish: %s", err)
+			}
 
-	var sourceRepo *debian.RemoteRepo
+			err = context.CollectionFactory().SnapshotCollection().LoadComplete(snapshot)
+			if err != nil {
+				return fmt.Errorf("unable to publish: %s", err)
+			}
 
-	if snapshot.SourceKind == "repo" && len(snapshot.SourceIDs) == 1 {
-		repoCollection := debian.NewRemoteRepoCollection(context.database)
+			sources = append(sources, snapshot)
+			parts = append(parts, snapshot.Name)
 
-		sourceRepo, _ = repoCollection.ByUUID(snapshot.SourceIDs[0])
-	}
+			if snapshot.NumPackages() == 0 {
+				emptyWarning = true
+			}
+		}
 
-	component := cmd.Flag.Lookup("component").Value.String()
-	if component == "" {
-		if sourceRepo != nil && len(sourceRepo.Components) == 1 {
-			component = sourceRepo.Components[0]
+		if len(parts) == 1 {
+			message = fmt.Sprintf("Snapshot %s has", parts[0])
 		} else {
-			component = "main"
+			message = fmt.Sprintf("Snapshots %s have", strings.Join(parts, ", "))
+
 		}
+
+		if emptyWarning {
+			context.Progress().Printf("Warning: publishing from empty source, architectures list should be complete, it can't be changed after publishing (use -architectures flag)\n")
+		}
+	} else if cmd.Name() == "repo" {
+		var (
+			localRepo    *deb.LocalRepo
+			emptyWarning = false
+			parts        = []string{}
+		)
+
+		for _, name := range args {
+			localRepo, err = context.CollectionFactory().LocalRepoCollection().ByName(name)
+			if err != nil {
+				return fmt.Errorf("unable to publish: %s", err)
+			}
+
+			err = context.CollectionFactory().LocalRepoCollection().LoadComplete(localRepo)
+			if err != nil {
+				return fmt.Errorf("unable to publish: %s", err)
+			}
+
+			sources = append(sources, localRepo)
+			parts = append(parts, localRepo.Name)
+
+			if localRepo.NumPackages() == 0 {
+				emptyWarning = true
+			}
+		}
+
+		if len(parts) == 1 {
+			message = fmt.Sprintf("Local repo %s has", parts[0])
+		} else {
+			message = fmt.Sprintf("Local repos %s have", strings.Join(parts, ", "))
+
+		}
+
+		if emptyWarning {
+			context.Progress().Printf("Warning: publishing from empty source, architectures list should be complete, it can't be changed after publishing (use -architectures flag)\n")
+		}
+	} else {
+		panic("unknown command")
 	}
 
-	distribution := cmd.Flag.Lookup("distribution").Value.String()
-	if distribution == "" {
-		if sourceRepo != nil {
-			distribution = sourceRepo.Distribution
-		}
+	distribution := context.flags.Lookup("distribution").Value.String()
 
-		if distribution == "" {
-			return fmt.Errorf("unable to guess distribution name, please specify explicitly")
-		}
-	}
-
-	published, err := debian.NewPublishedRepo(prefix, distribution, component, context.architecturesList, snapshot)
+	published, err := deb.NewPublishedRepo(storage, prefix, distribution, context.ArchitecturesList(), components, sources, context.CollectionFactory())
 	if err != nil {
 		return fmt.Errorf("unable to publish: %s", err)
 	}
+	published.Origin = cmd.Flag.Lookup("origin").Value.String()
+	published.Label = cmd.Flag.Lookup("label").Value.String()
 
-	duplicate := publishedCollecton.CheckDuplicate(published)
+	duplicate := context.CollectionFactory().PublishedRepoCollection().CheckDuplicate(published)
 	if duplicate != nil {
-		publishedCollecton.LoadComplete(duplicate, snapshotCollection)
+		context.CollectionFactory().PublishedRepoCollection().LoadComplete(duplicate, context.CollectionFactory())
 		return fmt.Errorf("prefix/distribution already used by another published repo: %s", duplicate)
 	}
 
-	signer, err := getSigner(cmd)
+	signer, err := getSigner(context.flags)
 	if err != nil {
 		return fmt.Errorf("unable to initialize GPG signer: %s", err)
 	}
 
-	packageCollection := debian.NewPackageCollection(context.database)
-	err = published.Publish(context.packagePool, context.publishedStorage, packageCollection, signer)
+	forceOverwrite := context.flags.Lookup("force-overwrite").Value.Get().(bool)
+	if forceOverwrite {
+		context.Progress().ColoredPrintf("@rWARNING@|: force overwrite mode enabled, aptly might corrupt other published repositories sharing " +
+			"the same package pool.\n")
+	}
+
+	err = published.Publish(context.PackagePool(), context, context.CollectionFactory(), signer, context.Progress(), forceOverwrite)
 	if err != nil {
 		return fmt.Errorf("unable to publish: %s", err)
 	}
 
-	err = publishedCollecton.Add(published)
+	err = context.CollectionFactory().PublishedRepoCollection().Add(published)
 	if err != nil {
 		return fmt.Errorf("unable to save to DB: %s", err)
 	}
 
-	if prefix != "" && !strings.HasSuffix(prefix, "/") {
+	var repoComponents string
+	prefix, repoComponents, distribution = published.Prefix, strings.Join(published.Components(), " "), published.Distribution
+	if prefix == "." {
+		prefix = ""
+	} else if !strings.HasSuffix(prefix, "/") {
 		prefix += "/"
 	}
 
-	fmt.Printf("\nSnapshot %s has been successfully published.\nPlease setup your webserver to serve directory '%s' with autoindexing.\n",
-		snapshot.Name, context.publishedStorage.PublicPath())
-	fmt.Printf("Now you can add following line to apt sources:\n")
-	fmt.Printf("  deb http://your-server/%s %s %s\n", prefix, distribution, component)
-	if utils.StrSliceHasItem(published.Architectures, "source") {
-		fmt.Printf("  deb-src http://your-server/%s %s %s\n", prefix, distribution, component)
+	context.Progress().Printf("\n%s been successfully published.\n", message)
+
+	if localStorage, ok := context.GetPublishedStorage(storage).(aptly.LocalPublishedStorage); ok {
+		context.Progress().Printf("Please setup your webserver to serve directory '%s' with autoindexing.\n",
+			localStorage.PublicPath())
 	}
-	fmt.Printf("Don't forget to add your GPG key to apt with apt-key.\n")
-	fmt.Printf("\nYou can also use `aptly serve` to publish your repositories over HTTP quickly.\n")
+
+	context.Progress().Printf("Now you can add following line to apt sources:\n")
+	context.Progress().Printf("  deb http://your-server/%s %s %s\n", prefix, distribution, repoComponents)
+	if utils.StrSliceHasItem(published.Architectures, "source") {
+		context.Progress().Printf("  deb-src http://your-server/%s %s %s\n", prefix, distribution, repoComponents)
+	}
+	context.Progress().Printf("Don't forget to add your GPG key to apt with apt-key.\n")
+	context.Progress().Printf("\nYou can also use `aptly serve` to publish your repositories over HTTP quickly.\n")
 
 	return err
 }
 
 func makeCmdPublishSnapshot() *commander.Command {
 	cmd := &commander.Command{
-		Run:       aptlyPublishSnapshot,
-		UsageLine: "snapshot <name> [<prefix>]",
-		Short:     "makes Debian repository out of snapshot",
+		Run:       aptlyPublishSnapshotOrRepo,
+		UsageLine: "snapshot <name> [[<endpoint>:]<prefix>]",
+		Short:     "publish snapshot",
 		Long: `
-Command publish oublishes snapshot as Debian repository ready to be used by apt tools.
+Command publishes snapshot as Debian repository ready to be consumed
+by apt tools. Published repostiories appear under rootDir/public directory.
+Valid GPG key is required for publishing.
 
-ex.
+Multiple component repository could be published by specifying several
+components split by commas via -component flag and multiple snapshots
+as the arguments:
+
+    aptly publish snapshot -component=main,contrib snap-main snap-contrib
+
+Example:
+
     $ aptly publish snapshot wheezy-main
 `,
 		Flag: *flag.NewFlagSet("aptly-publish-snapshot", flag.ExitOnError),
 	}
 	cmd.Flag.String("distribution", "", "distribution name to publish")
-	cmd.Flag.String("component", "", "component name to publish")
+	cmd.Flag.String("component", "", "component name to publish (for multi-component publishing, separate components with commas)")
 	cmd.Flag.String("gpg-key", "", "GPG key ID to use when signing the release")
-	cmd.Flag.String("keyring", "", "GPG keyring to use (instead of default)")
+	cmd.Flag.Var(&keyRingsFlag{}, "keyring", "GPG keyring to use (instead of default)")
 	cmd.Flag.String("secret-keyring", "", "GPG secret keyring to use (instead of default)")
 	cmd.Flag.Bool("skip-signing", false, "don't sign Release files with GPG")
+	cmd.Flag.String("origin", "", "origin name to publish")
+	cmd.Flag.String("label", "", "label to publish")
+	cmd.Flag.Bool("force-overwrite", false, "overwrite files in package pool in case of mismatch")
 
 	return cmd
 }

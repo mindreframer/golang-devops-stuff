@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
@@ -54,7 +55,7 @@ func (g *GpgSigner) SetKeyRing(keyring, secretKeyring string) {
 func (g *GpgSigner) gpgArgs() []string {
 	args := []string{}
 	if g.keyring != "" {
-		args = append(args, "--no-default-keyring", "--keyring", g.keyring)
+		args = append(args, "--no-auto-check-trustdb", "--no-default-keyring", "--keyring", g.keyring)
 	}
 	if g.secretKeyring != "" {
 		args = append(args, "--secret-keyring", g.secretKeyring)
@@ -69,9 +70,9 @@ func (g *GpgSigner) gpgArgs() []string {
 
 // Init verifies availability of gpg & presence of keys
 func (g *GpgSigner) Init() error {
-	output, err := exec.Command("gpg", "--list-keys").Output()
+	output, err := exec.Command("gpg", "--list-keys", "--dry-run", "--no-auto-check-trustdb").CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("unable to execute gpg: %s (is gpg installed?)", err)
+		return fmt.Errorf("unable to execute gpg: %s (is gpg installed?): %s", err, string(output))
 	}
 
 	if g.keyring == "" && g.secretKeyring == "" && len(output) == 0 {
@@ -83,22 +84,28 @@ func (g *GpgSigner) Init() error {
 
 // DetachedSign signs file with detached signature in ASCII format
 func (g *GpgSigner) DetachedSign(source string, destination string) error {
-	fmt.Printf("Signing file '%s' with gpg, please enter your passphrase when prompted:\n", source)
+	fmt.Printf("Signing file '%s' with gpg, please enter your passphrase when prompted:\n", filepath.Base(source))
 
 	args := []string{"-o", destination, "--armor", "--yes"}
 	args = append(args, g.gpgArgs()...)
 	args = append(args, "--detach-sign", source)
 	cmd := exec.Command("gpg", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
 // ClearSign clear-signs the file
 func (g *GpgSigner) ClearSign(source string, destination string) error {
-	fmt.Printf("Clearsigning file '%s' with gpg, please enter your passphrase when prompted:\n", source)
+	fmt.Printf("Clearsigning file '%s' with gpg, please enter your passphrase when prompted:\n", filepath.Base(source))
 	args := []string{"-o", destination, "--yes"}
 	args = append(args, g.gpgArgs()...)
 	args = append(args, "--clearsign", source)
 	cmd := exec.Command("gpg", args...)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
@@ -116,7 +123,7 @@ func (g *GpgVerifier) InitKeyring() error {
 
 	if len(g.keyRings) == 0 {
 		// using default keyring
-		output, err := exec.Command("gpg", "--no-default-keyring", "--keyring", "trustedkeys.gpg", "--list-keys").Output()
+		output, err := exec.Command("gpg", "--no-default-keyring", "--no-auto-check-trustdb", "--keyring", "trustedkeys.gpg", "--list-keys").Output()
 		if err == nil && len(output) == 0 {
 			fmt.Printf("\nLooks like your keyring with trusted keys is empty. You might consider importing some keys.\n")
 			fmt.Printf("If you're running Debian or Ubuntu, it's a good idea to import current archive keys by running:\n\n")
@@ -260,7 +267,7 @@ func (g *GpgVerifier) ExtractClearsigned(clearsigned io.Reader) (text *os.File, 
 	}
 	defer os.Remove(text.Name())
 
-	args := []string{"--decrypt", "--batch", "--skip-verify", "--output", "-", clearf.Name()}
+	args := []string{"--no-auto-check-trustdb", "--decrypt", "--batch", "--skip-verify", "--output", "-", clearf.Name()}
 
 	cmd := exec.Command("gpg", args...)
 	stdout, err := cmd.StdoutPipe()

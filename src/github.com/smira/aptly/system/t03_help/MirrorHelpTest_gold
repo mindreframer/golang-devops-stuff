@@ -2,11 +2,21 @@ aptly mirror - manage mirrors of remote repositories
 
 Commands:
 
-    create      create new mirror of Debian repository
-    drop        delete remote repository mirror
-    list        list mirrors of remote repositories
-    show        show details about remote repository mirror
-    update      update packages from remote mirror
+    create      create new mirror
+    drop        delete mirror
+    edit        edit properties of mirorr
+    list        list mirrors
+    rename      renames mirror
+    show        show details about mirror
+    update      update mirror
 
 Use "mirror help <command>" for more information about a command.
 
+
+Options:
+  -architectures="": list of architectures to consider during (comma-separated), default to all available
+  -config="": location of configuration file (default locations are /etc/aptly.conf, ~/.aptly.conf)
+  -dep-follow-all-variants=false: when processing dependencies, follow a & b if depdency is 'a|b'
+  -dep-follow-recommends=false: when processing dependencies, follow Recommends
+  -dep-follow-source=false: when processing dependencies, follow from binary to Source packages
+  -dep-follow-suggests=false: when processing dependencies, follow Suggests

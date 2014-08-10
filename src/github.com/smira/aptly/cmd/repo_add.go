@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
 	"github.com/smira/aptly/utils"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 	"os"
 	"path/filepath"
 	"sort"
@@ -16,44 +16,44 @@ func aptlyRepoAdd(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) < 2 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	name := args[0]
 
 	verifier := &utils.GpgVerifier{}
 
-	localRepoCollection := debian.NewLocalRepoCollection(context.database)
-	repo, err := localRepoCollection.ByName(name)
+	repo, err := context.CollectionFactory().LocalRepoCollection().ByName(name)
 	if err != nil {
 		return fmt.Errorf("unable to add: %s", err)
 	}
 
-	err = localRepoCollection.LoadComplete(repo)
+	err = context.CollectionFactory().LocalRepoCollection().LoadComplete(repo)
 	if err != nil {
 		return fmt.Errorf("unable to add: %s", err)
 	}
 
-	context.progress.Printf("Loading packages...\n")
+	context.Progress().Printf("Loading packages...\n")
 
-	packageCollection := debian.NewPackageCollection(context.database)
-	list, err := debian.NewPackageListFromRefList(repo.RefList(), packageCollection)
+	list, err := deb.NewPackageListFromRefList(repo.RefList(), context.CollectionFactory().PackageCollection(), context.Progress())
 	if err != nil {
 		return fmt.Errorf("unable to load packages: %s", err)
 	}
 
 	packageFiles := []string{}
+	failedFiles := []string{}
 
 	for _, location := range args[1:] {
-		info, err := os.Stat(location)
-		if err != nil {
-			context.progress.ColoredPrintf("@y[!]@| @!Unable to process %s: %s@|", location, err)
+		info, err2 := os.Stat(location)
+		if err2 != nil {
+			context.Progress().ColoredPrintf("@y[!]@| @!Unable to process %s: %s@|", location, err2)
+			failedFiles = append(failedFiles, location)
 			continue
 		}
 		if info.IsDir() {
-			err = filepath.Walk(location, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					return err
+			err2 = filepath.Walk(location, func(path string, info os.FileInfo, err3 error) error {
+				if err3 != nil {
+					return err3
 				}
 				if info.IsDir() {
 					return nil
@@ -69,7 +69,8 @@ func aptlyRepoAdd(cmd *commander.Command, args []string) error {
 			if strings.HasSuffix(info.Name(), ".deb") || strings.HasSuffix(info.Name(), ".dsc") {
 				packageFiles = append(packageFiles, location)
 			} else {
-				context.progress.ColoredPrintf("@y[!]@| @!Unknwon file extenstion: %s@|", location)
+				context.Progress().ColoredPrintf("@y[!]@| @!Unknwon file extenstion: %s@|", location)
+				failedFiles = append(failedFiles, location)
 				continue
 			}
 		}
@@ -80,46 +81,48 @@ func aptlyRepoAdd(cmd *commander.Command, args []string) error {
 
 	for _, file := range packageFiles {
 		var (
-			stanza debian.Stanza
-			err    error
-			p      *debian.Package
+			stanza deb.Stanza
+			p      *deb.Package
 		)
 
 		candidateProcessedFiles := []string{}
 		isSourcePackage := strings.HasSuffix(file, ".dsc")
 
 		if isSourcePackage {
-			stanza, err = debian.GetControlFileFromDsc(file, verifier)
+			stanza, err = deb.GetControlFileFromDsc(file, verifier)
 
 			if err == nil {
 				stanza["Package"] = stanza["Source"]
 				delete(stanza, "Source")
 
-				p, err = debian.NewSourcePackageFromControlFile(stanza)
+				p, err = deb.NewSourcePackageFromControlFile(stanza)
 			}
 		} else {
-			stanza, err = debian.GetControlFileFromDeb(file)
-			p = debian.NewPackageFromControlFile(stanza)
+			stanza, err = deb.GetControlFileFromDeb(file)
+			p = deb.NewPackageFromControlFile(stanza)
 		}
 		if err != nil {
-			context.progress.ColoredPrintf("@y[!]@| @!Unable to read file %s: %s@|", file, err)
+			context.Progress().ColoredPrintf("@y[!]@| @!Unable to read file %s: %s@|", file, err)
+			failedFiles = append(failedFiles, file)
 			continue
 		}
 
-		checksums, err := utils.ChecksumsForFile(file)
+		var checksums utils.ChecksumInfo
+		checksums, err = utils.ChecksumsForFile(file)
 		if err != nil {
 			return err
 		}
 
 		if isSourcePackage {
-			p.UpdateFiles(append(p.Files(), debian.PackageFile{Filename: filepath.Base(file), Checksums: checksums}))
+			p.UpdateFiles(append(p.Files(), deb.PackageFile{Filename: filepath.Base(file), Checksums: checksums}))
 		} else {
-			p.UpdateFiles([]debian.PackageFile{debian.PackageFile{Filename: filepath.Base(file), Checksums: checksums}})
+			p.UpdateFiles([]deb.PackageFile{deb.PackageFile{Filename: filepath.Base(file), Checksums: checksums}})
 		}
 
-		err = context.packagePool.Import(file, checksums.MD5)
+		err = context.PackagePool().Import(file, checksums.MD5)
 		if err != nil {
-			context.progress.ColoredPrintf("@y[!]@| @!Unable to import file %s into pool: %s@|", file, err)
+			context.Progress().ColoredPrintf("@y[!]@| @!Unable to import file %s into pool: %s@|", file, err)
+			failedFiles = append(failedFiles, file)
 			continue
 		}
 
@@ -131,9 +134,10 @@ func aptlyRepoAdd(cmd *commander.Command, args []string) error {
 				continue
 			}
 			sourceFile := filepath.Join(filepath.Dir(file), filepath.Base(f.Filename))
-			err = context.packagePool.Import(sourceFile, f.Checksums.MD5)
+			err = context.PackagePool().Import(sourceFile, f.Checksums.MD5)
 			if err != nil {
-				context.progress.ColoredPrintf("@y[!]@| @!Unable to import file %s into pool: %s@|", sourceFile, err)
+				context.Progress().ColoredPrintf("@y[!]@| @!Unable to import file %s into pool: %s@|", sourceFile, err)
+				failedFiles = append(failedFiles, file)
 				break
 			}
 
@@ -144,30 +148,32 @@ func aptlyRepoAdd(cmd *commander.Command, args []string) error {
 			continue
 		}
 
-		err = packageCollection.Update(p)
+		err = context.CollectionFactory().PackageCollection().Update(p)
 		if err != nil {
-			context.progress.ColoredPrintf("@y[!]@| @!Unable to save package %s: %s@|", p, err)
+			context.Progress().ColoredPrintf("@y[!]@| @!Unable to save package %s: %s@|", p, err)
+			failedFiles = append(failedFiles, file)
 			continue
 		}
 
 		err = list.Add(p)
 		if err != nil {
-			context.progress.ColoredPrintf("@y[!]@| @!Unable to add package to repo %s: %s@|", p, err)
+			context.Progress().ColoredPrintf("@y[!]@| @!Unable to add package to repo %s: %s@|", p, err)
+			failedFiles = append(failedFiles, file)
 			continue
 		}
 
-		context.progress.ColoredPrintf("@g[+]@| %s added@|", p)
+		context.Progress().ColoredPrintf("@g[+]@| %s added@|", p)
 		processedFiles = append(processedFiles, candidateProcessedFiles...)
 	}
 
-	repo.UpdateRefList(debian.NewPackageRefListFromPackageList(list))
+	repo.UpdateRefList(deb.NewPackageRefListFromPackageList(list))
 
-	err = localRepoCollection.Update(repo)
+	err = context.CollectionFactory().LocalRepoCollection().Update(repo)
 	if err != nil {
 		return fmt.Errorf("unable to save: %s", err)
 	}
 
-	if cmd.Flag.Lookup("remove-files").Value.Get().(bool) {
+	if context.flags.Lookup("remove-files").Value.Get().(bool) {
 		processedFiles = utils.StrSliceDeduplicate(processedFiles)
 
 		for _, file := range processedFiles {
@@ -176,6 +182,15 @@ func aptlyRepoAdd(cmd *commander.Command, args []string) error {
 				return fmt.Errorf("unable to remove file: %s", err)
 			}
 		}
+	}
+
+	if len(failedFiles) > 0 {
+		context.Progress().ColoredPrintf("@y[!]@| @!Some files were skipped due to errors:@|")
+		for _, file := range failedFiles {
+			context.Progress().ColoredPrintf("  %s", file)
+		}
+
+		return fmt.Errorf("some files failed to be added")
 	}
 
 	return err
@@ -187,12 +202,14 @@ func makeCmdRepoAdd() *commander.Command {
 		UsageLine: "add <name> <package file.deb>|<directory> ...",
 		Short:     "add packages to local repository",
 		Long: `
-Command adds packages to local repository. List of files or directories to be
-scanned could be specified. If importing from directory, all files matching *.deb or *.dsc
-patterns would be scanned and added to the repository. For source packages, all required
-files are added as well automatically.
+Command adds packages to local repository from .deb (binary packages) and .dsc (source packages) files.
+When importing from directory aptly would do recursive scan looking for all files matching *.deb or *.dsc
+patterns. Every file discovered would be analyzed to extract metadata, package would then be created and added
+to the database. Files would be imported to internal package pool. For source packages, all required files are
+added automatically as well. Extra files for source package should be in the same directory as *.dsc file.
 
-ex:
+Example:
+
   $ aptly repo add testing myapp-0.1.2.deb incoming/
 `,
 		Flag: *flag.NewFlagSet("aptly-repo-add", flag.ExitOnError),

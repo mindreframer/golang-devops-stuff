@@ -1,19 +1,21 @@
 package cmd
 
 import (
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
 	"github.com/smira/aptly/utils"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 	"strings"
 )
 
-func getVerifier(cmd *commander.Command) (utils.Verifier, error) {
-	if utils.Config.GpgDisableVerify || cmd.Flag.Lookup("ignore-signatures").Value.Get().(bool) {
+func getVerifier(flags *flag.FlagSet) (utils.Verifier, error) {
+	if context.Config().GpgDisableVerify || flags.Lookup("ignore-signatures").Value.Get().(bool) {
 		return nil, nil
 	}
 
+	keyRings := flags.Lookup("keyring").Value.Get().([]string)
+
 	verifier := &utils.GpgVerifier{}
-	for _, keyRing := range keyRings.keyRings {
+	for _, keyRing := range keyRings {
 		verifier.AddKeyring(keyRing)
 	}
 
@@ -42,8 +44,6 @@ func (k *keyRingsFlag) String() string {
 	return strings.Join(k.keyRings, ",")
 }
 
-var keyRings = keyRingsFlag{}
-
 func makeCmdMirror() *commander.Command {
 	return &commander.Command{
 		UsageLine: "mirror",
@@ -54,7 +54,8 @@ func makeCmdMirror() *commander.Command {
 			makeCmdMirrorShow(),
 			makeCmdMirrorDrop(),
 			makeCmdMirrorUpdate(),
+			makeCmdMirrorRename(),
+			makeCmdMirrorEdit(),
 		},
-		Flag: *flag.NewFlagSet("aptly-mirror", flag.ExitOnError),
 	}
 }

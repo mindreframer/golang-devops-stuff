@@ -4,9 +4,8 @@ import (
 	"bytes"
 	"code.google.com/p/gographviz"
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/commander"
 	"io"
 	"io/ioutil"
 	"os"
@@ -14,14 +13,15 @@ import (
 	"strings"
 )
 
-func graphvizEscape(s string) string {
-	return fmt.Sprintf("\"%s\"", strings.Replace(s, "\"", "\\\"", 0))
-}
-
 func aptlyGraph(cmd *commander.Command, args []string) error {
 	var err error
 
-	graph := gographviz.NewGraph()
+	if len(args) != 0 {
+		cmd.Usage()
+		return commander.ErrCommandError
+	}
+
+	graph := gographviz.NewEscape()
 	graph.SetDir(true)
 	graph.SetName("aptly")
 
@@ -29,21 +29,19 @@ func aptlyGraph(cmd *commander.Command, args []string) error {
 
 	fmt.Printf("Loading mirrors...\n")
 
-	repoCollection := debian.NewRemoteRepoCollection(context.database)
-
-	err = repoCollection.ForEach(func(repo *debian.RemoteRepo) error {
-		err := repoCollection.LoadComplete(repo)
+	err = context.CollectionFactory().RemoteRepoCollection().ForEach(func(repo *deb.RemoteRepo) error {
+		err := context.CollectionFactory().RemoteRepoCollection().LoadComplete(repo)
 		if err != nil {
 			return err
 		}
 
-		graph.AddNode("aptly", graphvizEscape(repo.UUID), map[string]string{
+		graph.AddNode("aptly", repo.UUID, map[string]string{
 			"shape":     "Mrecord",
 			"style":     "filled",
 			"fillcolor": "darkgoldenrod1",
-			"label": graphvizEscape(fmt.Sprintf("{Mirror %s|url: %s|dist: %s|comp: %s|arch: %s|pkgs: %d}",
+			"label": fmt.Sprintf("{Mirror %s|url: %s|dist: %s|comp: %s|arch: %s|pkgs: %d}",
 				repo.Name, repo.ArchiveRoot, repo.Distribution, strings.Join(repo.Components, ", "),
-				strings.Join(repo.Architectures, ", "), repo.NumPackages())),
+				strings.Join(repo.Architectures, ", "), repo.NumPackages()),
 		})
 		existingNodes[repo.UUID] = true
 		return nil
@@ -55,20 +53,18 @@ func aptlyGraph(cmd *commander.Command, args []string) error {
 
 	fmt.Printf("Loading local repos...\n")
 
-	localRepoCollection := debian.NewLocalRepoCollection(context.database)
-
-	err = localRepoCollection.ForEach(func(repo *debian.LocalRepo) error {
-		err := localRepoCollection.LoadComplete(repo)
+	err = context.CollectionFactory().LocalRepoCollection().ForEach(func(repo *deb.LocalRepo) error {
+		err := context.CollectionFactory().LocalRepoCollection().LoadComplete(repo)
 		if err != nil {
 			return err
 		}
 
-		graph.AddNode("aptly", graphvizEscape(repo.UUID), map[string]string{
+		graph.AddNode("aptly", repo.UUID, map[string]string{
 			"shape":     "Mrecord",
 			"style":     "filled",
 			"fillcolor": "mediumseagreen",
-			"label": graphvizEscape(fmt.Sprintf("{Repo %s|comment: %s|pkgs: %d}",
-				repo.Name, repo.Comment, repo.NumPackages())),
+			"label": fmt.Sprintf("{Repo %s|comment: %s|pkgs: %d}",
+				repo.Name, repo.Comment, repo.NumPackages()),
 		})
 		existingNodes[repo.UUID] = true
 		return nil
@@ -80,15 +76,13 @@ func aptlyGraph(cmd *commander.Command, args []string) error {
 
 	fmt.Printf("Loading snapshots...\n")
 
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
-
-	snapshotCollection.ForEach(func(snapshot *debian.Snapshot) error {
+	context.CollectionFactory().SnapshotCollection().ForEach(func(snapshot *deb.Snapshot) error {
 		existingNodes[snapshot.UUID] = true
 		return nil
 	})
 
-	err = snapshotCollection.ForEach(func(snapshot *debian.Snapshot) error {
-		err := snapshotCollection.LoadComplete(snapshot)
+	err = context.CollectionFactory().SnapshotCollection().ForEach(func(snapshot *deb.Snapshot) error {
+		err := context.CollectionFactory().SnapshotCollection().LoadComplete(snapshot)
 		if err != nil {
 			return err
 		}
@@ -98,18 +92,18 @@ func aptlyGraph(cmd *commander.Command, args []string) error {
 			description = "Snapshot from repo"
 		}
 
-		graph.AddNode("aptly", graphvizEscape(snapshot.UUID), map[string]string{
+		graph.AddNode("aptly", snapshot.UUID, map[string]string{
 			"shape":     "Mrecord",
 			"style":     "filled",
 			"fillcolor": "cadetblue1",
-			"label":     graphvizEscape(fmt.Sprintf("{Snapshot %s|%s|pkgs: %d}", snapshot.Name, description, snapshot.NumPackages())),
+			"label":     fmt.Sprintf("{Snapshot %s|%s|pkgs: %d}", snapshot.Name, description, snapshot.NumPackages()),
 		})
 
 		if snapshot.SourceKind == "repo" || snapshot.SourceKind == "local" || snapshot.SourceKind == "snapshot" {
 			for _, uuid := range snapshot.SourceIDs {
 				_, exists := existingNodes[uuid]
 				if exists {
-					graph.AddEdge(graphvizEscape(uuid), "", graphvizEscape(snapshot.UUID), "", true, nil)
+					graph.AddEdge(uuid, snapshot.UUID, true, nil)
 				}
 			}
 		}
@@ -122,19 +116,20 @@ func aptlyGraph(cmd *commander.Command, args []string) error {
 
 	fmt.Printf("Loading published repos...\n")
 
-	publishedCollection := debian.NewPublishedRepoCollection(context.database)
-
-	publishedCollection.ForEach(func(repo *debian.PublishedRepo) error {
-		graph.AddNode("aptly", graphvizEscape(repo.UUID), map[string]string{
+	context.CollectionFactory().PublishedRepoCollection().ForEach(func(repo *deb.PublishedRepo) error {
+		graph.AddNode("aptly", repo.UUID, map[string]string{
 			"shape":     "Mrecord",
 			"style":     "filled",
 			"fillcolor": "darkolivegreen1",
-			"label":     graphvizEscape(fmt.Sprintf("{Published %s/%s|comp: %s|arch: %s}", repo.Prefix, repo.Distribution, repo.Component, strings.Join(repo.Architectures, ", "))),
+			"label": fmt.Sprintf("{Published %s/%s|comp: %s|arch: %s}", repo.Prefix, repo.Distribution,
+				strings.Join(repo.Components(), " "), strings.Join(repo.Architectures, ", ")),
 		})
 
-		_, exists := existingNodes[repo.SnapshotUUID]
-		if exists {
-			graph.AddEdge(graphvizEscape(repo.SnapshotUUID), "", graphvizEscape(repo.UUID), "", true, nil)
+		for _, uuid := range repo.Sources {
+			_, exists := existingNodes[uuid]
+			if exists {
+				graph.AddEdge(uuid, repo.UUID, true, nil)
+			}
 		}
 
 		return nil
@@ -194,15 +189,16 @@ func makeCmdGraph() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyGraph,
 		UsageLine: "graph",
-		Short:     "display graph of dependencies between aptly objects (requires graphviz)",
+		Short:     "render graph of relationships",
 		Long: `
-Command graph displays relationship between mirrors, snapshots and published repositories using
-graphviz package to render graph as image.
+Command graph displays relationship between mirrors, local repositories,
+snapshots and published repositories using graphviz package to render
+graph as an image.
 
-ex:
+Example:
+
   $ aptly graph
 `,
-		Flag: *flag.NewFlagSet("aptly-graph", flag.ExitOnError),
 	}
 
 	return cmd

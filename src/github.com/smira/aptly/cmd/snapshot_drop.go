@@ -2,33 +2,30 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func aptlySnapshotDrop(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	name := args[0]
 
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
-	snapshot, err := snapshotCollection.ByName(name)
+	snapshot, err := context.CollectionFactory().SnapshotCollection().ByName(name)
 	if err != nil {
 		return fmt.Errorf("unable to drop: %s", err)
 	}
 
-	publishedRepoCollection := debian.NewPublishedRepoCollection(context.database)
-	published := publishedRepoCollection.BySnapshot(snapshot)
+	published := context.CollectionFactory().PublishedRepoCollection().BySnapshot(snapshot)
 
 	if len(published) > 0 {
 		fmt.Printf("Snapshot `%s` is published currently:\n", snapshot.Name)
 		for _, repo := range published {
-			err = publishedRepoCollection.LoadComplete(repo, snapshotCollection)
+			err = context.CollectionFactory().PublishedRepoCollection().LoadComplete(repo, context.CollectionFactory())
 			if err != nil {
 				return fmt.Errorf("unable to load published: %s", err)
 			}
@@ -38,9 +35,9 @@ func aptlySnapshotDrop(cmd *commander.Command, args []string) error {
 		return fmt.Errorf("unable to drop: snapshot is published")
 	}
 
-	force := cmd.Flag.Lookup("force").Value.Get().(bool)
+	force := context.flags.Lookup("force").Value.Get().(bool)
 	if !force {
-		snapshots := snapshotCollection.BySnapshotSource(snapshot)
+		snapshots := context.CollectionFactory().SnapshotCollection().BySnapshotSource(snapshot)
 		if len(snapshots) > 0 {
 			fmt.Printf("Snapshot `%s` was used as a source in following snapshots:\n", snapshot.Name)
 			for _, snap := range snapshots {
@@ -51,7 +48,7 @@ func aptlySnapshotDrop(cmd *commander.Command, args []string) error {
 		}
 	}
 
-	err = snapshotCollection.Drop(snapshot)
+	err = context.CollectionFactory().SnapshotCollection().Drop(snapshot)
 	if err != nil {
 		return fmt.Errorf("unable to drop: %s", err)
 	}
@@ -67,10 +64,11 @@ func makeCmdSnapshotDrop() *commander.Command {
 		UsageLine: "drop <name>",
 		Short:     "delete snapshot",
 		Long: `
-Drop removes information about snapshot. If snapshot is published,
+Drop removes information about a snapshot. If snapshot is published,
 it can't be dropped.
 
-ex.
+Example:
+
     $ aptly snapshot drop wheezy-main
 `,
 		Flag: *flag.NewFlagSet("aptly-snapshot-drop", flag.ExitOnError),

@@ -2,23 +2,23 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func aptlyRepoCreate(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
-	repo := debian.NewLocalRepo(args[0], cmd.Flag.Lookup("comment").Value.String())
+	repo := deb.NewLocalRepo(args[0], context.flags.Lookup("comment").Value.String())
+	repo.DefaultDistribution = context.flags.Lookup("distribution").Value.String()
+	repo.DefaultComponent = context.flags.Lookup("component").Value.String()
 
-	localRepoCollection := debian.NewLocalRepoCollection(context.database)
-
-	err = localRepoCollection.Add(repo)
+	err = context.CollectionFactory().LocalRepoCollection().Add(repo)
 	if err != nil {
 		return fmt.Errorf("unable to add local repo: %s", err)
 	}
@@ -31,17 +31,22 @@ func makeCmdRepoCreate() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyRepoCreate,
 		UsageLine: "create <name>",
-		Short:     "create new local package repository",
+		Short:     "create local repository",
 		Long: `
-Creates new empty local package repository.
+Create local package repository. Repository would be empty when
+created, packages could be added from files, copied or moved from
+another local repository or imported from the mirror.
 
-ex:
+Example:
+
   $ aptly repo create testing
 `,
 		Flag: *flag.NewFlagSet("aptly-repo-create", flag.ExitOnError),
 	}
 
-	cmd.Flag.String("comment", "", "comment for the repository")
+	cmd.Flag.String("comment", "", "any text that would be used to described local repository")
+	cmd.Flag.String("distribution", "", "default distribution when publishing")
+	cmd.Flag.String("component", "main", "default component when publishing")
 
 	return cmd
 }

@@ -2,9 +2,8 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/commander"
 	"sort"
 )
 
@@ -12,26 +11,24 @@ func aptlyPublishList(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 0 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
-	publishedCollecton := debian.NewPublishedRepoCollection(context.database)
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
+	raw := cmd.Flag.Lookup("raw").Value.Get().(bool)
 
-	if publishedCollecton.Len() == 0 {
-		fmt.Printf("No snapshots have been published. Publish a snapshot by running `aptly publish snapshot ...`.\n")
-		return err
-	}
+	published := make([]string, 0, context.CollectionFactory().PublishedRepoCollection().Len())
 
-	published := make([]string, 0, publishedCollecton.Len())
-
-	err = publishedCollecton.ForEach(func(repo *debian.PublishedRepo) error {
-		err := publishedCollecton.LoadComplete(repo, snapshotCollection)
+	err = context.CollectionFactory().PublishedRepoCollection().ForEach(func(repo *deb.PublishedRepo) error {
+		err := context.CollectionFactory().PublishedRepoCollection().LoadComplete(repo, context.CollectionFactory())
 		if err != nil {
 			return err
 		}
 
-		published = append(published, repo.String())
+		if raw {
+			published = append(published, fmt.Sprintf("%s %s", repo.Prefix, repo.Distribution))
+		} else {
+			published = append(published, repo.String())
+		}
 		return nil
 	})
 
@@ -41,10 +38,21 @@ func aptlyPublishList(cmd *commander.Command, args []string) error {
 
 	sort.Strings(published)
 
-	fmt.Printf("Published repositories:\n")
+	if raw {
+		for _, info := range published {
+			fmt.Printf("%s\n", info)
+		}
+	} else {
+		if len(published) == 0 {
+			fmt.Printf("No snapshots/local repos have been published. Publish a snapshot by running `aptly publish snapshot ...`.\n")
+			return err
+		}
 
-	for _, description := range published {
-		fmt.Printf("  * %s\n", description)
+		fmt.Printf("Published repositories:\n")
+
+		for _, description := range published {
+			fmt.Printf("  * %s\n", description)
+		}
 	}
 
 	return err
@@ -54,15 +62,17 @@ func makeCmdPublishList() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyPublishList,
 		UsageLine: "list",
-		Short:     "displays list of published repositories",
+		Short:     "list of published repositories",
 		Long: `
-Display command displays list of currently published snapshots with information about published root.
+Display list of currently published snapshots.
 
-ex.
+Example:
+
     $ aptly publish list
 `,
-		Flag: *flag.NewFlagSet("aptly-publish-list", flag.ExitOnError),
 	}
+
+	cmd.Flag.Bool("raw", false, "display list in machine-readable format")
 
 	return cmd
 }

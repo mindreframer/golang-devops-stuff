@@ -2,30 +2,41 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func aptlyRepoDrop(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	name := args[0]
 
-	localRepoCollection := debian.NewLocalRepoCollection(context.database)
-	repo, err := localRepoCollection.ByName(name)
+	repo, err := context.CollectionFactory().LocalRepoCollection().ByName(name)
 	if err != nil {
 		return fmt.Errorf("unable to drop: %s", err)
 	}
 
-	force := cmd.Flag.Lookup("force").Value.Get().(bool)
+	published := context.CollectionFactory().PublishedRepoCollection().ByLocalRepo(repo)
+	if len(published) > 0 {
+		fmt.Printf("Local repo `%s` is published currently:\n", repo.Name)
+		for _, repo := range published {
+			err = context.CollectionFactory().PublishedRepoCollection().LoadComplete(repo, context.CollectionFactory())
+			if err != nil {
+				return fmt.Errorf("unable to load published: %s", err)
+			}
+			fmt.Printf(" * %s\n", repo)
+		}
+
+		return fmt.Errorf("unable to drop: local repo is published")
+	}
+
+	force := context.flags.Lookup("force").Value.Get().(bool)
 	if !force {
-		snapshotCollection := debian.NewSnapshotCollection(context.database)
-		snapshots := snapshotCollection.ByLocalRepoSource(repo)
+		snapshots := context.CollectionFactory().SnapshotCollection().ByLocalRepoSource(repo)
 
 		if len(snapshots) > 0 {
 			fmt.Printf("Local repo `%s` was used to create following snapshots:\n", repo.Name)
@@ -37,7 +48,7 @@ func aptlyRepoDrop(cmd *commander.Command, args []string) error {
 		}
 	}
 
-	err = localRepoCollection.Drop(repo)
+	err = context.CollectionFactory().LocalRepoCollection().Drop(repo)
 	if err != nil {
 		return fmt.Errorf("unable to drop: %s", err)
 	}
@@ -51,12 +62,13 @@ func makeCmdRepoDrop() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyRepoDrop,
 		UsageLine: "drop <name>",
-		Short:     "delete local repo",
+		Short:     "delete local repository",
 		Long: `
-Drop deletes information about local repo. Package data is not deleted
-(it could be still used by other mirrors or snapshots).
+Drop information about deletions from local repo. Package data is not deleted
+(since it could be still used by other mirrors or snapshots).
 
-ex:
+Example:
+
   $ aptly repo drop local-repo
 `,
 		Flag: *flag.NewFlagSet("aptly-repo-drop", flag.ExitOnError),

@@ -1,20 +1,21 @@
 package cmd
 
 import (
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 )
 
 func makeCmdRepoCopy() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyRepoMoveCopyImport,
-		UsageLine: "copy <src-name> <dst-name> <package-spec> ...",
-		Short:     "copy packages between source repos",
+		UsageLine: "copy <src-name> <dst-name> <package-query> ...",
+		Short:     "copy packages between local repositories",
 		Long: `
-Command copy copies packages matching <package-spec> from local repo
+Command copy copies packages matching <package-query> from local repo
 <src-name> to local repo <dst-name>.
 
-ex:
+Example:
+
   $ aptly repo copy testing stable 'myapp (=0.1.12)'
 `,
 		Flag: *flag.NewFlagSet("aptly-repo-copy", flag.ExitOnError),

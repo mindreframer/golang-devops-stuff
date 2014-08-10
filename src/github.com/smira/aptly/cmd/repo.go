@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
+	"github.com/smira/commander"
 )
 
 func makeCmdRepo() *commander.Command {
@@ -14,12 +13,13 @@ func makeCmdRepo() *commander.Command {
 			makeCmdRepoCopy(),
 			makeCmdRepoCreate(),
 			makeCmdRepoDrop(),
+			makeCmdRepoEdit(),
 			makeCmdRepoImport(),
 			makeCmdRepoList(),
 			makeCmdRepoMove(),
 			makeCmdRepoRemove(),
 			makeCmdRepoShow(),
+			makeCmdRepoRename(),
 		},
-		Flag: *flag.NewFlagSet("aptly-repo", flag.ExitOnError),
 	}
 }

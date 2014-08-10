@@ -2,10 +2,9 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
 	"github.com/smira/aptly/utils"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 	"strings"
 )
 
@@ -13,18 +12,17 @@ func aptlyMirrorShow(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) != 1 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	name := args[0]
 
-	repoCollection := debian.NewRemoteRepoCollection(context.database)
-	repo, err := repoCollection.ByName(name)
+	repo, err := context.CollectionFactory().RemoteRepoCollection().ByName(name)
 	if err != nil {
 		return fmt.Errorf("unable to show: %s", err)
 	}
 
-	err = repoCollection.LoadComplete(repo)
+	err = context.CollectionFactory().RemoteRepoCollection().LoadComplete(repo)
 	if err != nil {
 		return fmt.Errorf("unable to show: %s", err)
 	}
@@ -39,6 +37,14 @@ func aptlyMirrorShow(cmd *commander.Command, args []string) error {
 		downloadSources = "yes"
 	}
 	fmt.Printf("Download Sources: %s\n", downloadSources)
+	if repo.Filter != "" {
+		fmt.Printf("Filter: %s\n", repo.Filter)
+		filterWithDeps := "no"
+		if repo.FilterWithDeps {
+			filterWithDeps = "yes"
+		}
+		fmt.Printf("Filter With Deps: %s\n", filterWithDeps)
+	}
 	if repo.LastDownloadDate.IsZero() {
 		fmt.Printf("Last update: never\n")
 	} else {
@@ -51,7 +57,7 @@ func aptlyMirrorShow(cmd *commander.Command, args []string) error {
 		fmt.Printf("%s: %s\n", k, repo.Meta[k])
 	}
 
-	withPackages := cmd.Flag.Lookup("with-packages").Value.Get().(bool)
+	withPackages := context.flags.Lookup("with-packages").Value.Get().(bool)
 	if withPackages {
 		if repo.LastDownloadDate.IsZero() {
 			fmt.Printf("Unable to show package list, mirror hasn't been downloaded yet.\n")
@@ -67,17 +73,18 @@ func makeCmdMirrorShow() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyMirrorShow,
 		UsageLine: "show <name>",
-		Short:     "show details about remote repository mirror",
+		Short:     "show details about mirror",
 		Long: `
-Show shows full information about mirror.
+Shows detailed information about the mirror.
 
-ex:
+Example:
+
   $ aptly mirror show wheezy-main
 `,
 		Flag: *flag.NewFlagSet("aptly-mirror-show", flag.ExitOnError),
 	}
 
-	cmd.Flag.Bool("with-packages", false, "show list of packages")
+	cmd.Flag.Bool("with-packages", false, "show detailed list of packages and versions stored in the mirror")
 
 	return cmd
 }

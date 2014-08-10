@@ -2,9 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/aptly/query"
+	"github.com/smira/commander"
+	"github.com/smira/flag"
 	"sort"
 )
 
@@ -12,30 +13,28 @@ func aptlyRepoMoveCopyImport(cmd *commander.Command, args []string) error {
 	var err error
 	if len(args) < 3 {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
 	command := cmd.Name()
 
-	localRepoCollection := debian.NewLocalRepoCollection(context.database)
-
-	dstRepo, err := localRepoCollection.ByName(args[1])
+	dstRepo, err := context.CollectionFactory().LocalRepoCollection().ByName(args[1])
 	if err != nil {
 		return fmt.Errorf("unable to %s: %s", command, err)
 	}
 
-	err = localRepoCollection.LoadComplete(dstRepo)
+	err = context.CollectionFactory().LocalRepoCollection().LoadComplete(dstRepo)
 	if err != nil {
 		return fmt.Errorf("unable to %s: %s", command, err)
 	}
 
 	var (
-		srcRefList *debian.PackageRefList
-		srcRepo    *debian.LocalRepo
+		srcRefList *deb.PackageRefList
+		srcRepo    *deb.LocalRepo
 	)
 
 	if command == "copy" || command == "move" {
-		srcRepo, err = localRepoCollection.ByName(args[0])
+		srcRepo, err = context.CollectionFactory().LocalRepoCollection().ByName(args[0])
 		if err != nil {
 			return fmt.Errorf("unable to %s: %s", command, err)
 		}
@@ -44,43 +43,42 @@ func aptlyRepoMoveCopyImport(cmd *commander.Command, args []string) error {
 			return fmt.Errorf("unable to %s: source and destination are the same", command)
 		}
 
-		err = localRepoCollection.LoadComplete(srcRepo)
+		err = context.CollectionFactory().LocalRepoCollection().LoadComplete(srcRepo)
 		if err != nil {
 			return fmt.Errorf("unable to %s: %s", command, err)
 		}
 
 		srcRefList = srcRepo.RefList()
 	} else if command == "import" {
-		repoCollection := debian.NewRemoteRepoCollection(context.database)
+		var srcRemoteRepo *deb.RemoteRepo
 
-		srcRepo, err := repoCollection.ByName(args[0])
+		srcRemoteRepo, err = context.CollectionFactory().RemoteRepoCollection().ByName(args[0])
 		if err != nil {
 			return fmt.Errorf("unable to %s: %s", command, err)
 		}
 
-		err = repoCollection.LoadComplete(srcRepo)
+		err = context.CollectionFactory().RemoteRepoCollection().LoadComplete(srcRemoteRepo)
 		if err != nil {
 			return fmt.Errorf("unable to %s: %s", command, err)
 		}
 
-		if srcRepo.RefList() == nil {
+		if srcRemoteRepo.RefList() == nil {
 			return fmt.Errorf("unable to %s: mirror not updated", command)
 		}
 
-		srcRefList = srcRepo.RefList()
+		srcRefList = srcRemoteRepo.RefList()
 	} else {
 		panic("unexpected command")
 	}
 
-	context.progress.Printf("Loading packages...\n")
+	context.Progress().Printf("Loading packages...\n")
 
-	packageCollection := debian.NewPackageCollection(context.database)
-	dstList, err := debian.NewPackageListFromRefList(dstRepo.RefList(), packageCollection)
+	dstList, err := deb.NewPackageListFromRefList(dstRepo.RefList(), context.CollectionFactory().PackageCollection(), context.Progress())
 	if err != nil {
 		return fmt.Errorf("unable to load packages: %s", err)
 	}
 
-	srcList, err := debian.NewPackageListFromRefList(srcRefList, packageCollection)
+	srcList, err := deb.NewPackageListFromRefList(srcRefList, context.CollectionFactory().PackageCollection(), context.Progress())
 	if err != nil {
 		return fmt.Errorf("unable to load packages: %s", err)
 	}
@@ -89,14 +87,14 @@ func aptlyRepoMoveCopyImport(cmd *commander.Command, args []string) error {
 
 	var architecturesList []string
 
-	withDeps := cmd.Flag.Lookup("with-deps").Value.Get().(bool)
+	withDeps := context.flags.Lookup("with-deps").Value.Get().(bool)
 
 	if withDeps {
 		dstList.PrepareIndex()
 
 		// Calculate architectures
-		if len(context.architecturesList) > 0 {
-			architecturesList = context.architecturesList
+		if len(context.ArchitecturesList()) > 0 {
+			architecturesList = context.ArchitecturesList()
 		} else {
 			architecturesList = dstList.Architectures(false)
 		}
@@ -108,7 +106,15 @@ func aptlyRepoMoveCopyImport(cmd *commander.Command, args []string) error {
 		}
 	}
 
-	toProcess, err := srcList.Filter(args[2:], withDeps, dstList, context.dependencyOptions, architecturesList)
+	queries := make([]deb.PackageQuery, len(args)-2)
+	for i := 0; i < len(args)-2; i++ {
+		queries[i], err = query.Parse(args[i+2])
+		if err != nil {
+			return fmt.Errorf("unable to %s: %s", command, err)
+		}
+	}
+
+	toProcess, err := srcList.Filter(queries, withDeps, dstList, context.DependencyOptions(), architecturesList)
 	if err != nil {
 		return fmt.Errorf("unable to %s: %s", command, err)
 	}
@@ -123,7 +129,7 @@ func aptlyRepoMoveCopyImport(cmd *commander.Command, args []string) error {
 		verb = "imported"
 	}
 
-	err = toProcess.ForEach(func(p *debian.Package) error {
+	err = toProcess.ForEach(func(p *deb.Package) error {
 		err = dstList.Add(p)
 		if err != nil {
 			return err
@@ -132,27 +138,27 @@ func aptlyRepoMoveCopyImport(cmd *commander.Command, args []string) error {
 		if command == "move" {
 			srcList.Remove(p)
 		}
-		context.progress.ColoredPrintf("@g[o]@| %s %s", p, verb)
+		context.Progress().ColoredPrintf("@g[o]@| %s %s", p, verb)
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("unable to %s: %s", command, err)
 	}
 
-	if cmd.Flag.Lookup("dry-run").Value.Get().(bool) {
-		context.progress.Printf("\nChanges not saved, as dry run has been requested.\n")
+	if context.flags.Lookup("dry-run").Value.Get().(bool) {
+		context.Progress().Printf("\nChanges not saved, as dry run has been requested.\n")
 	} else {
-		dstRepo.UpdateRefList(debian.NewPackageRefListFromPackageList(dstList))
+		dstRepo.UpdateRefList(deb.NewPackageRefListFromPackageList(dstList))
 
-		err = localRepoCollection.Update(dstRepo)
+		err = context.CollectionFactory().LocalRepoCollection().Update(dstRepo)
 		if err != nil {
 			return fmt.Errorf("unable to save: %s", err)
 		}
 
 		if command == "move" {
-			srcRepo.UpdateRefList(debian.NewPackageRefListFromPackageList(srcList))
+			srcRepo.UpdateRefList(deb.NewPackageRefListFromPackageList(srcList))
 
-			err = localRepoCollection.Update(srcRepo)
+			err = context.CollectionFactory().LocalRepoCollection().Update(srcRepo)
 			if err != nil {
 				return fmt.Errorf("unable to save: %s", err)
 			}
@@ -165,13 +171,14 @@ func aptlyRepoMoveCopyImport(cmd *commander.Command, args []string) error {
 func makeCmdRepoMove() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlyRepoMoveCopyImport,
-		UsageLine: "move <src-name> <dst-name> <package-spec> ...",
-		Short:     "move packages between source repos",
+		UsageLine: "move <src-name> <dst-name> <package-query> ...",
+		Short:     "move packages between local repositories",
 		Long: `
-Command move moves packages matching <package-spec> from local repo
+Command move moves packages matching <package-query> from local repo
 <src-name> to local repo <dst-name>.
 
-ex:
+Example:
+
   $ aptly repo move testing stable 'myapp (=0.1.12)'
 `,
 		Flag: *flag.NewFlagSet("aptly-repo-move", flag.ExitOnError),

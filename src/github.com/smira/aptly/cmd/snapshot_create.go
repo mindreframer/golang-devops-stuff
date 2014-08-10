@@ -2,52 +2,53 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
-	"github.com/smira/aptly/debian"
+	"github.com/smira/aptly/deb"
+	"github.com/smira/commander"
 )
 
 func aptlySnapshotCreate(cmd *commander.Command, args []string) error {
 	var (
 		err      error
-		snapshot *debian.Snapshot
+		snapshot *deb.Snapshot
 	)
 
 	if len(args) == 4 && args[1] == "from" && args[2] == "mirror" {
 		// aptly snapshot create snap from mirror mirror
+		var repo *deb.RemoteRepo
+
 		repoName, snapshotName := args[3], args[0]
 
-		repoCollection := debian.NewRemoteRepoCollection(context.database)
-		repo, err := repoCollection.ByName(repoName)
+		repo, err = context.CollectionFactory().RemoteRepoCollection().ByName(repoName)
 		if err != nil {
 			return fmt.Errorf("unable to create snapshot: %s", err)
 		}
 
-		err = repoCollection.LoadComplete(repo)
+		err = context.CollectionFactory().RemoteRepoCollection().LoadComplete(repo)
 		if err != nil {
 			return fmt.Errorf("unable to create snapshot: %s", err)
 		}
 
-		snapshot, err = debian.NewSnapshotFromRepository(snapshotName, repo)
+		snapshot, err = deb.NewSnapshotFromRepository(snapshotName, repo)
 		if err != nil {
 			return fmt.Errorf("unable to create snapshot: %s", err)
 		}
 	} else if len(args) == 4 && args[1] == "from" && args[2] == "repo" {
 		// aptly snapshot create snap from repo repo
+		var repo *deb.LocalRepo
+
 		localRepoName, snapshotName := args[3], args[0]
 
-		localRepoCollection := debian.NewLocalRepoCollection(context.database)
-		repo, err := localRepoCollection.ByName(localRepoName)
+		repo, err = context.CollectionFactory().LocalRepoCollection().ByName(localRepoName)
 		if err != nil {
 			return fmt.Errorf("unable to create snapshot: %s", err)
 		}
 
-		err = localRepoCollection.LoadComplete(repo)
+		err = context.CollectionFactory().LocalRepoCollection().LoadComplete(repo)
 		if err != nil {
 			return fmt.Errorf("unable to create snapshot: %s", err)
 		}
 
-		snapshot, err = debian.NewSnapshotFromLocalRepo(snapshotName, repo)
+		snapshot, err = deb.NewSnapshotFromLocalRepo(snapshotName, repo)
 		if err != nil {
 			return fmt.Errorf("unable to create snapshot: %s", err)
 		}
@@ -55,17 +56,15 @@ func aptlySnapshotCreate(cmd *commander.Command, args []string) error {
 		// aptly snapshot create snap empty
 		snapshotName := args[0]
 
-		packageList := debian.NewPackageList()
+		packageList := deb.NewPackageList()
 
-		snapshot = debian.NewSnapshotFromPackageList(snapshotName, nil, packageList, "Created as empty")
+		snapshot = deb.NewSnapshotFromPackageList(snapshotName, nil, packageList, "Created as empty")
 	} else {
 		cmd.Usage()
-		return err
+		return commander.ErrCommandError
 	}
 
-	snapshotCollection := debian.NewSnapshotCollection(context.database)
-
-	err = snapshotCollection.Add(snapshot)
+	err = context.CollectionFactory().SnapshotCollection().Add(snapshot)
 	if err != nil {
 		return fmt.Errorf("unable to add snapshot: %s", err)
 	}
@@ -78,22 +77,25 @@ func aptlySnapshotCreate(cmd *commander.Command, args []string) error {
 func makeCmdSnapshotCreate() *commander.Command {
 	cmd := &commander.Command{
 		Run:       aptlySnapshotCreate,
-		UsageLine: "create <name> from mirror <mirror-name> | from repo <repo-name> | create <name> empty",
-		Short:     "creates immutable snapshot of mirror (local repo) contents",
+		UsageLine: "create <name> from mirror <mirror-name> | from repo <repo-name> | empty",
+		Short:     "creates snapshot of mirror (local repository) contents",
 		Long: `
-Command create .. from mirror makes persistent immutable snapshot of remote repository mirror. Snapshot could be
-published or further modified using merge, pull and other aptly features.
+Command create <name> from mirror makes persistent immutable snapshot of remote
+repository mirror. Snapshot could be published or further modified using
+merge, pull and other aptly features.
 
-Command create .. from repo makes persistent immutable snapshot of local repository. Snapshot could be processed
-as mirror snapshots, and mixed with snapshots of remote mirrors.
+Command create <name> from repo makes persistent immutable snapshot of local
+repository. Snapshot could be processed as mirror snapshots, and mixed with
+snapshots of remote mirrors.
 
-Command create .. empty creates empty snapshot that could be used as a basis for snapshot pull operations, for example.
-As snapshots are immutable, creating one empty snapshot should be enough.
+Command create <name> empty creates empty snapshot that could be used as a
+basis for snapshot pull operations, for example. As snapshots are immutable,
+creating one empty snapshot should be enough.
 
-ex.
+Example:
+
   $ aptly snapshot create wheezy-main-today from mirror wheezy-main
 `,
-		Flag: *flag.NewFlagSet("aptly-snapshot-create", flag.ExitOnError),
 	}
 
 	return cmd

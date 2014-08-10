@@ -2,12 +2,16 @@ package cmd
 
 import (
 	"fmt"
-	"github.com/gonuts/commander"
-	"github.com/gonuts/flag"
 	"github.com/smira/aptly/aptly"
+	"github.com/smira/commander"
 )
 
 func aptlyVersion(cmd *commander.Command, args []string) error {
+	if len(args) != 0 {
+		cmd.Usage()
+		return commander.ErrCommandError
+	}
+
 	fmt.Printf("aptly version: %s\n", aptly.Version)
 	return nil
 }
@@ -23,6 +27,5 @@ Shows aptly version.
 ex:
   $ aptly version
 `,
-		Flag: *flag.NewFlagSet("aptly-version", flag.ExitOnError),
 	}
 }
