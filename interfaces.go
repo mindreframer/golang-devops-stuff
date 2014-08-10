@@ -1,5 +1,7 @@
 package gophercloud
 
+import "net/url"
+
 // AccessProvider instances encapsulate a Keystone authentication interface.
 type AccessProvider interface {
 	// FirstEndpointUrlByCriteria searches through the service catalog for the first
@@ -37,6 +39,22 @@ type CloudServersProvider interface {
 	// in a given region.  This function differs from ListServersLinksOnly()
 	// in that it returns all available details for each server returned.
 	ListServers() ([]Server, error)
+
+	// ListServersByFilters provides a list of servers hosted by the user in a
+	// given region. This function let you requests servers by certain URI
+	// paramaters defined by the API endpoint.  This is sometimes more suitable
+	// if you have many servers and you only want to pick servers on certain
+	// criterias. An example usage could be :
+	//
+	//	   filter := url.Values{}
+	//	   filter.Set("name", "MyServer")
+	//	   filter.Set("status", "ACTIVE")
+	//
+	//	   filteredServers, err := c.ListServersByFilters(filter)
+	//
+	// Here, filteredServers only contains servers whose name started with
+	// "MyServer" and are in "ACTIVE" status.
+	ListServersByFilter(filter url.Values) ([]Server, error)
 
 	// ListServers provides a complete list of servers hosted by the user
 	// in a given region.  This function differs from ListServers() in that
@@ -193,4 +211,37 @@ type CloudServersProvider interface {
 
 	// ShowKeyPair will yield the named keypair.
 	ShowKeyPair(name string) (KeyPair, error)
+
+	// ListSecurityGroups provides a listing of security groups for the tenant.
+	// This method works only if the provider supports the os-security-groups extension.
+	ListSecurityGroups() ([]SecurityGroup, error)
+
+	// CreateSecurityGroup lets a tenant create a new security group.
+	// Only the SecurityGroup fields which are specified will be marshalled to the API.
+	// This method works only if the provider supports the os-security-groups extension.
+	CreateSecurityGroup(desired SecurityGroup) (*SecurityGroup, error)
+
+	// ListSecurityGroupsByServerId provides a list of security groups which apply to the indicated server.
+	// This method works only if the provider supports the os-security-groups extension.
+	ListSecurityGroupsByServerId(id string) ([]SecurityGroup, error)
+
+	// SecurityGroupById returns a security group corresponding to the provided ID number.
+	// This method works only if the provider supports the os-security-groups extension.
+	SecurityGroupById(id int) (*SecurityGroup, error)
+
+	// DeleteSecurityGroupById disposes of a security group corresponding to the provided ID number.
+	// This method works only if the provider supports the os-security-groups extension.
+	DeleteSecurityGroupById(id int) error
+
+	// ListDefaultSGRules lists default security group rules.
+	// This method only works if the provider supports the os-security-groups-default-rules extension.
+	ListDefaultSGRules() ([]SGRule, error)
+
+	// CreateDefaultSGRule creates a default security group rule.
+	// This method only works if the provider supports the os-security-groups-default-rules extension.
+	CreateDefaultSGRule(SGRule) (*SGRule, error)
+
+	// GetSGRule obtains information for a specified security group rule.
+	// This method only works if the provider supports the os-security-groups-default-rules extension.
+	GetSGRule(string) (*SGRule, error)
 }
