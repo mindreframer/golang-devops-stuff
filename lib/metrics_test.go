@@ -6,6 +6,8 @@ import (
 )
 
 func TestNewMetrics(t *testing.T) {
+	t.Parallel()
+
 	m := NewMetrics([]Result{
 		Result{500, time.Unix(0, 0), 100 * time.Millisecond, 10, 30, "Internal server error"},
 		Result{200, time.Unix(1, 0), 20 * time.Millisecond, 20, 20, ""},
@@ -53,4 +55,8 @@ func TestNewMetrics(t *testing.T) {
 	if len(m.Errors) != 1 || m.Errors[0] != err {
 		t.Errorf("Errors: want: %v, got: %v", []string{err}, m.Errors)
 	}
+}
+
+func TestNewMetricsEmptyResults(t *testing.T) {
+	_ = NewMetrics([]Result{}) // Must not panic
 }
