@@ -30,8 +30,9 @@ func testComponentFinder() *ComponentFinder {
 func testEnvironment() Environment {
 	config := DefaultEnvironmentConfig()
 	config.Ui = &BasicUi{
-		Reader: new(bytes.Buffer),
-		Writer: new(bytes.Buffer),
+		Reader:      new(bytes.Buffer),
+		Writer:      new(bytes.Buffer),
+		ErrorWriter: new(bytes.Buffer),
 	}
 
 	env, err := NewEnvironment(config)

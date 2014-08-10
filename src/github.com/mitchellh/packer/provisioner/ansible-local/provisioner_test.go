@@ -70,6 +70,46 @@ func TestProvisionerPrepare_PlaybookFile(t *testing.T) {
 	}
 }
 
+func TestProvisionerPrepare_InventoryFile(t *testing.T) {
+	var p Provisioner
+	config := testConfig()
+
+	err := p.Prepare(config)
+	if err == nil {
+		t.Fatal("should have error")
+	}
+
+	config["playbook_file"] = ""
+	err = p.Prepare(config)
+	if err == nil {
+		t.Fatal("should have error")
+	}
+
+	playbook_file, err := ioutil.TempFile("", "playbook")
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer os.Remove(playbook_file.Name())
+
+	config["playbook_file"] = playbook_file.Name()
+	err = p.Prepare(config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	inventory_file, err := ioutil.TempFile("", "inventory")
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+	defer os.Remove(inventory_file.Name())
+
+	config["inventory_file"] = inventory_file.Name()
+	err = p.Prepare(config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+}
+
 func TestProvisionerPrepare_Dirs(t *testing.T) {
 	var p Provisioner
 	config := testConfig()
@@ -116,6 +156,30 @@ func TestProvisionerPrepare_Dirs(t *testing.T) {
 	}
 
 	config["role_paths"] = []string{os.TempDir()}
+	err = p.Prepare(config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	config["group_vars"] = playbook_file.Name()
+	err = p.Prepare(config)
+	if err == nil {
+		t.Fatalf("should error if group_vars path is not a dir")
+	}
+
+	config["group_vars"] = os.TempDir()
+	err = p.Prepare(config)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	config["host_vars"] = playbook_file.Name()
+	err = p.Prepare(config)
+	if err == nil {
+		t.Fatalf("should error if host_vars path is not a dir")
+	}
+
+	config["host_vars"] = os.TempDir()
 	err = p.Prepare(config)
 	if err != nil {
 		t.Fatalf("err: %s", err)

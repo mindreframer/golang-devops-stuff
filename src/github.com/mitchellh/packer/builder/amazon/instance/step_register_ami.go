@@ -2,6 +2,7 @@ package instance
 
 import (
 	"fmt"
+
 	"github.com/mitchellh/goamz/ec2"
 	"github.com/mitchellh/multistep"
 	awscommon "github.com/mitchellh/packer/builder/amazon/common"
@@ -21,6 +22,12 @@ func (s *StepRegisterAMI) Run(state multistep.StateBag) multistep.StepAction {
 		ImageLocation: manifestPath,
 		Name:          config.AMIName,
 		BlockDevices:  config.BlockDevices.BuildAMIDevices(),
+		VirtType:      config.AMIVirtType,
+	}
+
+	// Set SriovNetSupport to "simple". See http://goo.gl/icuXh5
+	if config.AMIEnhancedNetworking {
+		registerOpts.SriovNetSupport = "simple"
 	}
 
 	registerResp, err := ec2conn.RegisterImage(registerOpts)

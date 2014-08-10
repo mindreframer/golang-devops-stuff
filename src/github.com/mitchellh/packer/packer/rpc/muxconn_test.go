@@ -18,7 +18,7 @@ func readStream(t *testing.T, s io.Reader) string {
 }
 
 func testMux(t *testing.T) (client *MuxConn, server *MuxConn) {
-	l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("err: %s", err)
 	}
@@ -76,6 +76,7 @@ func TestMuxConn(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
+			defer s1.Close()
 			data := readStream(t, s1)
 			if data != "another" {
 				t.Fatalf("bad: %#v", data)
@@ -84,6 +85,7 @@ func TestMuxConn(t *testing.T) {
 
 		go func() {
 			defer wg.Done()
+			defer s0.Close()
 			data := readStream(t, s0)
 			if data != "hello" {
 				t.Fatalf("bad: %#v", data)
@@ -107,6 +109,61 @@ func TestMuxConn(t *testing.T) {
 		t.Fatalf("err: %s", err)
 	}
 	if _, err := s1.Write([]byte("another")); err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	s0.Close()
+	s1.Close()
+
+	// Wait for the server to be done
+	<-doneCh
+}
+
+func TestMuxConn_lotsOfData(t *testing.T) {
+	client, server := testMux(t)
+	defer client.Close()
+	defer server.Close()
+
+	// When the server is done
+	doneCh := make(chan struct{})
+
+	// The server side
+	go func() {
+		defer close(doneCh)
+
+		s0, err := server.Accept(0)
+		if err != nil {
+			t.Fatalf("err: %s", err)
+		}
+
+		var data [1024]byte
+		for {
+			n, err := s0.Read(data[:])
+			if err == io.EOF {
+				break
+			}
+
+			dataString := string(data[0:n])
+			if dataString != "hello" {
+				t.Fatalf("bad: %#v", dataString)
+			}
+		}
+
+		s0.Close()
+	}()
+
+	s0, err := client.Dial(0)
+	if err != nil {
+		t.Fatalf("err: %s", err)
+	}
+
+	for i := 0; i < 4096*4; i++ {
+		if _, err := s0.Write([]byte("hello")); err != nil {
+			t.Fatalf("err: %s", err)
+		}
+	}
+
+	if err := s0.Close(); err != nil {
 		t.Fatalf("err: %s", err)
 	}
 

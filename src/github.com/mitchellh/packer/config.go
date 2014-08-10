@@ -30,7 +30,10 @@ const defaultConfig = `
 		"virtualbox-iso": "packer-builder-virtualbox-iso",
 		"virtualbox-ovf": "packer-builder-virtualbox-ovf",
 		"vmware-iso": "packer-builder-vmware-iso",
-		"vmware-vmx": "packer-builder-vmware-vmx"
+		"vmware-vmx": "packer-builder-vmware-vmx",
+		"parallels-iso": "packer-builder-parallels-iso",
+		"parallels-pvm": "packer-builder-parallels-pvm",
+		"null": "packer-builder-null"
 	},
 
 	"commands": {
@@ -43,15 +46,18 @@ const defaultConfig = `
 	"post-processors": {
 		"vagrant": "packer-post-processor-vagrant",
 		"vsphere": "packer-post-processor-vsphere",
-    "docker-push": "packer-post-processor-docker-push",
-    "docker-import": "packer-post-processor-docker-import"
+		"docker-push": "packer-post-processor-docker-push",
+		"docker-import": "packer-post-processor-docker-import",
+		"vagrant-cloud": "packer-post-processor-vagrant-cloud"
 	},
 
 	"provisioners": {
 		"ansible-local": "packer-provisioner-ansible-local",
+		"chef-client": "packer-provisioner-chef-client",
 		"chef-solo": "packer-provisioner-chef-solo",
 		"file": "packer-provisioner-file",
 		"puppet-masterless": "packer-provisioner-puppet-masterless",
+		"puppet-server": "packer-provisioner-puppet-server",
 		"shell": "packer-provisioner-shell",
 		"salt-masterless": "packer-provisioner-salt-masterless"
 	}

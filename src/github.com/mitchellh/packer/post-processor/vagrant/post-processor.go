@@ -21,6 +21,8 @@ var builtins = map[string]string{
 	"mitchellh.virtualbox":      "virtualbox",
 	"mitchellh.vmware":          "vmware",
 	"pearkes.digitalocean":      "digitalocean",
+	"packer.parallels":          "parallels",
+	"MSOpenTech.hyperv":         "hyperv",
 }
 
 type Config struct {
@@ -63,6 +65,7 @@ func (p *PostProcessor) Configure(raws ...interface{}) error {
 }
 
 func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (packer.Artifact, bool, error) {
+
 	name, ok := builtins[artifact.BuilderId()]
 	if !ok {
 		return nil, false, fmt.Errorf(
@@ -152,7 +155,7 @@ func (p *PostProcessor) PostProcess(ui packer.Ui, artifact packer.Artifact) (pac
 		return nil, false, err
 	}
 
-	return NewArtifact(name, outputPath), false, nil
+	return NewArtifact(name, outputPath), provider.KeepInputArtifact(), nil
 }
 
 func (p *PostProcessor) configureSingle(config *Config, raws ...interface{}) error {
@@ -216,6 +219,10 @@ func providerForName(name string) Provider {
 		return new(VBoxProvider)
 	case "vmware":
 		return new(VMwareProvider)
+	case "parallels":
+		return new(ParallelsProvider)
+	case "hyperv":
+		return new(HypervProvider)
 	default:
 		return nil
 	}

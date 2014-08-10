@@ -81,8 +81,9 @@ func DefaultEnvironmentConfig() *EnvironmentConfig {
 	config := &EnvironmentConfig{}
 	config.Commands = make([]string, 0)
 	config.Ui = &BasicUi{
-		Reader: os.Stdin,
-		Writer: os.Stdout,
+		Reader:      os.Stdin,
+		Writer:      os.Stdout,
+		ErrorWriter: os.Stdout,
 	}
 
 	return config

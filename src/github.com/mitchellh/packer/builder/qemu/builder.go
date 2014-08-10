@@ -70,6 +70,7 @@ type config struct {
 	NetDevice       string     `mapstructure:"net_device"`
 	OutputDir       string     `mapstructure:"output_directory"`
 	QemuArgs        [][]string `mapstructure:"qemuargs"`
+	QemuBinary      string     `mapstructure:"qemu_binary"`
 	ShutdownCommand string     `mapstructure:"shutdown_command"`
 	SSHHostPortMin  uint       `mapstructure:"ssh_host_port_min"`
 	SSHHostPortMax  uint       `mapstructure:"ssh_host_port_max"`
@@ -80,7 +81,9 @@ type config struct {
 	VNCPortMin      uint       `mapstructure:"vnc_port_min"`
 	VNCPortMax      uint       `mapstructure:"vnc_port_max"`
 	VMName          string     `mapstructure:"vm_name"`
-	RunOnce         bool       `mapstructure:"run_once"`
+
+	// TODO(mitchellh): deprecate
+	RunOnce bool `mapstructure:"run_once"`
 
 	RawBootWait        string `mapstructure:"boot_wait"`
 	RawSingleISOUrl    string `mapstructure:"iso_url"`
@@ -126,6 +129,10 @@ func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 
 	if b.config.OutputDir == "" {
 		b.config.OutputDir = fmt.Sprintf("output-%s", b.config.PackerBuildName)
+	}
+
+	if b.config.QemuBinary == "" {
+		b.config.QemuBinary = "qemu-system-x86_64"
 	}
 
 	if b.config.RawBootWait == "" {
@@ -189,6 +196,7 @@ func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 		"iso_url":           &b.config.RawSingleISOUrl,
 		"output_directory":  &b.config.OutputDir,
 		"shutdown_command":  &b.config.ShutdownCommand,
+		"ssh_key_path":      &b.config.SSHKeyPath,
 		"ssh_password":      &b.config.SSHPassword,
 		"ssh_username":      &b.config.SSHUser,
 		"vm_name":           &b.config.VMName,
@@ -330,7 +338,7 @@ func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 		if _, err := os.Stat(b.config.SSHKeyPath); err != nil {
 			errs = packer.MultiErrorAppend(
 				errs, fmt.Errorf("ssh_key_path is invalid: %s", err))
-		} else if _, err := sshKeyToKeyring(b.config.SSHKeyPath); err != nil {
+		} else if _, err := sshKeyToSigner(b.config.SSHKeyPath); err != nil {
 			errs = packer.MultiErrorAppend(
 				errs, fmt.Errorf("ssh_key_path is invalid: %s", err))
 		}
@@ -370,7 +378,7 @@ func (b *Builder) Prepare(raws ...interface{}) ([]string, error) {
 
 func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packer.Artifact, error) {
 	// Create the driver that we'll use to communicate with Qemu
-	driver, err := b.newDriver()
+	driver, err := b.newDriver(b.config.QemuBinary)
 	if err != nil {
 		return nil, fmt.Errorf("Failed creating Qemu driver: %s", err)
 	}
@@ -392,26 +400,11 @@ func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packe
 		new(stepForwardSSH),
 		new(stepConfigureVNC),
 		&stepRun{
-			BootDrive: "d",
+			BootDrive: "once=d",
 			Message:   "Starting VM, booting from CD-ROM",
 		},
-	}
-
-	if !b.config.RunOnce {
-		steps = append(steps,
-			&stepBootWait{},
-			&stepTypeBootCommand{},
-			&stepWaitForShutdown{
-				Message: "Waiting for initial VM boot to shut down",
-			},
-			&stepRun{
-				BootDrive: "c",
-				Message:   "Starting VM, booting from hard disk",
-			},
-		)
-	}
-
-	steps = append(steps,
+		&stepBootWait{},
+		&stepTypeBootCommand{},
 		&common.StepConnectSSH{
 			SSHAddress:     sshAddress,
 			SSHConfig:      sshConfig,
@@ -419,7 +412,7 @@ func (b *Builder) Run(ui packer.Ui, hook packer.Hook, cache packer.Cache) (packe
 		},
 		new(common.StepProvision),
 		new(stepShutdown),
-	)
+	}
 
 	// Setup the state bag
 	state := new(multistep.BasicStateBag)
@@ -484,8 +477,8 @@ func (b *Builder) Cancel() {
 	}
 }
 
-func (b *Builder) newDriver() (Driver, error) {
-	qemuPath, err := exec.LookPath("qemu-system-x86_64")
+func (b *Builder) newDriver(qemuBinary string) (Driver, error) {
+	qemuPath, err := exec.LookPath(qemuBinary)
 	if err != nil {
 		return nil, err
 	}
