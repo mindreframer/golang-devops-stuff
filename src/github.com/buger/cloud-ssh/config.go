@@ -42,6 +42,8 @@ func readConfig() (config Config) {
 			if err != nil {
 				log.Fatal("Error while reading config: ", err)
 			}
+
+			break
 		}
 	}
 
