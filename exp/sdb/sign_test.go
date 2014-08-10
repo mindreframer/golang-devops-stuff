@@ -3,14 +3,14 @@ package sdb_test
 import (
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/exp/sdb"
-	"launchpad.net/gocheck"
+	"gopkg.in/check.v1"
 )
 
 // SimpleDB ReST authentication docs: http://goo.gl/CaY81
 
 var testAuth = aws.Auth{AccessKey: "access-key-id-s8eBOWuU", SecretKey: "secret-access-key-UkQjTLd9"}
 
-func (s *S) TestSignExampleDomainCreate(c *gocheck.C) {
+func (s *S) TestSignExampleDomainCreate(c *check.C) {
 	method := "GET"
 	params := map[string][]string{
 		"Action":     {"CreateDomain"},
@@ -23,7 +23,7 @@ func (s *S) TestSignExampleDomainCreate(c *gocheck.C) {
 	}
 	sdb.Sign(testAuth, method, "", params, headers)
 	expected := "ot2JaeeqMRJqgAqW67hkzUlffgxdOz4RykbrECB+tDU="
-	c.Assert(params["Signature"], gocheck.DeepEquals, []string{expected})
+	c.Assert(params["Signature"], check.DeepEquals, []string{expected})
 }
 
 // Do a few test methods which takes combinations of params

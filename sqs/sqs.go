@@ -21,6 +21,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -90,6 +91,7 @@ type DeleteQueueResponse struct {
 }
 
 type SendMessageResponse struct {
+	AttributeMD5     string `xml:"SendMessageResult>MD5OfMessageAttributes"`
 	MD5              string `xml:"SendMessageResult>MD5OfMessageBody"`
 	Id               string `xml:"SendMessageResult>MessageId"`
 	ResponseMetadata ResponseMetadata
@@ -101,16 +103,28 @@ type ReceiveMessageResponse struct {
 }
 
 type Message struct {
-	MessageId     string      `xml:"MessageId"`
-	Body          string      `xml:"Body"`
-	MD5OfBody     string      `xml:"MD5OfBody"`
-	ReceiptHandle string      `xml:"ReceiptHandle"`
-	Attribute     []Attribute `xml:"Attribute"`
+	MessageId        string             `xml:"MessageId"`
+	Body             string             `xml:"Body"`
+	MD5OfBody        string             `xml:"MD5OfBody"`
+	ReceiptHandle    string             `xml:"ReceiptHandle"`
+	Attribute        []Attribute        `xml:"Attribute"`
+	MessageAttribute []MessageAttribute `xml:"MessageAttribute"`
+	DelaySeconds     int
 }
 
 type Attribute struct {
 	Name  string `xml:"Name"`
 	Value string `xml:"Value"`
+}
+
+type MessageAttribute struct {
+	Name  string                `xml:"Name"`
+	Value MessageAttributeValue `xml:"Value"`
+}
+
+type MessageAttributeValue struct {
+	DataType    string `xml:"DataType"`
+	StringValue string `xml:"StringValue"`
 }
 
 type ChangeMessageVisibilityResponse struct {
@@ -205,7 +219,7 @@ func (s *SQS) newQueue(queueName string, attrs map[string]string) (resp *CreateQ
 	i := 1
 	for k, v := range attrs {
 		nameParam := fmt.Sprintf("Attribute.%d.Name", i)
-		valParam := fmt.Sprintf("Attribute.%d.Value", 1)
+		valParam := fmt.Sprintf("Attribute.%d.Value", i)
 		params[nameParam] = k
 		params[valParam] = v
 		i++
@@ -246,36 +260,66 @@ func (q *Queue) SendMessageWithDelay(MessageBody string, DelaySeconds int64) (re
 	return
 }
 
-func (q *Queue) SendMessage(MessageBody string) (resp *SendMessageResponse, err error) {
+func (q *Queue) SendMessageWithAttributes(MessageBody string, MessageAttributes map[string]string) (resp *SendMessageResponse, err error) {
 	resp = &SendMessageResponse{}
 	params := makeParams("SendMessage")
 
 	params["MessageBody"] = MessageBody
 
-	err = q.SQS.query(q.Url, params, resp)
+	// Add attributes (currently only supports string values)
+	i := 1
+	for k, v := range MessageAttributes {
+		params[fmt.Sprintf("MessageAttribute.%d.Name", i)] = k
+		params[fmt.Sprintf("MessageAttribute.%d.Value.StringValue", i)] = v
+		params[fmt.Sprintf("MessageAttribute.%d.Value.DataType", i)] = "String"
+		i++
+	}
+
+	if err = q.SQS.query(q.Url, params, resp); err != nil {
+		return resp, err
+	}
+
+	// Assert we have expected Attribute MD5 if we've passed any Message Attributes
+	if len(MessageAttributes) > 0 {
+		expectedAttributeMD5 := fmt.Sprintf("%x", calculateAttributeMD5(MessageAttributes))
+
+		if expectedAttributeMD5 != resp.AttributeMD5 {
+			return resp, errors.New(fmt.Sprintf("Attribute MD5 mismatch, expecting `%v`, found `%v`", expectedAttributeMD5, resp.AttributeMD5))
+		}
+	}
+
 	return
+}
+
+func (q *Queue) SendMessage(MessageBody string) (resp *SendMessageResponse, err error) {
+	return q.SendMessageWithAttributes(MessageBody, map[string]string{})
 }
 
 // ReceiveMessageWithVisibilityTimeout
-func (q *Queue) ReceiveMessageWithVisibilityTimeout(MaxNumberOfMessages, VisibilityTimeoutSec int) (resp *ReceiveMessageResponse, err error) {
-	resp = &ReceiveMessageResponse{}
-	params := makeParams("ReceiveMessage")
-
-	params["AttributeName"] = "All"
-	params["MaxNumberOfMessages"] = strconv.Itoa(MaxNumberOfMessages)
-	params["VisibilityTimeout"] = strconv.Itoa(VisibilityTimeoutSec)
-
-	err = q.SQS.query(q.Url, params, resp)
-	return
+func (q *Queue) ReceiveMessageWithVisibilityTimeout(MaxNumberOfMessages, VisibilityTimeoutSec int) (*ReceiveMessageResponse, error) {
+	params := map[string]string{
+		"MaxNumberOfMessages": strconv.Itoa(MaxNumberOfMessages),
+		"VisibilityTimeout":   strconv.Itoa(VisibilityTimeoutSec),
+	}
+	return q.ReceiveMessageWithParameters(params)
 }
 
 // ReceiveMessage
-func (q *Queue) ReceiveMessage(MaxNumberOfMessages int) (resp *ReceiveMessageResponse, err error) {
+func (q *Queue) ReceiveMessage(MaxNumberOfMessages int) (*ReceiveMessageResponse, error) {
+	params := map[string]string{
+		"MaxNumberOfMessages": strconv.Itoa(MaxNumberOfMessages),
+	}
+	return q.ReceiveMessageWithParameters(params)
+}
+
+func (q *Queue) ReceiveMessageWithParameters(p map[string]string) (resp *ReceiveMessageResponse, err error) {
 	resp = &ReceiveMessageResponse{}
 	params := makeParams("ReceiveMessage")
-
 	params["AttributeName"] = "All"
-	params["MaxNumberOfMessages"] = strconv.Itoa(MaxNumberOfMessages)
+
+	for k, v := range p {
+		params[k] = v
+	}
 
 	err = q.SQS.query(q.Url, params, resp)
 	return
@@ -330,6 +374,10 @@ func (q *Queue) SendMessageBatch(msgList []Message) (resp *SendMessageBatchRespo
 		count := idx + 1
 		params[fmt.Sprintf("SendMessageBatchRequestEntry.%d.Id", count)] = fmt.Sprintf("msg-%d", count)
 		params[fmt.Sprintf("SendMessageBatchRequestEntry.%d.MessageBody", count)] = msg.Body
+
+		if msg.DelaySeconds > 0 {
+			params[fmt.Sprintf("SendMessageBatchRequestEntry.%d.DelaySeconds", count)] = strconv.Itoa(msg.DelaySeconds)
+		}
 	}
 
 	err = q.SQS.query(q.Url, params, resp)
@@ -397,36 +445,36 @@ func (q *Queue) DeleteMessageBatch(msgList []Message) (resp *DeleteMessageBatchR
 }
 
 func (s *SQS) query(queueUrl string, params map[string]string, resp interface{}) (err error) {
-	params["Version"] = "2011-10-01"
-	params["Timestamp"] = time.Now().In(time.UTC).Format(time.RFC3339)
 	var url_ *url.URL
 
-	var path string
 	if queueUrl != "" && len(queueUrl) > len(s.Region.SQSEndpoint) {
 		url_, err = url.Parse(queueUrl)
-		path = queueUrl[len(s.Region.SQSEndpoint):]
 	} else {
 		url_, err = url.Parse(s.Region.SQSEndpoint)
-		path = "/"
 	}
+
 	if err != nil {
 		return err
 	}
 
-	//url_, err := url.Parse(s.Region.SQSEndpoint)
-	//if err != nil {
-	//	return err
-	//}
-
-	sign(s.Auth, "GET", path, params, url_.Host)
-
-	url_.RawQuery = multimap(params).Encode()
-
-	if debug {
-		log.Printf("GET ", url_.String())
+	params["Version"] = "2012-11-05"
+	hreq, err := http.NewRequest("POST", url_.String(), strings.NewReader(multimap(params).Encode()))
+	if err != nil {
+		return err
 	}
 
-	r, err := http.Get(url_.String())
+	hreq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	hreq.Header.Set("X-Amz-Date", time.Now().UTC().Format(aws.ISO8601BasicFormat))
+
+	if s.Auth.Token() != "" {
+		hreq.Header.Set("X-Amz-Security-Token", s.Auth.Token())
+	}
+
+	signer := aws.NewV4Signer(s.Auth, "sqs", s.Region)
+	signer.Sign(hreq)
+
+	r, err := http.DefaultClient.Do(hreq)
+
 	if err != nil {
 		return err
 	}

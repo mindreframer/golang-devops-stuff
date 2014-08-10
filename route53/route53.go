@@ -7,6 +7,7 @@ import (
 	"github.com/crowdmob/goamz/aws"
 	"io"
 	"net/http"
+	"strconv"
 )
 
 type Route53 struct {
@@ -25,16 +26,11 @@ func NewRoute53(auth aws.Auth) (*Route53, error) {
 	return &Route53{
 		Auth:     auth,
 		Signer:   signer,
-		Endpoint: route53_host + "/2012-12-12/hostedzone",
+		Endpoint: route53_host + "/2013-04-01/hostedzone",
 	}, nil
 }
 
 // General Structs used in all types of requests
-type HostedZones struct {
-	XMLName    xml.Name `xml:"HostedZones"`
-	HostedZone []HostedZone
-}
-
 type HostedZone struct {
 	XMLName                xml.Name `xml:"HostedZone"`
 	Id                     string
@@ -51,8 +47,8 @@ type Config struct {
 
 // Structs for getting the existing Hosted Zones
 type ListHostedZonesResponse struct {
-	XMLName     xml.Name `xml:"ListHostedZonesResponse"`
-	HostedZones []HostedZones
+	XMLName     xml.Name     `xml:"ListHostedZonesResponse"`
+	HostedZones []HostedZone `xml:"HostedZones>HostedZone"`
 	Marker      string
 	IsTruncated bool
 	NextMarker  string
@@ -68,14 +64,22 @@ type CreateHostedZoneRequest struct {
 	HostedZoneConfig HostedZoneConfig
 }
 
+type ResourceRecordValue struct {
+	Value string `xml:"Value"`
+}
+
+type Change struct {
+	Action string                `xml:"Action"`
+	Name   string                `xml:"ResourceRecordSet>Name"`
+	Type   string                `xml:"ResourceRecordSet>Type"`
+	TTL    int                   `xml:"ResourceRecordSet>TTL,omitempty"`
+	Values []ResourceRecordValue `xml:"ResourceRecordSet>ResourceRecords>ResourceRecord"`
+}
+
 type ChangeResourceRecordSetsRequest struct {
 	XMLName xml.Name `xml:"ChangeResourceRecordSetsRequest"`
 	Xmlns   string   `xml:"xmlns,attr"`
-	Action  string   `xml:"ChangeBatch>Changes>Change>Action"`
-	Name    string   `xml:"ChangeBatch>Changes>Change>ResourceRecordSet>Name"`
-	Type    string   `xml:"ChangeBatch>Changes>Change>ResourceRecordSet>Type"`
-	TTL     string   `xml:"ChangeBatch>Changes>Change>ResourceRecordSet>TTL,omitempty"`
-	Value   string   `xml:"ChangeBatch>Changes>Change>ResourceRecordSet>ResourceRecords>ResourceRecord>Value"`
+	Changes []Change `xml:"ChangeBatch>Changes>Change"`
 }
 
 type HostedZoneConfig struct {
@@ -88,6 +92,49 @@ type CreateHostedZoneResponse struct {
 	HostedZone    HostedZone
 	ChangeInfo    ChangeInfo
 	DelegationSet DelegationSet
+}
+
+type AliasTarget struct {
+	HostedZoneId         string
+	DNSName              string
+	EvaluateTargetHealth bool
+}
+
+type ResourceRecord struct {
+	XMLName xml.Name `xml:"ResourceRecord"`
+	Value   string
+}
+
+type ResourceRecords struct {
+	XMLName        xml.Name `xml:"ResourceRecords"`
+	ResourceRecord []ResourceRecord
+}
+
+type ResourceRecordSet struct {
+	XMLName         xml.Name `xml:"ResourceRecordSet"`
+	Name            string
+	Type            string
+	TTL             int
+	ResourceRecords []ResourceRecords
+	HealthCheckId   string
+	Region          string
+	Failover        string
+	AliasTarget     AliasTarget
+}
+
+type ResourceRecordSets struct {
+	XMLName           xml.Name `xml:"ResourceRecordSets"`
+	ResourceRecordSet []ResourceRecordSet
+}
+
+type ListResourceRecordSetsResponse struct {
+	XMLName              xml.Name `xml:"ListResourceRecordSetsResponse"`
+	ResourceRecordSets   []ResourceRecordSets
+	IsTruncated          bool
+	MaxItems             int
+	NextRecordName       string
+	NextRecordType       string
+	NextRecordIdentifier string
 }
 
 type ChangeResourceRecordSetsResponse struct {
@@ -171,6 +218,39 @@ func (r *Route53) CreateHostedZone(hostedZoneReq *CreateHostedZoneRequest) (*Cre
 	return result, err
 }
 
+// ListResourceRecordSets fetches a collection of ResourceRecordSets through the AWS Route53 API
+func (r *Route53) ListResourceRecordSets(hostedZone string, name string, _type string, identifier string, maxitems int) (result *ListResourceRecordSetsResponse, err error) {
+	var buffer bytes.Buffer
+	addParam(&buffer, "name", name)
+	addParam(&buffer, "type", _type)
+	addParam(&buffer, "identifier", identifier)
+	if maxitems > 0 {
+		addParam(&buffer, "maxitems", strconv.Itoa(maxitems))
+	}
+	path := fmt.Sprintf("%s/%s/rrset?%s", r.Endpoint, hostedZone, buffer.String())
+
+	fmt.Println(path)
+	result = new(ListResourceRecordSetsResponse)
+	err = r.query("GET", path, nil, result)
+
+	return
+}
+
+func (response *ListResourceRecordSetsResponse) GetResourceRecordSets() []ResourceRecordSet {
+	return response.ResourceRecordSets[0].ResourceRecordSet
+}
+
+func (recordset *ResourceRecordSet) GetValues() []string {
+	if len(recordset.ResourceRecords) > 0 {
+		result := make([]string, len(recordset.ResourceRecords[0].ResourceRecord))
+		for i, record := range recordset.ResourceRecords[0].ResourceRecord {
+			result[i] = record.Value
+		}
+		return result
+	}
+	return make([]string, 0)
+}
+
 // ChangeResourceRecordSet send a change resource record request to the AWS Route53 API
 func (r *Route53) ChangeResourceRecordSet(req *ChangeResourceRecordSetsRequest, zoneId string) (*ChangeResourceRecordSetsResponse, error) {
 	xmlBytes, err := xml.Marshal(req)
@@ -188,7 +268,13 @@ func (r *Route53) ChangeResourceRecordSet(req *ChangeResourceRecordSetsRequest, 
 
 // ListedHostedZones fetches a collection of HostedZones through the AWS Route53 API
 func (r *Route53) ListHostedZones(marker string, maxItems int) (result *ListHostedZonesResponse, err error) {
-	path := fmt.Sprintf("%s?marker=%v&maxitems=%d", r.Endpoint, marker, maxItems)
+	path := ""
+
+	if marker == "" {
+		path = fmt.Sprintf("%s?maxitems=%d", r.Endpoint, maxItems)
+	} else {
+		path = fmt.Sprintf("%s?marker=%v&maxitems=%d", r.Endpoint, marker, maxItems)
+	}
 
 	result = new(ListHostedZonesResponse)
 	err = r.query("GET", path, nil, result)
@@ -212,4 +298,13 @@ func (r *Route53) DeleteHostedZone(id string) (result *DeleteHostedZoneResponse,
 	err = r.query("DELETE", path, nil, result)
 
 	return
+}
+
+func addParam(buffer *bytes.Buffer, name, value string) {
+	if value != "" {
+		if buffer.Len() > 0 {
+			buffer.WriteString("&")
+		}
+		buffer.WriteString(fmt.Sprintf("%s=%s", name, value))
+	}
 }

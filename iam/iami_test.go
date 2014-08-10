@@ -4,7 +4,7 @@ import (
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/iam"
 	"github.com/crowdmob/goamz/testutil"
-	"launchpad.net/gocheck"
+	"gopkg.in/check.v1"
 	"net/url"
 )
 
@@ -13,7 +13,7 @@ type AmazonServer struct {
 	auth aws.Auth
 }
 
-func (s *AmazonServer) SetUp(c *gocheck.C) {
+func (s *AmazonServer) SetUp(c *check.C) {
 	auth, err := aws.EnvAuth()
 	if err != nil {
 		c.Fatal(err)
@@ -21,7 +21,7 @@ func (s *AmazonServer) SetUp(c *gocheck.C) {
 	s.auth = auth
 }
 
-var _ = gocheck.Suite(&AmazonClientSuite{})
+var _ = check.Suite(&AmazonClientSuite{})
 
 // AmazonClientSuite tests the client against a live AWS server.
 type AmazonClientSuite struct {
@@ -29,7 +29,7 @@ type AmazonClientSuite struct {
 	ClientTests
 }
 
-func (s *AmazonClientSuite) SetUpSuite(c *gocheck.C) {
+func (s *AmazonClientSuite) SetUpSuite(c *check.C) {
 	if !testutil.Amazon {
 		c.Skip("AmazonClientSuite tests not enabled")
 	}
@@ -44,140 +44,140 @@ type ClientTests struct {
 	iam *iam.IAM
 }
 
-func (s *ClientTests) TestCreateAndDeleteUser(c *gocheck.C) {
+func (s *ClientTests) TestCreateAndDeleteUser(c *check.C) {
 	createResp, err := s.iam.CreateUser("gopher", "/gopher/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	getResp, err := s.iam.GetUser("gopher")
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(createResp.User, gocheck.DeepEquals, getResp.User)
+	c.Assert(err, check.IsNil)
+	c.Assert(createResp.User, check.DeepEquals, getResp.User)
 	_, err = s.iam.DeleteUser("gopher")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 }
 
-func (s *ClientTests) TestCreateUserError(c *gocheck.C) {
+func (s *ClientTests) TestCreateUserError(c *check.C) {
 	_, err := s.iam.CreateUser("gopher", "/gopher/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer s.iam.DeleteUser("gopher")
 	_, err = s.iam.CreateUser("gopher", "/")
 	iamErr, ok := err.(*iam.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(iamErr.StatusCode, gocheck.Equals, 409)
-	c.Assert(iamErr.Code, gocheck.Equals, "EntityAlreadyExists")
-	c.Assert(iamErr.Message, gocheck.Equals, "User with name gopher already exists.")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(iamErr.StatusCode, check.Equals, 409)
+	c.Assert(iamErr.Code, check.Equals, "EntityAlreadyExists")
+	c.Assert(iamErr.Message, check.Equals, "User with name gopher already exists.")
 }
 
-func (s *ClientTests) TestDeleteUserError(c *gocheck.C) {
+func (s *ClientTests) TestDeleteUserError(c *check.C) {
 	_, err := s.iam.DeleteUser("gopher")
 	iamErr, ok := err.(*iam.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(iamErr.StatusCode, gocheck.Equals, 404)
-	c.Assert(iamErr.Code, gocheck.Equals, "NoSuchEntity")
-	c.Assert(iamErr.Message, gocheck.Equals, "The user with name gopher cannot be found.")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(iamErr.StatusCode, check.Equals, 404)
+	c.Assert(iamErr.Code, check.Equals, "NoSuchEntity")
+	c.Assert(iamErr.Message, check.Equals, "The user with name gopher cannot be found.")
 }
 
-func (s *ClientTests) TestGetUserError(c *gocheck.C) {
+func (s *ClientTests) TestGetUserError(c *check.C) {
 	_, err := s.iam.GetUser("gopher")
 	iamErr, ok := err.(*iam.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(iamErr.StatusCode, gocheck.Equals, 404)
-	c.Assert(iamErr.Code, gocheck.Equals, "NoSuchEntity")
-	c.Assert(iamErr.Message, gocheck.Equals, "The user with name gopher cannot be found.")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(iamErr.StatusCode, check.Equals, 404)
+	c.Assert(iamErr.Code, check.Equals, "NoSuchEntity")
+	c.Assert(iamErr.Message, check.Equals, "The user with name gopher cannot be found.")
 }
 
-func (s *ClientTests) TestCreateListAndDeleteAccessKey(c *gocheck.C) {
+func (s *ClientTests) TestCreateListAndDeleteAccessKey(c *check.C) {
 	createUserResp, err := s.iam.CreateUser("gopher", "/gopher/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer s.iam.DeleteUser(createUserResp.User.Name)
 	createKeyResp, err := s.iam.CreateAccessKey(createUserResp.User.Name)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	listKeyResp, err := s.iam.AccessKeys(createUserResp.User.Name)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(listKeyResp.AccessKeys, gocheck.HasLen, 1)
+	c.Assert(err, check.IsNil)
+	c.Assert(listKeyResp.AccessKeys, check.HasLen, 1)
 	createKeyResp.AccessKey.Secret = ""
-	c.Assert(listKeyResp.AccessKeys[0], gocheck.DeepEquals, createKeyResp.AccessKey)
+	c.Assert(listKeyResp.AccessKeys[0], check.DeepEquals, createKeyResp.AccessKey)
 	_, err = s.iam.DeleteAccessKey(createKeyResp.AccessKey.Id, createUserResp.User.Name)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 }
 
-func (s *ClientTests) TestCreateAccessKeyError(c *gocheck.C) {
+func (s *ClientTests) TestCreateAccessKeyError(c *check.C) {
 	_, err := s.iam.CreateAccessKey("unknowngopher")
-	c.Assert(err, gocheck.NotNil)
+	c.Assert(err, check.NotNil)
 	iamErr, ok := err.(*iam.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(iamErr.StatusCode, gocheck.Equals, 404)
-	c.Assert(iamErr.Code, gocheck.Equals, "NoSuchEntity")
-	c.Assert(iamErr.Message, gocheck.Equals, "The user with name unknowngopher cannot be found.")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(iamErr.StatusCode, check.Equals, 404)
+	c.Assert(iamErr.Code, check.Equals, "NoSuchEntity")
+	c.Assert(iamErr.Message, check.Equals, "The user with name unknowngopher cannot be found.")
 }
 
-func (s *ClientTests) TestListAccessKeysUserNotFound(c *gocheck.C) {
+func (s *ClientTests) TestListAccessKeysUserNotFound(c *check.C) {
 	_, err := s.iam.AccessKeys("unknowngopher")
-	c.Assert(err, gocheck.NotNil)
+	c.Assert(err, check.NotNil)
 	iamErr, ok := err.(*iam.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(iamErr.StatusCode, gocheck.Equals, 404)
-	c.Assert(iamErr.Code, gocheck.Equals, "NoSuchEntity")
-	c.Assert(iamErr.Message, gocheck.Equals, "The user with name unknowngopher cannot be found.")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(iamErr.StatusCode, check.Equals, 404)
+	c.Assert(iamErr.Code, check.Equals, "NoSuchEntity")
+	c.Assert(iamErr.Message, check.Equals, "The user with name unknowngopher cannot be found.")
 }
 
-func (s *ClientTests) TestListAccessKeysUserWithoutKeys(c *gocheck.C) {
+func (s *ClientTests) TestListAccessKeysUserWithoutKeys(c *check.C) {
 	createUserResp, err := s.iam.CreateUser("gopher", "/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer s.iam.DeleteUser(createUserResp.User.Name)
 	resp, err := s.iam.AccessKeys(createUserResp.User.Name)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(resp.AccessKeys, gocheck.HasLen, 0)
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.AccessKeys, check.HasLen, 0)
 }
 
-func (s *ClientTests) TestCreateListAndDeleteGroup(c *gocheck.C) {
+func (s *ClientTests) TestCreateListAndDeleteGroup(c *check.C) {
 	cResp1, err := s.iam.CreateGroup("Finances", "/finances/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	cResp2, err := s.iam.CreateGroup("DevelopmentManagers", "/development/managers/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	lResp, err := s.iam.Groups("/development/")
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(lResp.Groups, gocheck.HasLen, 1)
-	c.Assert(cResp2.Group, gocheck.DeepEquals, lResp.Groups[0])
+	c.Assert(err, check.IsNil)
+	c.Assert(lResp.Groups, check.HasLen, 1)
+	c.Assert(cResp2.Group, check.DeepEquals, lResp.Groups[0])
 	lResp, err = s.iam.Groups("")
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(lResp.Groups, gocheck.HasLen, 2)
+	c.Assert(err, check.IsNil)
+	c.Assert(lResp.Groups, check.HasLen, 2)
 	if lResp.Groups[0].Name == cResp1.Group.Name {
-		c.Assert([]iam.Group{cResp1.Group, cResp2.Group}, gocheck.DeepEquals, lResp.Groups)
+		c.Assert([]iam.Group{cResp1.Group, cResp2.Group}, check.DeepEquals, lResp.Groups)
 	} else {
-		c.Assert([]iam.Group{cResp2.Group, cResp1.Group}, gocheck.DeepEquals, lResp.Groups)
+		c.Assert([]iam.Group{cResp2.Group, cResp1.Group}, check.DeepEquals, lResp.Groups)
 	}
 	_, err = s.iam.DeleteGroup("DevelopmentManagers")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	lResp, err = s.iam.Groups("/development/")
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(lResp.Groups, gocheck.HasLen, 0)
+	c.Assert(err, check.IsNil)
+	c.Assert(lResp.Groups, check.HasLen, 0)
 	_, err = s.iam.DeleteGroup("Finances")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 }
 
-func (s *ClientTests) TestCreateGroupError(c *gocheck.C) {
+func (s *ClientTests) TestCreateGroupError(c *check.C) {
 	_, err := s.iam.CreateGroup("Finances", "/finances/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer s.iam.DeleteGroup("Finances")
 	_, err = s.iam.CreateGroup("Finances", "/something-else/")
 	iamErr, ok := err.(*iam.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(iamErr.StatusCode, gocheck.Equals, 409)
-	c.Assert(iamErr.Code, gocheck.Equals, "EntityAlreadyExists")
-	c.Assert(iamErr.Message, gocheck.Equals, "Group with name Finances already exists.")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(iamErr.StatusCode, check.Equals, 409)
+	c.Assert(iamErr.Code, check.Equals, "EntityAlreadyExists")
+	c.Assert(iamErr.Message, check.Equals, "Group with name Finances already exists.")
 }
 
-func (s *ClientTests) TestDeleteGroupError(c *gocheck.C) {
+func (s *ClientTests) TestDeleteGroupError(c *check.C) {
 	_, err := s.iam.DeleteGroup("Finances")
 	iamErr, ok := err.(*iam.Error)
-	c.Assert(ok, gocheck.Equals, true)
-	c.Assert(iamErr.StatusCode, gocheck.Equals, 404)
-	c.Assert(iamErr.Code, gocheck.Equals, "NoSuchEntity")
-	c.Assert(iamErr.Message, gocheck.Equals, "The group with name Finances cannot be found.")
+	c.Assert(ok, check.Equals, true)
+	c.Assert(iamErr.StatusCode, check.Equals, 404)
+	c.Assert(iamErr.Code, check.Equals, "NoSuchEntity")
+	c.Assert(iamErr.Message, check.Equals, "The group with name Finances cannot be found.")
 }
 
-func (s *ClientTests) TestPutGetAndDeleteUserPolicy(c *gocheck.C) {
+func (s *ClientTests) TestPutGetAndDeleteUserPolicy(c *check.C) {
 	userResp, err := s.iam.CreateUser("gopher", "/gopher/")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	defer s.iam.DeleteUser(userResp.User.Name)
 	document := `{
 		"Statement": [
@@ -193,16 +193,16 @@ func (s *ClientTests) TestPutGetAndDeleteUserPolicy(c *gocheck.C) {
 		}]
 	}`
 	_, err = s.iam.PutUserPolicy(userResp.User.Name, "EverythingS3", document)
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	resp, err := s.iam.GetUserPolicy(userResp.User.Name, "EverythingS3")
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(resp.Policy.Name, gocheck.Equals, "EverythingS3")
-	c.Assert(resp.Policy.UserName, gocheck.Equals, userResp.User.Name)
+	c.Assert(err, check.IsNil)
+	c.Assert(resp.Policy.Name, check.Equals, "EverythingS3")
+	c.Assert(resp.Policy.UserName, check.Equals, userResp.User.Name)
 	gotDocument, err := url.QueryUnescape(resp.Policy.Document)
-	c.Assert(err, gocheck.IsNil)
-	c.Assert(gotDocument, gocheck.Equals, document)
+	c.Assert(err, check.IsNil)
+	c.Assert(gotDocument, check.Equals, document)
 	_, err = s.iam.DeleteUserPolicy(userResp.User.Name, "EverythingS3")
-	c.Assert(err, gocheck.IsNil)
+	c.Assert(err, check.IsNil)
 	_, err = s.iam.GetUserPolicy(userResp.User.Name, "EverythingS3")
-	c.Assert(err, gocheck.NotNil)
+	c.Assert(err, check.NotNil)
 }

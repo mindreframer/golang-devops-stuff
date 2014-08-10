@@ -162,3 +162,156 @@ var TestListSubscriptionsByTopicXmlOK = `
   </ResponseMetadata>
 </ListSubscriptionsByTopicResponse>
 `
+
+var TestCreatePlatformApplicationXmlOK = `
+<CreatePlatformApplicationResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <CreatePlatformApplicationResult>
+    <PlatformApplicationArn>arn:aws:sns:us-west-2:123456789012:app/GCM/gcmpushapp</PlatformApplicationArn>
+  </CreatePlatformApplicationResult>
+  <ResponseMetadata>
+    <RequestId>b6f0e78b-e9d4-5a0e-b973-adc04e8a4ff9</RequestId>
+  </ResponseMetadata>
+</CreatePlatformApplicationResponse>
+`
+
+var TestCreatePlatformEndpointXmlOK = `
+<CreatePlatformEndpointResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <CreatePlatformEndpointResult>
+    <EndpointArn>arn:aws:sns:us-west-2:123456789012:endpoint/GCM/gcmpushapp/5e3e9847-3183-3f18-a7e8-671c3a57d4b3</EndpointArn>
+  </CreatePlatformEndpointResult>
+  <ResponseMetadata>
+    <RequestId>6613341d-3e15-53f7-bf3c-7e56994ba278</RequestId>
+  </ResponseMetadata>
+</CreatePlatformEndpointResponse>
+`
+
+var DeleteEndpointXmlOK = `
+<DeleteEndpointResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <ResponseMetadata>
+    <RequestId>c1d2b191-353c-5a5f-8969-fbdd3900afa8</RequestId>
+  </ResponseMetadata>
+</DeleteEndpointResponse>
+`
+
+var TestDeletePlatformApplicationXmlOK = `
+<DeletePlatformApplicationResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <ResponseMetadata>
+    <RequestId>097dac18-7a77-5823-a8dd-e65476dcb037</RequestId>
+  </ResponseMetadata>
+</DeletePlatformApplicationResponse>
+`
+
+var TestGetEndpointAttributesXmlOK = `
+<GetEndpointAttributesResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <GetEndpointAttributesResult>
+    <Attributes>
+      <entry>
+        <key>Enabled</key>
+        <value>true</value>
+      </entry>
+      <entry>
+        <key>CustomUserData</key>
+        <value>UserId=01234567</value>
+      </entry>
+      <entry>
+        <key>Token</key>
+        <value>APA91bGi7fFachkC1xjlqT66VYEucGHochmf1VQAr9k...jsM0PKPxKhddCzx6paEsyay9Zn3D4wNUJb8m6HZrBEXAMPLE</value>
+      </entry>
+    </Attributes>
+  </GetEndpointAttributesResult>
+  <ResponseMetadata>
+    <RequestId>6c725a19-a142-5b77-94f9-1055a9ea04e7</RequestId>
+  </ResponseMetadata>
+</GetEndpointAttributesResponse>
+`
+
+var TestGetPlatformApplicationAttributesXmlOK = `
+<GetPlatformApplicationAttributesResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <GetPlatformApplicationAttributesResult>
+    <Attributes>
+      <entry>
+        <key>AllowEndpointPolicies</key>
+        <value>false</value>
+      </entry>
+    </Attributes>
+  </GetPlatformApplicationAttributesResult>
+  <ResponseMetadata>
+    <RequestId>74848df2-87f6-55ed-890c-c7be80442462</RequestId>
+  </ResponseMetadata>
+</GetPlatformApplicationAttributesResponse>
+`
+
+var TestListEndpointsByPlatformApplicationXmlOK = `
+<ListEndpointsByPlatformApplicationResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <ListEndpointsByPlatformApplicationResult>
+    <Endpoints>
+      <member>
+        <EndpointArn>arn:aws:sns:us-west-2:123456789012:endpoint/GCM/gcmpushapp/5e3e9847-3183-3f18-a7e8-671c3a57d4b3</EndpointArn>
+        <Attributes>
+          <entry>
+            <key>Enabled</key>
+            <value>true</value>
+          </entry>
+          <entry>
+            <key>CustomUserData</key>
+            <value>UserId=27576823</value>
+          </entry>
+          <entry>
+            <key>Token</key>
+            <value>APA91bGi7fFachkC1xjlqT66VYEucGHochmf1VQAr9k...jsM0PKPxKhddCzx6paEsyay9Zn3D4wNUJb8m6HZrBEXAMPLE</value>
+          </entry>
+        </Attributes>
+      </member>
+    </Endpoints>
+  </ListEndpointsByPlatformApplicationResult>
+  <ResponseMetadata>
+    <RequestId>9a48768c-dac8-5a60-aec0-3cc27ea08d96</RequestId>
+  </ResponseMetadata>
+</ListEndpointsByPlatformApplicationResponse>
+`
+
+var TestListPlatformApplicationsXmlOK = `
+<ListPlatformApplicationsResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <ListPlatformApplicationsResult>
+    <PlatformApplications>
+      <member>
+        <PlatformApplicationArn>arn:aws:sns:us-west-2:123456789012:app/APNS_SANDBOX/apnspushapp</PlatformApplicationArn>
+        <Attributes>
+          <entry>
+            <key>AllowEndpointPolicies</key>
+            <value>false</value>
+          </entry>
+        </Attributes>
+      </member>
+      <member>
+        <PlatformApplicationArn>arn:aws:sns:us-west-2:123456789012:app/GCM/gcmpushapp</PlatformApplicationArn>
+        <Attributes>
+          <entry>
+            <key>AllowEndpointPolicies</key>
+            <value>false</value>
+          </entry>
+        </Attributes>
+      </member>
+    </PlatformApplications>
+  </ListPlatformApplicationsResult>
+  <ResponseMetadata>
+    <RequestId>315a335e-85d8-52df-9349-791283cbb529</RequestId>
+  </ResponseMetadata>
+</ListPlatformApplicationsResponse>
+`
+
+var TestSetEndpointAttributesXmlOK = `
+<SetEndpointAttributesResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <ResponseMetadata>
+    <RequestId>2fe0bfc7-3e85-5ee5-a9e2-f58b35e85f6a</RequestId>
+  </ResponseMetadata>
+</SetEndpointAttributesResponse>
+`
+
+var TestSetPlatformApplicationAttributesXmlOK = `
+<SetPlatformApplicationAttributesResponse xmlns="http://sns.amazonaws.com/doc/2010-03-31/">
+  <ResponseMetadata>
+    <RequestId>cf577bcc-b3dc-5463-88f1-3180b9412395</RequestId>
+  </ResponseMetadata>
+</SetPlatformApplicationAttributesResponse>
+`

@@ -48,7 +48,7 @@ func New(auth aws.Auth, region aws.Region) *EC2 {
 //     filter := NewFilter()
 //     filter.Add("architecture", "i386")
 //     filter.Add("launch-index", "0")
-//     resp, err := ec2.Instances(nil, filter)
+//     resp, err := ec2.DescribeInstances(nil, filter)
 //
 type Filter struct {
 	m map[string][]string
@@ -119,7 +119,7 @@ type xmlErrors struct {
 var timeNow = time.Now
 
 func (ec2 *EC2) query(params map[string]string, resp interface{}) error {
-	params["Version"] = "2013-02-01"
+	params["Version"] = "2014-02-01"
 	params["Timestamp"] = timeNow().In(time.UTC).Format(time.RFC3339)
 	endpoint, err := url.Parse(ec2.Region.EC2Endpoint)
 	if err != nil {
@@ -128,6 +128,10 @@ func (ec2 *EC2) query(params map[string]string, resp interface{}) error {
 	if endpoint.Path == "" {
 		endpoint.Path = "/"
 	}
+	if ec2.Auth.Token() != "" {
+		params["SecurityToken"] = ec2.Auth.Token()
+	}
+
 	sign(ec2.Auth, "GET", endpoint.Path, params, endpoint.Host)
 	endpoint.RawQuery = multimap(params).Encode()
 	if debug {
@@ -193,25 +197,38 @@ func addParamsList(params map[string]string, label string, ids []string) {
 //
 // See http://goo.gl/Mcm3b for more details.
 type RunInstancesOptions struct {
-	ImageId                string
-	MinCount               int
-	MaxCount               int
-	KeyName                string
-	InstanceType           string
-	SecurityGroups         []SecurityGroup
-	KernelId               string
-	RamdiskId              string
-	UserData               []byte
-	AvailabilityZone       string
-	PlacementGroupName     string
-	Monitoring             bool
-	SubnetId               string
-	DisableAPITermination  bool
-	ShutdownBehavior       string
-	PrivateIPAddress       string
-	IamInstanceProfileArn  string
-	IamInstanceProfileName string
-	BlockDeviceMappings    []BlockDeviceMapping
+	ImageId               string
+	MinCount              int
+	MaxCount              int
+	KeyName               string
+	InstanceType          string
+	SecurityGroups        []SecurityGroup
+	KernelId              string
+	RamdiskId             string
+	UserData              []byte
+	AvailabilityZone      string
+	PlacementGroupName    string
+	Tenancy               string
+	Monitoring            bool
+	SubnetId              string
+	DisableAPITermination bool
+	ShutdownBehavior      string
+	PrivateIPAddress      string
+	IamInstanceProfile    IamInstanceProfile
+	BlockDeviceMappings   []BlockDeviceMapping
+	EbsOptimized          bool
+	NetworkInterfaces     []NetworkInterface
+}
+
+// NetworkInterface is for creating and attaching to ec2 instances on launch
+type NetworkInterface struct {
+	AssociatePublicIpAddress bool
+	SubnetId                 string
+	Description              string
+	SecurityGroups           []SecurityGroup
+	DeleteOnTermination      bool
+	PrivateIpAddress         string // primary private ip
+	PrivateIpAddresses       []InstancePrivateIpAddress
 }
 
 // Response to a RunInstances request.
@@ -357,8 +374,9 @@ type InstancePrivateIpAddress struct {
 // IamInstanceProfile
 // See http://goo.gl/PjyijL for more details
 type IamInstanceProfile struct {
-	ARN string `xml:"arn"`
-	Id  string `xml:"id"`
+	ARN  string `xml:"arn"`
+	Id   string `xml:"id"`
+	Name string `xml:"name"`
 }
 
 // RunInstances starts new instances in EC2.
@@ -445,6 +463,9 @@ func (ec2 *EC2) RunInstances(options *RunInstancesOptions) (resp *RunInstancesRe
 	if options.PlacementGroupName != "" {
 		params["Placement.GroupName"] = options.PlacementGroupName
 	}
+	if options.Tenancy != "" {
+		params["Placement.Tenancy"] = options.Tenancy
+	}
 	if options.Monitoring {
 		params["Monitoring.Enabled"] = "true"
 	}
@@ -460,13 +481,50 @@ func (ec2 *EC2) RunInstances(options *RunInstancesOptions) (resp *RunInstancesRe
 	if options.PrivateIPAddress != "" {
 		params["PrivateIpAddress"] = options.PrivateIPAddress
 	}
-	if options.IamInstanceProfileArn != "" {
-		params["IamInstanceProfile.Arn"] = options.IamInstanceProfileArn
+	if options.IamInstanceProfile.ARN != "" {
+		params["IamInstanceProfile.Arn"] = options.IamInstanceProfile.ARN
 	}
-	if options.IamInstanceProfileName != "" {
-		params["IamInstanceProfile.Name"] = options.IamInstanceProfileName
+	if options.IamInstanceProfile.Name != "" {
+		params["IamInstanceProfile.Name"] = options.IamInstanceProfile.Name
+	}
+	if options.EbsOptimized {
+		params["EbsOptimized"] = "true"
 	}
 
+	if options.NetworkInterfaces != nil {
+		for i, ni := range options.NetworkInterfaces {
+			prefix := fmt.Sprintf("NetworkInterface.%d.", i+1)
+			params[prefix+"DeviceIndex"] = strconv.Itoa(i)
+			if ni.SubnetId != "" {
+				params[prefix+"SubnetId"] = ni.SubnetId
+			}
+			if ni.Description != "" {
+				params[prefix+"Description"] = ni.Description
+			}
+			if ni.AssociatePublicIpAddress {
+				params[prefix+"AssociatePublicIpAddress"] = "true"
+			}
+			if ni.PrivateIpAddress != "" {
+				params[prefix+"PrivateIpAddress"] = ni.PrivateIpAddress
+			}
+			if ni.SecurityGroups != nil {
+				for secId, g := range ni.SecurityGroups {
+					params[prefix+"SecurityGroupId."+strconv.Itoa(secId+1)] = g.Id
+				}
+			}
+			if ni.DeleteOnTermination {
+				params[prefix+"DeleteOnTermination"] = "true"
+			}
+			if ni.PrivateIpAddresses != nil {
+				for pId, addy := range ni.PrivateIpAddresses {
+					params[prefix+"PrivateIpAddresses."+strconv.Itoa(pId+1)+".PrivateIpAddress"] = addy.PrivateIPAddress
+					if addy.Primary {
+						params[prefix+"PrivateIpAddresses."+strconv.Itoa(pId+1)+".Primary"] = "true"
+					}
+				}
+			}
+		}
+	}
 	resp = &RunInstancesResp{}
 	err = ec2.query(params, resp)
 	if err != nil {
@@ -804,6 +862,7 @@ type Image struct {
 	RootDeviceType     string               `xml:"rootDeviceType"`
 	RootDeviceName     string               `xml:"rootDeviceName"`
 	VirtualizationType string               `xml:"virtualizationType"`
+	Tags               []Tag                `xml:"tagSet>item"`
 	Hypervisor         string               `xml:"hypervisor"`
 	BlockDevices       []BlockDeviceMapping `xml:"blockDeviceMapping>item"`
 }
@@ -866,11 +925,9 @@ func (ec2 *EC2) CreateSnapshot(volumeId, description string) (resp *CreateSnapsh
 // snapshot in order to restore the volume.
 //
 // See http://goo.gl/vwU1y for more details.
-func (ec2 *EC2) DeleteSnapshots(ids []string) (resp *SimpleResp, err error) {
+func (ec2 *EC2) DeleteSnapshots(ssid string) (resp *SimpleResp, err error) {
 	params := makeParams("DeleteSnapshot")
-	for i, id := range ids {
-		params["SnapshotId."+strconv.Itoa(i+1)] = id
-	}
+	params["SnapshotId.1"] = ssid
 
 	resp = &SimpleResp{}
 	err = ec2.query(params, resp)
@@ -917,6 +974,66 @@ func (ec2 *EC2) Snapshots(ids []string, filter *Filter) (resp *SnapshotsResp, er
 	filter.addParams(params)
 
 	resp = &SnapshotsResp{}
+	err = ec2.query(params, resp)
+	if err != nil {
+		return nil, err
+	}
+	return
+}
+
+// DeregisterImage
+//
+type DeregisterImageResponse struct {
+        RequestId string `xml:"requestId"`
+        Response  bool   `xml:"return"`
+}
+
+// See
+//
+func (ec2 *EC2) DeregisterImage(imageId string) (resp *DeregisterImageResponse, err error) {
+        params := makeParams("DeregisterImage")
+        params["ImageId"] = imageId
+
+        resp = &DeregisterImageResponse{}
+        err = ec2.query(params, resp)
+        if err != nil {
+                return nil, err
+        }
+        return
+}
+
+
+// ---------------------------------------------------------------------------
+// Subnets
+
+type SubnetsResp struct {
+	RequestId string   `xml:"requestId"`
+	Subnets   []Subnet `xml:"subnetSet>item"`
+}
+
+// Subnet represents details about a given VPC subnet
+type Subnet struct {
+	Id                      string `xml:"subnetId"`
+	State                   string `xml:"state"`
+	VpcId                   string `xml:"vpcId"`
+	CidrBlock               string `xml:"cidrBlock"`
+	AvailableIpAddressCount int    `xml:"availableIpAddressCount"`
+	AvailabilityZone        string `xml:"availabilityZone"`
+	DefaultForAz            bool   `xml:"defaultForAz"`
+	MapPublicIpOnLaunch     bool   `xml:"mapPublicIpOnLaunch"`
+	Tags                    []Tag  `xml:"tagSet>item"`
+}
+
+// Subnets returns details about VPC subnets.
+// The ids are filter parameters, if provided, limit the subnets returned.
+func (ec2 *EC2) Subnets(ids []string, filter *Filter) (resp *SubnetsResp, err error) {
+	params := makeParams("DescribeSubnets")
+	for i, id := range ids {
+		params["SubnetId."+strconv.Itoa(i+1)] = id
+	}
+	filter.addParams(params)
+
+	resp = &SubnetsResp{}
 	err = ec2.query(params, resp)
 	if err != nil {
 		return nil, err
@@ -1212,3 +1329,66 @@ func (ec2 *EC2) RebootInstances(ids ...string) (resp *SimpleResp, err error) {
 	}
 	return resp, nil
 }
+
+// Reserved Instances
+
+// Structures
+
+// DescribeReservedInstancesResponse structure returned from a DescribeReservedInstances request.
+//
+// See
+type DescribeReservedInstancesResponse struct {
+	RequestId         string                          `xml:"requestId"`
+	ReservedInstances []ReservedInstancesResponseItem `xml:"reservedInstancesSet>item"`
+}
+
+//
+//
+// See
+type ReservedInstancesResponseItem struct {
+	ReservedInstanceId string            `xml:"reservedInstancesId"`
+	InstanceType       string            `xml:"instanceType"`
+	AvailabilityZone    string            `xml:"availabilityZone"`
+	Start               string            `xml:"start"`
+	Duration            uint64            `xml:"duration"`
+	End                 string            `xml:"end"`
+	FixedPrice          float32           `xml:"fixedPrice"`
+	UsagePrice          float32           `xml:"usagePrice"`
+	InstanceCount       int               `xml:"instanceCount"`
+	ProductDescription  string            `xml:"productDescription"`
+	State               string            `xml:"state"`
+	Tags                []Tag             `xml:"tagSet->item"`
+	InstanceTenancy     string            `xml:"instanceTenancy"`
+	CurrencyCode        string            `xml:"currencyCode"`
+	OfferingType        string            `xml:"offeringType"`
+	RecurringCharges    []RecurringCharge `xml:"recurringCharges>item"`
+}
+
+//
+//
+// See
+type RecurringCharge struct {
+	Frequency string  `xml:"frequency"`
+	Amount    float32 `xml:"amount"`
+}
+
+// functions
+// DescribeReservedInstances
+//
+// See 
+func (ec2 *EC2) DescribeReservedInstances(instIds []string, filter *Filter) (resp *DescribeReservedInstancesResponse, err error) {
+	params := makeParams("DescribeReservedInstances")
+
+        for i, id := range instIds {
+                params["ReservedInstancesId."+strconv.Itoa(i+1)] = id
+        }
+        filter.addParams(params)
+
+	resp = &DescribeReservedInstancesResponse{}
+	err = ec2.query(params, resp)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+

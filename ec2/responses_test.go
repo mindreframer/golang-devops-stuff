@@ -446,6 +446,12 @@ var DescribeImagesExample = `
                 </item>
             </blockDeviceMapping>
             <virtualizationType>paravirtual</virtualizationType>
+            <tagSet>
+                <item>
+                    <key>Purpose</key>
+                    <value>EXAMPLE</value>
+                </item>
+            </tagSet>
             <hypervisor>xen</hypervisor>
         </item>
     </imagesSet>
@@ -498,6 +504,74 @@ var DescribeSnapshotsExample = `
       </item>
    </snapshotSet>
 </DescribeSnapshotsResponse>
+`
+
+var DescribeSubnetsExample = `
+<DescribeSubnetsResponse xmlns="http://ec2.amazonaws.com/doc/2014-02-01/">
+    <requestId>a5266c3e-2b7a-4434-971e-317b6EXAMPLE</requestId>
+    <subnetSet>
+        <item>
+            <subnetId>subnet-3e993755</subnetId>
+            <state>available</state>
+            <vpcId>vpc-f84a9b93</vpcId>
+            <cidrBlock>10.0.12.0/24</cidrBlock>
+            <availableIpAddressCount>249</availableIpAddressCount>
+            <availabilityZone>us-west-2c</availabilityZone>
+            <defaultForAz>false</defaultForAz>
+            <mapPublicIpOnLaunch>false</mapPublicIpOnLaunch>
+            <tagSet>
+                <item>
+                    <key>visibility</key>
+                    <value>private</value>
+                </item>
+                <item>
+                    <key>Name</key>
+                    <value>application</value>
+                </item>
+            </tagSet>
+        </item>
+        <item>
+            <subnetId>subnet-f44a8b9f</subnetId>
+            <state>available</state>
+            <vpcId>vpc-f84a9b93</vpcId>
+            <cidrBlock>10.0.10.0/24</cidrBlock>
+            <availableIpAddressCount>248</availableIpAddressCount>
+            <availabilityZone>us-west-2a</availabilityZone>
+            <defaultForAz>false</defaultForAz>
+            <mapPublicIpOnLaunch>false</mapPublicIpOnLaunch>
+            <tagSet>
+                <item>
+                    <key>Name</key>
+                    <value>application</value>
+                </item>
+                <item>
+                    <key>visibility</key>
+                    <value>private</value>
+                </item>
+            </tagSet>
+        </item>
+        <item>
+            <subnetId>subnet-7599371e</subnetId>
+            <state>available</state>
+            <vpcId>vpc-f84a1b93</vpcId>
+            <cidrBlock>10.0.11.0/24</cidrBlock>
+            <availableIpAddressCount>246</availableIpAddressCount>
+            <availabilityZone>us-west-2b</availabilityZone>
+            <defaultForAz>false</defaultForAz>
+            <mapPublicIpOnLaunch>false</mapPublicIpOnLaunch>
+            <tagSet>
+                <item>
+                    <key>visibility</key>
+                    <value>private</value>
+                </item>
+                <item>
+                    <key>Name</key>
+                    <value>application</value>
+                </item>
+            </tagSet>
+        </item>
+    </subnetSet>
+</DescribeSubnetsResponse>
 `
 
 // http://goo.gl/Eo7Yl
@@ -674,3 +748,33 @@ var RebootInstancesExample = `
   <return>true</return>
 </RebootInstancesResponse>
 `
+
+var DescribeReservedInstancesExample = `
+<DescribeReservedInstancesResponse xmlns="http://ec2.amazonaws.com/doc/2014-06-15/">
+   <requestId>59dbff89-35bd-4eac-99ed-be587EXAMPLE</requestId> 
+   <reservedInstancesSet>
+      <item>
+         <reservedInstancesId>e5a2ff3b-7d14-494f-90af-0b5d0EXAMPLE</reservedInstancesId>
+         <instanceType>m1.xlarge</instanceType>
+         <availabilityZone>us-east-1b</availabilityZone>
+         <duration>31536000</duration>
+         <fixedPrice>61.0</fixedPrice>
+         <usagePrice>0.034</usagePrice>
+         <instanceCount>3</instanceCount>
+         <productDescription>Linux/UNIX</productDescription>
+         <state>active</state> 
+         <instanceTenancy>default</instanceTenancy>
+         <currencyCode>USD</currencyCode>
+         <offeringType>Light Utilization</offeringType>
+         <recurringCharges/>
+      </item>
+   </reservedInstancesSet> 
+</DescribeReservedInstancesResponse>
+`
+var DeregisterImageExample = `
+<DeregisterImageResponse xmlns="http://ec2.amazonaws.com/doc/2014-06-15/">
+  <requestId>59dbff89-35bd-4eac-99ed-be587EXAMPLE</requestId> 
+  <return>true</return>
+</DeregisterImageResponse>
+`
+

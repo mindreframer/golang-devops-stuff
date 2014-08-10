@@ -104,6 +104,25 @@ type ListMetricsRequest struct {
 	NextToken  string
 }
 
+type AlarmAction struct {
+	ARN string
+}
+
+type MetricAlarm struct {
+	AlarmActions       []AlarmAction
+	AlarmDescription   string
+	AlarmName          string
+	ComparisonOperator string
+	Dimensions         []Dimension
+	EvaluationPeriods  int
+	MetricName         string
+	Namespace          string
+	Period             int
+	Statistic          string
+	Threshold          float64
+	Unit               string
+}
+
 var attempts = aws.AttemptStrategy{
 	Min:   5,
 	Total: 5 * time.Second,
@@ -145,6 +164,13 @@ var validMetricStatistics = sets.SSet(
 	"SampleCount",
 	"Maximum",
 	"Minimum",
+)
+
+var validComparisonOperators = sets.SSet(
+	"LessThanThreshold",
+	"LessThanOrEqualToThreshold",
+	"GreaterThanThreshold",
+	"GreaterThanOrEqualToThreshold",
 )
 
 // Create a new CloudWatch object for a given namespace
@@ -240,11 +266,16 @@ func (c *CloudWatch) ListMetrics(req *ListMetricsRequest) (result *ListMetricsRe
 	if req.Namespace != "" {
 		params["Namespace"] = req.Namespace
 	}
+	if req.MetricName != "" {
+		params["MetricName"] = req.MetricName
+	}
 	if len(req.Dimensions) > 0 {
 		for i, d := range req.Dimensions {
 			prefix := "Dimensions.member." + strconv.Itoa(i+1)
 			params[prefix+".Name"] = d.Name
-			params[prefix+".Value"] = d.Value
+			if len(d.Value) > 0 {
+				params[prefix+".Value"] = d.Value
+			}
 		}
 	}
 
@@ -308,6 +339,64 @@ func (c *CloudWatch) PutMetricDataNamespace(metrics []MetricDatum, namespace str
 			params[statprefix+".Sum"] = strconv.FormatFloat(metric.StatisticValues.Sum, 'E', 10, 64)
 		}
 	}
+	result = new(aws.BaseResponse)
+	err = c.query("POST", "/", params, result)
+	return
+}
+
+func (c *CloudWatch) PutMetricAlarm(alarm *MetricAlarm) (result *aws.BaseResponse, err error) {
+	// Serialize the params
+	params := aws.MakeParams("PutMetricAlarm")
+
+	switch {
+	case alarm.AlarmName == "":
+		err = errors.New("No AlarmName supplied")
+	case !validComparisonOperators.Member(alarm.ComparisonOperator):
+		err = errors.New("ComparisonOperator is not valid")
+	case alarm.EvaluationPeriods == 0:
+		err = errors.New("No number of EvaluationPeriods specified")
+	case alarm.MetricName == "":
+		err = errors.New("No MetricName specified")
+	case alarm.Namespace == "":
+		err = errors.New("No Namespace specified")
+	case alarm.Period == 0:
+		err = errors.New("No Period over which statistic should apply was specified")
+	case !validMetricStatistics.Member(alarm.Statistic):
+		err = errors.New("Invalid statistic value supplied")
+	case alarm.Threshold == 0:
+		err = errors.New("No Threshold value specified")
+	case alarm.Unit != "" && !validUnits.Member(alarm.Unit):
+		err = errors.New("Unit is not a valid value")
+	}
+	if err != nil {
+		return
+	}
+
+	for i, action := range alarm.AlarmActions {
+		params["AlarmActions.member."+strconv.Itoa(i+1)] = action.ARN
+	}
+	if alarm.AlarmDescription != "" {
+		params["AlarmDescription"] = alarm.AlarmDescription
+		return
+	}
+	params["AlarmDescription"] = alarm.AlarmDescription
+	params["AlarmName"] = alarm.AlarmName
+	params["ComparisonOperator"] = alarm.ComparisonOperator
+	for i, dim := range alarm.Dimensions {
+		dimprefix := "Dimensions.member." + strconv.Itoa(i+1)
+		params[dimprefix+".Name"] = dim.Name
+		params[dimprefix+".Value"] = dim.Value
+	}
+	params["EvaluationPeriods"] = strconv.Itoa(alarm.EvaluationPeriods)
+	params["MetricName"] = alarm.MetricName
+	params["Namespace"] = alarm.Namespace
+	params["Period"] = strconv.Itoa(alarm.Period)
+	params["Statistic"] = alarm.Statistic
+	params["Threshold"] = strconv.FormatFloat(alarm.Threshold, 'E', 10, 64)
+	if alarm.Unit != "" {
+		params["Unit"] = alarm.Unit
+	}
+
 	result = new(aws.BaseResponse)
 	err = c.query("POST", "/", params, result)
 	return

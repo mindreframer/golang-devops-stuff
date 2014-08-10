@@ -4,32 +4,32 @@ import (
 	simplejson "github.com/bitly/go-simplejson"
 	"github.com/crowdmob/goamz/aws"
 	"github.com/crowdmob/goamz/dynamodb"
-	"launchpad.net/gocheck"
+	"gopkg.in/check.v1"
 )
 
 type QueryBuilderSuite struct {
 	server *dynamodb.Server
 }
 
-var _ = gocheck.Suite(&QueryBuilderSuite{})
+var _ = check.Suite(&QueryBuilderSuite{})
 
-func (s *QueryBuilderSuite) SetUpSuite(c *gocheck.C) {
+func (s *QueryBuilderSuite) SetUpSuite(c *check.C) {
 	auth := &aws.Auth{AccessKey: "", SecretKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"}
 	s.server = &dynamodb.Server{*auth, aws.USEast}
 }
 
-func (s *QueryBuilderSuite) TestEmptyQuery(c *gocheck.C) {
+func (s *QueryBuilderSuite) TestEmptyQuery(c *check.C) {
 	q := dynamodb.NewEmptyQuery()
 	queryString := q.String()
 	expectedString := "{}"
-	c.Check(queryString, gocheck.Equals, expectedString)
+	c.Check(queryString, check.Equals, expectedString)
 
 	if expectedString != queryString {
 		c.Fatalf("Unexpected Query String : %s\n", queryString)
 	}
 }
 
-func (s *QueryBuilderSuite) TestAddWriteRequestItems(c *gocheck.C) {
+func (s *QueryBuilderSuite) TestAddWriteRequestItems(c *check.C) {
 	primary := dynamodb.NewStringAttribute("WidgetFoo", "")
 	secondary := dynamodb.NewNumericAttribute("Created", "")
 	key := dynamodb.PrimaryKey{primary, secondary}
@@ -144,10 +144,10 @@ func (s *QueryBuilderSuite) TestAddWriteRequestItems(c *gocheck.C) {
 	if err != nil {
 		c.Fatal(err)
 	}
-	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+	c.Check(queryJson, check.DeepEquals, expectedJson)
 }
 
-func (s *QueryBuilderSuite) TestAddExpectedQuery(c *gocheck.C) {
+func (s *QueryBuilderSuite) TestAddExpectedQuery(c *check.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	key := dynamodb.PrimaryKey{primary, nil}
 	table := s.server.NewTable("sites", key)
@@ -190,10 +190,10 @@ func (s *QueryBuilderSuite) TestAddExpectedQuery(c *gocheck.C) {
 	if err != nil {
 		c.Fatal(err)
 	}
-	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+	c.Check(queryJson, check.DeepEquals, expectedJson)
 }
 
-func (s *QueryBuilderSuite) TestGetItemQuery(c *gocheck.C) {
+func (s *QueryBuilderSuite) TestGetItemQuery(c *check.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	key := dynamodb.PrimaryKey{primary, nil}
 	table := s.server.NewTable("sites", key)
@@ -220,7 +220,7 @@ func (s *QueryBuilderSuite) TestGetItemQuery(c *gocheck.C) {
 		if err != nil {
 			c.Fatal(err)
 		}
-		c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+		c.Check(queryJson, check.DeepEquals, expectedJson)
 	}
 
 	// Use ConsistentRead
@@ -245,11 +245,11 @@ func (s *QueryBuilderSuite) TestGetItemQuery(c *gocheck.C) {
 		if err != nil {
 			c.Fatal(err)
 		}
-		c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+		c.Check(queryJson, check.DeepEquals, expectedJson)
 	}
 }
 
-func (s *QueryBuilderSuite) TestUpdateQuery(c *gocheck.C) {
+func (s *QueryBuilderSuite) TestUpdateQuery(c *check.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	rangek := dynamodb.NewNumericAttribute("time", "")
 	key := dynamodb.PrimaryKey{primary, rangek}
@@ -290,10 +290,10 @@ func (s *QueryBuilderSuite) TestUpdateQuery(c *gocheck.C) {
 	if err != nil {
 		c.Fatal(err)
 	}
-	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+	c.Check(queryJson, check.DeepEquals, expectedJson)
 }
 
-func (s *QueryBuilderSuite) TestAddUpdates(c *gocheck.C) {
+func (s *QueryBuilderSuite) TestAddUpdates(c *check.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	key := dynamodb.PrimaryKey{primary, nil}
 	table := s.server.NewTable("sites", key)
@@ -330,10 +330,10 @@ func (s *QueryBuilderSuite) TestAddUpdates(c *gocheck.C) {
 	if err != nil {
 		c.Fatal(err)
 	}
-	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+	c.Check(queryJson, check.DeepEquals, expectedJson)
 }
 
-func (s *QueryBuilderSuite) TestAddKeyConditions(c *gocheck.C) {
+func (s *QueryBuilderSuite) TestAddKeyConditions(c *check.C) {
 	primary := dynamodb.NewStringAttribute("domain", "")
 	key := dynamodb.PrimaryKey{primary, nil}
 	table := s.server.NewTable("sites", key)
@@ -376,5 +376,5 @@ func (s *QueryBuilderSuite) TestAddKeyConditions(c *gocheck.C) {
 	if err != nil {
 		c.Fatal(err)
 	}
-	c.Check(queryJson, gocheck.DeepEquals, expectedJson)
+	c.Check(queryJson, check.DeepEquals, expectedJson)
 }
