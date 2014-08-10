@@ -6,7 +6,7 @@ set -e
 #
 # Requirements:
 # - The current directory should be a checkout of the docker source code
-#   (http://github.com/dotcloud/docker). Whatever version is checked out
+#   (http://github.com/docker/docker). Whatever version is checked out
 #   will be built.
 # - The VERSION file, at the root of the repository, should exist, and
 #   will be used as Docker binary version and package version.
@@ -16,16 +16,18 @@ set -e
 #   in the Dockerfile at the root of the source. In other words:
 #   DO NOT CALL THIS SCRIPT DIRECTLY.
 # - The right way to call this script is to invoke "make" from
-#   your checkout of the Docker repository. 
+#   your checkout of the Docker repository.
 #   the Makefile will do a "docker build -t docker ." and then
-#   "docker run hack/make.sh" in the resulting container image.
+#   "docker run hack/make.sh" in the resulting image.
 #
 
 set -o pipefail
 
+export DOCKER_PKG='github.com/docker/docker'
+
 # We're a nice, sexy, little shell script, and people might try to run us;
 # but really, they shouldn't. We want to be in a container!
-if [ "$(pwd)" != '/go/src/github.com/dotcloud/docker' ] || [ -z "$DOCKER_CROSSPLATFORMS" ]; then
+if [ "$(pwd)" != "/go/src/$DOCKER_PKG" ] || [ -z "$DOCKER_CROSSPLATFORMS" ]; then
 	{
 		echo "# WARNING! I don't seem to be running in the Docker container."
 		echo "# The result of this command might be an incorrect build, and will not be"
@@ -40,12 +42,19 @@ echo
 
 # List of bundles to create when no argument is passed
 DEFAULT_BUNDLES=(
+	validate-dco
+	validate-gofmt
+
 	binary
-	test
+
+	test-unit
 	test-integration
+	test-integration-cli
+
 	dynbinary
-	dyntest
+	dyntest-unit
 	dyntest-integration
+
 	cover
 	cross
 	tgz
@@ -53,9 +62,9 @@ DEFAULT_BUNDLES=(
 )
 
 VERSION=$(cat ./VERSION)
-if [ -d .git ] && command -v git &> /dev/null; then
+if command -v git &> /dev/null && git rev-parse &> /dev/null; then
 	GITCOMMIT=$(git rev-parse --short HEAD)
-	if [ -n "$(git status --porcelain)" ]; then
+	if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
 		GITCOMMIT="$GITCOMMIT-dirty"
 	fi
 elif [ "$DOCKER_GITCOMMIT" ]; then
@@ -70,8 +79,8 @@ fi
 
 if [ "$AUTO_GOPATH" ]; then
 	rm -rf .gopath
-	mkdir -p .gopath/src/github.com/dotcloud
-	ln -sf ../../../.. .gopath/src/github.com/dotcloud/docker
+	mkdir -p .gopath/src/"$(dirname "${DOCKER_PKG}")"
+	ln -sf ../../../.. .gopath/src/"${DOCKER_PKG}"
 	export GOPATH="$(pwd)/.gopath:$(pwd)/vendor"
 fi
 
@@ -81,10 +90,46 @@ if [ ! "$GOPATH" ]; then
 	exit 1
 fi
 
+if [ -z "$DOCKER_CLIENTONLY" ]; then
+	DOCKER_BUILDTAGS+=" daemon"
+fi
+
 # Use these flags when compiling the tests and final binary
-LDFLAGS='-X main.GITCOMMIT "'$GITCOMMIT'" -X main.VERSION "'$VERSION'" -w'
-LDFLAGS_STATIC='-X github.com/dotcloud/docker/utils.IAMSTATIC true -linkmode external -extldflags "-lpthread -static -Wl,--unresolved-symbols=ignore-in-object-files"'
-BUILDFLAGS='-tags netgo -a'
+LDFLAGS='
+	-w
+	-X '$DOCKER_PKG'/dockerversion.GITCOMMIT "'$GITCOMMIT'"
+	-X '$DOCKER_PKG'/dockerversion.VERSION "'$VERSION'"
+'
+LDFLAGS_STATIC='-linkmode external'
+EXTLDFLAGS_STATIC='-static'
+BUILDFLAGS=( -a -tags "netgo static_build $DOCKER_BUILDTAGS" )
+
+# A few more flags that are specific just to building a completely-static binary (see hack/make/binary)
+# PLEASE do not use these anywhere else.
+EXTLDFLAGS_STATIC_DOCKER="$EXTLDFLAGS_STATIC -lpthread -Wl,--unresolved-symbols=ignore-in-object-files"
+LDFLAGS_STATIC_DOCKER="
+	$LDFLAGS_STATIC
+	-X $DOCKER_PKG/dockerversion.IAMSTATIC true
+	-extldflags \"$EXTLDFLAGS_STATIC_DOCKER\"
+"
+
+if [ "$(uname -s)" = 'FreeBSD' ]; then
+	# Tell cgo the compiler is Clang, not GCC
+	# https://code.google.com/p/go/source/browse/src/cmd/cgo/gcc.go?spec=svne77e74371f2340ee08622ce602e9f7b15f29d8d3&r=e6794866ebeba2bf8818b9261b54e2eef1c9e588#752
+	export CC=clang
+
+	# "-extld clang" is a workaround for
+	# https://code.google.com/p/go/issues/detail?id=6845
+	LDFLAGS="$LDFLAGS -extld clang"
+fi
+
+# If sqlite3.h doesn't exist under /usr/include,
+# check /usr/local/include also just in case
+# (e.g. FreeBSD Ports installs it under the directory)
+if [ ! -e /usr/include/sqlite3.h ] && [ -e /usr/local/include/sqlite3.h ]; then
+	export CGO_CFLAGS='-I/usr/local/include'
+	export CGO_LDFLAGS='-L/usr/local/lib'
+fi
 
 HAVE_GO_TEST_COVER=
 if \
@@ -101,19 +146,86 @@ fi
 #
 go_test_dir() {
 	dir=$1
+	coverpkg=$2
 	testcover=()
 	if [ "$HAVE_GO_TEST_COVER" ]; then
 		# if our current go install has -cover, we want to use it :)
 		mkdir -p "$DEST/coverprofiles"
 		coverprofile="docker${dir#.}"
 		coverprofile="$DEST/coverprofiles/${coverprofile//\//-}"
-		testcover=( -cover -coverprofile "$coverprofile" )
+		testcover=( -cover -coverprofile "$coverprofile" $coverpkg )
 	fi
 	(
-		set -x
+		echo '+ go test' $TESTFLAGS "${DOCKER_PKG}${dir#.}"
 		cd "$dir"
-		go test ${testcover[@]} -ldflags "$LDFLAGS" $BUILDFLAGS $TESTFLAGS
+		go test ${testcover[@]} -ldflags "$LDFLAGS" "${BUILDFLAGS[@]}" $TESTFLAGS
 	)
+}
+
+# Compile phase run by parallel in test-unit. No support for coverpkg
+go_compile_test_dir() {
+	dir=$1
+	out_file="$DEST/precompiled/$dir.test"
+	testcover=()
+	if [ "$HAVE_GO_TEST_COVER" ]; then
+		# if our current go install has -cover, we want to use it :)
+		mkdir -p "$DEST/coverprofiles"
+		coverprofile="docker${dir#.}"
+		coverprofile="$DEST/coverprofiles/${coverprofile//\//-}"
+		testcover=( -cover -coverprofile "$coverprofile" ) # missing $coverpkg
+	fi
+	if [ "$BUILDFLAGS_FILE" ]; then
+		readarray -t BUILDFLAGS < "$BUILDFLAGS_FILE"
+	fi
+	(
+		cd "$dir"
+		go test "${testcover[@]}" -ldflags "$LDFLAGS" "${BUILDFLAGS[@]}" $TESTFLAGS -c
+	)
+	[ $? -ne 0 ] && return 1
+	mkdir -p "$(dirname "$out_file")"
+	mv "$dir/$(basename "$dir").test" "$out_file"
+	echo "Precompiled: ${DOCKER_PKG}${dir#.}"
+}
+
+# This helper function walks the current directory looking for directories
+# holding certain files ($1 parameter), and prints their paths on standard
+# output, one per line.
+find_dirs() {
+	find . -not \( \
+		\( \
+			-wholename './vendor' \
+			-o -wholename './integration' \
+			-o -wholename './integration-cli' \
+			-o -wholename './contrib' \
+			-o -wholename './pkg/mflag/example' \
+			-o -wholename './.git' \
+			-o -wholename './bundles' \
+			-o -wholename './docs' \
+			-o -wholename './pkg/libcontainer/nsinit' \
+		\) \
+		-prune \
+	\) -name "$1" -print0 | xargs -0n1 dirname | sort -u
+}
+
+hash_files() {
+	while [ $# -gt 0 ]; do
+		f="$1"
+		shift
+		dir="$(dirname "$f")"
+		base="$(basename "$f")"
+		for hashAlgo in md5 sha256; do
+			if command -v "${hashAlgo}sum" &> /dev/null; then
+				(
+					# subshell and cd so that we get output files like:
+					#   $HASH docker-$VERSION
+					# instead of:
+					#   $HASH /go/src/github.com/.../$VERSION/binary/docker-$VERSION
+					cd "$dir"
+					"${hashAlgo}sum" "$base" > "$base.$hashAlgo"
+				)
+			fi
+		done
+	done
 }
 
 bundle() {

@@ -1,7 +1,7 @@
 package docker
 
 import (
-	"github.com/dotcloud/docker/utils"
+	"github.com/docker/docker/utils"
 	"runtime"
 	"testing"
 )
@@ -11,7 +11,7 @@ func displayFdGoroutines(t *testing.T) {
 }
 
 func TestFinal(t *testing.T) {
-	nuke(globalRuntime)
+	nuke(globalDaemon)
 	t.Logf("Start Fds: %d, Start Goroutines: %d", startFds, startGoroutines)
 	displayFdGoroutines(t)
 }

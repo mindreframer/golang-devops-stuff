@@ -2,32 +2,30 @@ package utils
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
 	"fmt"
-	"index/suffixarray"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"time"
+	"syscall"
+
+	"github.com/docker/docker/dockerversion"
 )
 
-var (
-	IAMSTATIC bool   // whether or not Docker itself was compiled statically via ./hack/make.sh binary
-	INITSHA1  string // sha1sum of separate static dockerinit, if Docker itself was compiled dynamically via ./hack/make.sh dynbinary
-	INITPATH  string // custom location to search for a valid dockerinit binary (available for packagers as a last resort escape hatch)
-)
+type KeyValuePair struct {
+	Key   string
+	Value string
+}
 
 // A common interface to access the Fatal method of
 // both testing.B and testing.T.
@@ -38,7 +36,7 @@ type Fataler interface {
 // Go is a basic promise implementation: it wraps calls a function in a goroutine,
 // and returns a channel which will later return the function's return value.
 func Go(f func() error) chan error {
-	ch := make(chan error)
+	ch := make(chan error, 1)
 	go func() {
 		ch <- f()
 	}()
@@ -79,79 +77,6 @@ func Debugf(format string, a ...interface{}) {
 
 func Errorf(format string, a ...interface{}) {
 	logf("error", format, a...)
-}
-
-// HumanDuration returns a human-readable approximation of a duration
-// (eg. "About a minute", "4 hours ago", etc.)
-func HumanDuration(d time.Duration) string {
-	if seconds := int(d.Seconds()); seconds < 1 {
-		return "Less than a second"
-	} else if seconds < 60 {
-		return fmt.Sprintf("%d seconds", seconds)
-	} else if minutes := int(d.Minutes()); minutes == 1 {
-		return "About a minute"
-	} else if minutes < 60 {
-		return fmt.Sprintf("%d minutes", minutes)
-	} else if hours := int(d.Hours()); hours == 1 {
-		return "About an hour"
-	} else if hours < 48 {
-		return fmt.Sprintf("%d hours", hours)
-	} else if hours < 24*7*2 {
-		return fmt.Sprintf("%d days", hours/24)
-	} else if hours < 24*30*3 {
-		return fmt.Sprintf("%d weeks", hours/24/7)
-	} else if hours < 24*365*2 {
-		return fmt.Sprintf("%d months", hours/24/30)
-	}
-	return fmt.Sprintf("%f years", d.Hours()/24/365)
-}
-
-// HumanSize returns a human-readable approximation of a size
-// using SI standard (eg. "44kB", "17MB")
-func HumanSize(size int64) string {
-	i := 0
-	var sizef float64
-	sizef = float64(size)
-	units := []string{"B", "kB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"}
-	for sizef >= 1000.0 {
-		sizef = sizef / 1000.0
-		i++
-	}
-	return fmt.Sprintf("%.4g %s", sizef, units[i])
-}
-
-// Parses a human-readable string representing an amount of RAM
-// in bytes, kibibytes, mebibytes or gibibytes, and returns the
-// number of bytes, or -1 if the string is unparseable.
-// Units are case-insensitive, and the 'b' suffix is optional.
-func RAMInBytes(size string) (bytes int64, err error) {
-	re, error := regexp.Compile("^(\\d+)([kKmMgG])?[bB]?$")
-	if error != nil {
-		return -1, error
-	}
-
-	matches := re.FindStringSubmatch(size)
-
-	if len(matches) != 3 {
-		return -1, fmt.Errorf("Invalid size: '%s'", size)
-	}
-
-	memLimit, error := strconv.ParseInt(matches[1], 10, 0)
-	if error != nil {
-		return -1, error
-	}
-
-	unit := strings.ToLower(matches[2])
-
-	if unit == "k" {
-		memLimit *= 1024
-	} else if unit == "m" {
-		memLimit *= 1024 * 1024
-	} else if unit == "g" {
-		memLimit *= 1024 * 1024 * 1024
-	}
-
-	return memLimit, nil
 }
 
 func Trunc(s string, maxlen int) string {
@@ -201,7 +126,7 @@ func isValidDockerInitPath(target string, selfPath string) bool { // target and 
 	if target == "" {
 		return false
 	}
-	if IAMSTATIC {
+	if dockerversion.IAMSTATIC {
 		if selfPath == "" {
 			return false
 		}
@@ -218,7 +143,7 @@ func isValidDockerInitPath(target string, selfPath string) bool { // target and 
 		}
 		return os.SameFile(targetFileInfo, selfPathFileInfo)
 	}
-	return INITSHA1 != "" && dockerInitSha1(target) == INITSHA1
+	return dockerversion.INITSHA1 != "" && dockerInitSha1(target) == dockerversion.INITSHA1
 }
 
 // Figure out the path of our dockerinit (which may be SelfPath())
@@ -230,7 +155,7 @@ func DockerInitPath(localCopy string) string {
 	}
 	var possibleInits = []string{
 		localCopy,
-		INITPATH,
+		dockerversion.INITPATH,
 		filepath.Join(filepath.Dir(selfPath), "dockerinit"),
 
 		// FHS 3.0 Draft: "/usr/libexec includes internal binaries that are not intended to be executed directly by users or shell scripts. Applications may use a single subdirectory under /usr/libexec."
@@ -337,76 +262,6 @@ func (r *bufReader) Close() error {
 	return closer.Close()
 }
 
-type WriteBroadcaster struct {
-	sync.Mutex
-	buf     *bytes.Buffer
-	writers map[StreamWriter]bool
-}
-
-type StreamWriter struct {
-	wc     io.WriteCloser
-	stream string
-}
-
-func (w *WriteBroadcaster) AddWriter(writer io.WriteCloser, stream string) {
-	w.Lock()
-	sw := StreamWriter{wc: writer, stream: stream}
-	w.writers[sw] = true
-	w.Unlock()
-}
-
-type JSONLog struct {
-	Log     string    `json:"log,omitempty"`
-	Stream  string    `json:"stream,omitempty"`
-	Created time.Time `json:"time"`
-}
-
-func (w *WriteBroadcaster) Write(p []byte) (n int, err error) {
-	w.Lock()
-	defer w.Unlock()
-	w.buf.Write(p)
-	for sw := range w.writers {
-		lp := p
-		if sw.stream != "" {
-			lp = nil
-			for {
-				line, err := w.buf.ReadString('\n')
-				if err != nil {
-					w.buf.Write([]byte(line))
-					break
-				}
-				b, err := json.Marshal(&JSONLog{Log: line, Stream: sw.stream, Created: time.Now().UTC()})
-				if err != nil {
-					// On error, evict the writer
-					delete(w.writers, sw)
-					continue
-				}
-				lp = append(lp, b...)
-				lp = append(lp, '\n')
-			}
-		}
-		if n, err := sw.wc.Write(lp); err != nil || n != len(lp) {
-			// On error, evict the writer
-			delete(w.writers, sw)
-		}
-	}
-	return len(p), nil
-}
-
-func (w *WriteBroadcaster) CloseWriters() error {
-	w.Lock()
-	defer w.Unlock()
-	for sw := range w.writers {
-		sw.wc.Close()
-	}
-	w.writers = make(map[StreamWriter]bool)
-	return nil
-}
-
-func NewWriteBroadcaster() *WriteBroadcaster {
-	return &WriteBroadcaster{writers: make(map[StreamWriter]bool), buf: bytes.NewBuffer(nil)}
-}
-
 func GetTotalUsedFds() int {
 	if fds, err := ioutil.ReadDir(fmt.Sprintf("/proc/%d/fd", os.Getpid())); err != nil {
 		Errorf("Error opening /proc/%d/fd: %s", os.Getpid(), err)
@@ -414,76 +269,6 @@ func GetTotalUsedFds() int {
 		return len(fds)
 	}
 	return -1
-}
-
-// TruncIndex allows the retrieval of string identifiers by any of their unique prefixes.
-// This is used to retrieve image and container IDs by more convenient shorthand prefixes.
-type TruncIndex struct {
-	sync.RWMutex
-	index *suffixarray.Index
-	ids   map[string]bool
-	bytes []byte
-}
-
-func NewTruncIndex() *TruncIndex {
-	return &TruncIndex{
-		index: suffixarray.New([]byte{' '}),
-		ids:   make(map[string]bool),
-		bytes: []byte{' '},
-	}
-}
-
-func (idx *TruncIndex) Add(id string) error {
-	idx.Lock()
-	defer idx.Unlock()
-	if strings.Contains(id, " ") {
-		return fmt.Errorf("Illegal character: ' '")
-	}
-	if _, exists := idx.ids[id]; exists {
-		return fmt.Errorf("Id already exists: %s", id)
-	}
-	idx.ids[id] = true
-	idx.bytes = append(idx.bytes, []byte(id+" ")...)
-	idx.index = suffixarray.New(idx.bytes)
-	return nil
-}
-
-func (idx *TruncIndex) Delete(id string) error {
-	idx.Lock()
-	defer idx.Unlock()
-	if _, exists := idx.ids[id]; !exists {
-		return fmt.Errorf("No such id: %s", id)
-	}
-	before, after, err := idx.lookup(id)
-	if err != nil {
-		return err
-	}
-	delete(idx.ids, id)
-	idx.bytes = append(idx.bytes[:before], idx.bytes[after:]...)
-	idx.index = suffixarray.New(idx.bytes)
-	return nil
-}
-
-func (idx *TruncIndex) lookup(s string) (int, int, error) {
-	offsets := idx.index.Lookup([]byte(" "+s), -1)
-	//log.Printf("lookup(%s): %v (index bytes: '%s')\n", s, offsets, idx.index.Bytes())
-	if offsets == nil || len(offsets) == 0 || len(offsets) > 1 {
-		return -1, -1, fmt.Errorf("No such id: %s", s)
-	}
-	offsetBefore := offsets[0] + 1
-	offsetAfter := offsetBefore + strings.Index(string(idx.bytes[offsetBefore:]), " ")
-	return offsetBefore, offsetAfter, nil
-}
-
-func (idx *TruncIndex) Get(s string) (string, error) {
-	idx.RLock()
-	defer idx.RUnlock()
-	before, after, err := idx.lookup(s)
-	//log.Printf("Get(%s) bytes=|%s| before=|%d| after=|%d|\n", s, idx.bytes, before, after)
-	if err != nil {
-		return "", err
-	}
-	return string(idx.bytes[before:after]), err
 }
 
 // TruncateID returns a shorthand version of a string identifier for convenience.
@@ -496,6 +281,34 @@ func TruncateID(id string) string {
 		shortLen = len(id)
 	}
 	return id[:shortLen]
+}
+
+// GenerateRandomID returns an unique id
+func GenerateRandomID() string {
+	for {
+		id := make([]byte, 32)
+		if _, err := io.ReadFull(rand.Reader, id); err != nil {
+			panic(err) // This shouldn't happen
+		}
+		value := hex.EncodeToString(id)
+		// if we try to parse the truncated for as an int and we don't have
+		// an error then the value is all numberic and causes issues when
+		// used as a hostname. ref #3869
+		if _, err := strconv.ParseInt(TruncateID(value), 10, 64); err == nil {
+			continue
+		}
+		return value
+	}
+}
+
+func ValidateID(id string) error {
+	if id == "" {
+		return fmt.Errorf("Id can't be empty")
+	}
+	if strings.Contains(id, ":") {
+		return fmt.Errorf("Invalid character in id: ':'")
+	}
+	return nil
 }
 
 // Code c/c from io.Copy() modified to handle escape sequence
@@ -547,86 +360,6 @@ func HashData(src io.Reader) (string, error) {
 		return "", err
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
-}
-
-type KernelVersionInfo struct {
-	Kernel int
-	Major  int
-	Minor  int
-	Flavor string
-}
-
-func (k *KernelVersionInfo) String() string {
-	return fmt.Sprintf("%d.%d.%d%s", k.Kernel, k.Major, k.Minor, k.Flavor)
-}
-
-// Compare two KernelVersionInfo struct.
-// Returns -1 if a < b, 0 if a == b, 1 it a > b
-func CompareKernelVersion(a, b *KernelVersionInfo) int {
-	if a.Kernel < b.Kernel {
-		return -1
-	} else if a.Kernel > b.Kernel {
-		return 1
-	}
-
-	if a.Major < b.Major {
-		return -1
-	} else if a.Major > b.Major {
-		return 1
-	}
-
-	if a.Minor < b.Minor {
-		return -1
-	} else if a.Minor > b.Minor {
-		return 1
-	}
-
-	return 0
-}
-
-func GetKernelVersion() (*KernelVersionInfo, error) {
-	var (
-		err error
-	)
-
-	uts, err := uname()
-	if err != nil {
-		return nil, err
-	}
-
-	release := make([]byte, len(uts.Release))
-
-	i := 0
-	for _, c := range uts.Release {
-		release[i] = byte(c)
-		i++
-	}
-
-	// Remove the \x00 from the release for Atoi to parse correctly
-	release = release[:bytes.IndexByte(release, 0)]
-
-	return ParseRelease(string(release))
-}
-
-func ParseRelease(release string) (*KernelVersionInfo, error) {
-	var (
-		kernel, major, minor, parsed int
-		flavor                       string
-	)
-
-	// Ignore error from Sscanf to allow an empty flavor.  Instead, just
-	// make sure we got all the version numbers.
-	parsed, _ = fmt.Sscanf(release, "%d.%d.%d%s", &kernel, &major, &minor, &flavor)
-	if parsed < 3 {
-		return nil, errors.New("Can't parse kernel version " + release)
-	}
-
-	return &KernelVersionInfo{
-		Kernel: kernel,
-		Major:  major,
-		Minor:  minor,
-		Flavor: flavor,
-	}, nil
 }
 
 // FIXME: this is deprecated by CopyWithTar in archive.go
@@ -684,187 +417,42 @@ func IsURL(str string) bool {
 }
 
 func IsGIT(str string) bool {
-	return strings.HasPrefix(str, "git://") || strings.HasPrefix(str, "github.com/")
-}
-
-// GetResolvConf opens and read the content of /etc/resolv.conf.
-// It returns it as byte slice.
-func GetResolvConf() ([]byte, error) {
-	resolv, err := ioutil.ReadFile("/etc/resolv.conf")
-	if err != nil {
-		Errorf("Error openning resolv.conf: %s", err)
-		return nil, err
-	}
-	return resolv, nil
+	return strings.HasPrefix(str, "git://") || strings.HasPrefix(str, "github.com/") || strings.HasPrefix(str, "git@github.com:") || (strings.HasSuffix(str, ".git") && IsURL(str))
 }
 
 // CheckLocalDns looks into the /etc/resolv.conf,
 // it returns true if there is a local nameserver or if there is no nameserver.
 func CheckLocalDns(resolvConf []byte) bool {
-	var parsedResolvConf = StripComments(resolvConf, []byte("#"))
-	if !bytes.Contains(parsedResolvConf, []byte("nameserver")) {
-		return true
-	}
-	for _, ip := range [][]byte{
-		[]byte("127.0.0.1"),
-		[]byte("127.0.1.1"),
-	} {
-		if bytes.Contains(parsedResolvConf, ip) {
-			return true
+	for _, line := range GetLines(resolvConf, []byte("#")) {
+		if !bytes.Contains(line, []byte("nameserver")) {
+			continue
 		}
+		for _, ip := range [][]byte{
+			[]byte("127.0.0.1"),
+			[]byte("127.0.1.1"),
+		} {
+			if bytes.Contains(line, ip) {
+				return true
+			}
+		}
+		return false
 	}
-	return false
+	return true
 }
 
-// StripComments parses input into lines and strips away comments.
-func StripComments(input []byte, commentMarker []byte) []byte {
+// GetLines parses input into lines and strips away comments.
+func GetLines(input []byte, commentMarker []byte) [][]byte {
 	lines := bytes.Split(input, []byte("\n"))
-	var output []byte
+	var output [][]byte
 	for _, currentLine := range lines {
 		var commentIndex = bytes.Index(currentLine, commentMarker)
 		if commentIndex == -1 {
-			output = append(output, currentLine...)
+			output = append(output, currentLine)
 		} else {
-			output = append(output, currentLine[:commentIndex]...)
+			output = append(output, currentLine[:commentIndex])
 		}
-		output = append(output, []byte("\n")...)
 	}
 	return output
-}
-
-// GetNameserversAsCIDR returns nameservers (if any) listed in
-// /etc/resolv.conf as CIDR blocks (e.g., "1.2.3.4/32")
-// This function's output is intended for net.ParseCIDR
-func GetNameserversAsCIDR(resolvConf []byte) []string {
-	var parsedResolvConf = StripComments(resolvConf, []byte("#"))
-	nameservers := []string{}
-	re := regexp.MustCompile(`^\s*nameserver\s*(([0-9]+\.){3}([0-9]+))\s*$`)
-	for _, line := range bytes.Split(parsedResolvConf, []byte("\n")) {
-		var ns = re.FindSubmatch(line)
-		if len(ns) > 0 {
-			nameservers = append(nameservers, string(ns[1])+"/32")
-		}
-	}
-
-	return nameservers
-}
-
-// FIXME: Change this not to receive default value as parameter
-func ParseHost(defaultHost string, defaultPort int, defaultUnix, addr string) (string, error) {
-	var (
-		proto string
-		host  string
-		port  int
-	)
-	addr = strings.TrimSpace(addr)
-	switch {
-	case strings.HasPrefix(addr, "unix://"):
-		proto = "unix"
-		addr = strings.TrimPrefix(addr, "unix://")
-		if addr == "" {
-			addr = defaultUnix
-		}
-	case strings.HasPrefix(addr, "tcp://"):
-		proto = "tcp"
-		addr = strings.TrimPrefix(addr, "tcp://")
-	case strings.HasPrefix(addr, "fd://"):
-		return addr, nil
-	case addr == "":
-		proto = "unix"
-		addr = defaultUnix
-	default:
-		if strings.Contains(addr, "://") {
-			return "", fmt.Errorf("Invalid bind address protocol: %s", addr)
-		}
-		proto = "tcp"
-	}
-
-	if proto != "unix" && strings.Contains(addr, ":") {
-		hostParts := strings.Split(addr, ":")
-		if len(hostParts) != 2 {
-			return "", fmt.Errorf("Invalid bind address format: %s", addr)
-		}
-		if hostParts[0] != "" {
-			host = hostParts[0]
-		} else {
-			host = defaultHost
-		}
-
-		if p, err := strconv.Atoi(hostParts[1]); err == nil && p != 0 {
-			port = p
-		} else {
-			port = defaultPort
-		}
-
-	} else {
-		host = addr
-		port = defaultPort
-	}
-	if proto == "unix" {
-		return fmt.Sprintf("%s://%s", proto, host), nil
-	}
-	return fmt.Sprintf("%s://%s:%d", proto, host, port), nil
-}
-
-func GetReleaseVersion() string {
-	resp, err := http.Get("https://get.docker.io/latest")
-	if err != nil {
-		return ""
-	}
-	defer resp.Body.Close()
-	if resp.ContentLength > 24 || resp.StatusCode != 200 {
-		return ""
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(body))
-}
-
-// Get a repos name and returns the right reposName + tag
-// The tag can be confusing because of a port in a repository name.
-//     Ex: localhost.localdomain:5000/samalba/hipache:latest
-func ParseRepositoryTag(repos string) (string, string) {
-	n := strings.LastIndex(repos, ":")
-	if n < 0 {
-		return repos, ""
-	}
-	if tag := repos[n+1:]; !strings.Contains(tag, "/") {
-		return repos[:n], tag
-	}
-	return repos, ""
-}
-
-type User struct {
-	Uid      string // user id
-	Gid      string // primary group id
-	Username string
-	Name     string
-	HomeDir  string
-}
-
-// UserLookup check if the given username or uid is present in /etc/passwd
-// and returns the user struct.
-// If the username is not found, an error is returned.
-func UserLookup(uid string) (*User, error) {
-	file, err := ioutil.ReadFile("/etc/passwd")
-	if err != nil {
-		return nil, err
-	}
-	for _, line := range strings.Split(string(file), "\n") {
-		data := strings.Split(line, ":")
-		if len(data) > 5 && (data[0] == uid || data[2] == uid) {
-			return &User{
-				Uid:      data[2],
-				Gid:      data[3],
-				Username: data[0],
-				Name:     data[4],
-				HomeDir:  data[5],
-			}, nil
-		}
-	}
-	return nil, fmt.Errorf("User not found in /etc/passwd")
 }
 
 // An StatusError reports an unsuccessful exit by a command.
@@ -910,37 +498,6 @@ func ShellQuoteArguments(args []string) string {
 		quote(arg, &buf)
 	}
 	return buf.String()
-}
-
-func IsClosedError(err error) bool {
-	/* This comparison is ugly, but unfortunately, net.go doesn't export errClosing.
-	 * See:
-	 * http://golang.org/src/pkg/net/net.go
-	 * https://code.google.com/p/go/issues/detail?id=4337
-	 * https://groups.google.com/forum/#!msg/golang-nuts/0_aaCvBmOcM/SptmDyX1XJMJ
-	 */
-	return strings.HasSuffix(err.Error(), "use of closed network connection")
-}
-
-func PartParser(template, data string) (map[string]string, error) {
-	// ip:public:private
-	var (
-		templateParts = strings.Split(template, ":")
-		parts         = strings.Split(data, ":")
-		out           = make(map[string]string, len(templateParts))
-	)
-	if len(parts) != len(templateParts) {
-		return nil, fmt.Errorf("Invalid format to parse.  %s should match template %s", data, template)
-	}
-
-	for i, t := range templateParts {
-		value := ""
-		if len(parts) > i {
-			value = parts[i]
-		}
-		out[t] = value
-	}
-	return out, nil
 }
 
 var globalTestID string
@@ -1014,4 +571,151 @@ func NewReadCloserWrapper(r io.Reader, closer func() error) io.ReadCloser {
 		Reader: r,
 		closer: closer,
 	}
+}
+
+// ReplaceOrAppendValues returns the defaults with the overrides either
+// replaced by env key or appended to the list
+func ReplaceOrAppendEnvValues(defaults, overrides []string) []string {
+	cache := make(map[string]int, len(defaults))
+	for i, e := range defaults {
+		parts := strings.SplitN(e, "=", 2)
+		cache[parts[0]] = i
+	}
+	for _, value := range overrides {
+		parts := strings.SplitN(value, "=", 2)
+		if i, exists := cache[parts[0]]; exists {
+			defaults[i] = value
+		} else {
+			defaults = append(defaults, value)
+		}
+	}
+	return defaults
+}
+
+// ReadSymlinkedDirectory returns the target directory of a symlink.
+// The target of the symbolic link may not be a file.
+func ReadSymlinkedDirectory(path string) (string, error) {
+	var realPath string
+	var err error
+	if realPath, err = filepath.Abs(path); err != nil {
+		return "", fmt.Errorf("unable to get absolute path for %s: %s", path, err)
+	}
+	if realPath, err = filepath.EvalSymlinks(realPath); err != nil {
+		return "", fmt.Errorf("failed to canonicalise path for %s: %s", path, err)
+	}
+	realPathInfo, err := os.Stat(realPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to stat target '%s' of '%s': %s", realPath, path, err)
+	}
+	if !realPathInfo.Mode().IsDir() {
+		return "", fmt.Errorf("canonical path points to a file '%s'", realPath)
+	}
+	return realPath, nil
+}
+
+// TreeSize walks a directory tree and returns its total size in bytes.
+func TreeSize(dir string) (size int64, err error) {
+	data := make(map[uint64]struct{})
+	err = filepath.Walk(dir, func(d string, fileInfo os.FileInfo, e error) error {
+		// Ignore directory sizes
+		if fileInfo == nil {
+			return nil
+		}
+
+		s := fileInfo.Size()
+		if fileInfo.IsDir() || s == 0 {
+			return nil
+		}
+
+		// Check inode to handle hard links correctly
+		inode := fileInfo.Sys().(*syscall.Stat_t).Ino
+		// inode is not a uint64 on all platforms. Cast it to avoid issues.
+		if _, exists := data[uint64(inode)]; exists {
+			return nil
+		}
+		// inode is not a uint64 on all platforms. Cast it to avoid issues.
+		data[uint64(inode)] = struct{}{}
+
+		size += s
+
+		return nil
+	})
+	return
+}
+
+// ValidateContextDirectory checks if all the contents of the directory
+// can be read and returns an error if some files can't be read
+// symlinks which point to non-existing files don't trigger an error
+func ValidateContextDirectory(srcPath string, excludes []string) error {
+	var finalError error
+
+	filepath.Walk(filepath.Join(srcPath, "."), func(filePath string, f os.FileInfo, err error) error {
+		// skip this directory/file if it's not in the path, it won't get added to the context
+		relFilePath, err := filepath.Rel(srcPath, filePath)
+		if err != nil && os.IsPermission(err) {
+			return nil
+		}
+
+		skip, err := Matches(relFilePath, excludes)
+		if err != nil {
+			finalError = err
+		}
+		if skip {
+			if f.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if _, err := os.Stat(filePath); err != nil && os.IsPermission(err) {
+			finalError = fmt.Errorf("can't stat '%s'", filePath)
+			return err
+		}
+		// skip checking if symlinks point to non-existing files, such symlinks can be useful
+		lstat, _ := os.Lstat(filePath)
+		if lstat.Mode()&os.ModeSymlink == os.ModeSymlink {
+			return err
+		}
+
+		if !f.IsDir() {
+			currentFile, err := os.Open(filePath)
+			if err != nil && os.IsPermission(err) {
+				finalError = fmt.Errorf("no permission to read from '%s'", filePath)
+				return err
+			} else {
+				currentFile.Close()
+			}
+		}
+		return nil
+	})
+	return finalError
+}
+
+func StringsContainsNoCase(slice []string, s string) bool {
+	for _, ss := range slice {
+		if strings.ToLower(s) == strings.ToLower(ss) {
+			return true
+		}
+	}
+	return false
+}
+
+// Matches returns true if relFilePath matches any of the patterns
+func Matches(relFilePath string, patterns []string) (bool, error) {
+	for _, exclude := range patterns {
+		matched, err := filepath.Match(exclude, relFilePath)
+		if err != nil {
+			Errorf("Error matching: %s (pattern: %s)", relFilePath, exclude)
+			return false, err
+		}
+		if matched {
+			if filepath.Clean(relFilePath) == "." {
+				Errorf("Can't exclude whole path, excluding pattern: %s", exclude)
+				continue
+			}
+			Debugf("Skipping excluded path: %s", relFilePath)
+			return true, nil
+		}
+	}
+	return false, nil
 }

@@ -1,7 +1,6 @@
 package docker
 
 import (
-	"archive/tar"
 	"bytes"
 	"fmt"
 	"io"
@@ -14,53 +13,45 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dotcloud/docker"
-	"github.com/dotcloud/docker/engine"
-	"github.com/dotcloud/docker/utils"
+	"github.com/docker/docker/vendor/src/code.google.com/p/go/src/pkg/archive/tar"
+
+	"github.com/docker/docker/builtins"
+	"github.com/docker/docker/daemon"
+	"github.com/docker/docker/engine"
+	"github.com/docker/docker/runconfig"
+	"github.com/docker/docker/server"
+	"github.com/docker/docker/utils"
 )
 
 // This file contains utility functions for docker's unit test suite.
 // It has to be named XXX_test.go, apparently, in other to access private functions
 // from other XXX_test.go functions.
 
-// Create a temporary runtime suitable for unit testing.
+// Create a temporary daemon suitable for unit testing.
 // Call t.Fatal() at the first error.
-func mkRuntime(f utils.Fataler) *docker.Runtime {
-	root, err := newTestDirectory(unitTestStoreBase)
-	if err != nil {
-		f.Fatal(err)
-	}
-	config := &docker.DaemonConfig{
-		Root:        root,
-		AutoRestart: false,
-		Mtu:         docker.GetDefaultNetworkMtu(),
-	}
-
-	eng, err := engine.New(root)
-	if err != nil {
-		f.Fatal(err)
-	}
-
-	r, err := docker.NewRuntimeFromDirectory(config, eng)
-	if err != nil {
-		f.Fatal(err)
-	}
-	return r
+func mkDaemon(f utils.Fataler) *daemon.Daemon {
+	eng := newTestEngine(f, false, "")
+	return mkDaemonFromEngine(eng, f)
+	// FIXME:
+	// [...]
+	// Mtu:         docker.GetDefaultNetworkMtu(),
+	// [...]
 }
 
-func createNamedTestContainer(eng *engine.Engine, config *docker.Config, f utils.Fataler, name string) (shortId string) {
+func createNamedTestContainer(eng *engine.Engine, config *runconfig.Config, f utils.Fataler, name string) (shortId string) {
 	job := eng.Job("create", name)
 	if err := job.ImportEnv(config); err != nil {
 		f.Fatal(err)
 	}
-	job.Stdout.AddString(&shortId)
+	var outputBuffer = bytes.NewBuffer(nil)
+	job.Stdout.Add(outputBuffer)
 	if err := job.Run(); err != nil {
 		f.Fatal(err)
 	}
-	return
+	return engine.Tail(outputBuffer, 1)
 }
 
-func createTestContainer(eng *engine.Engine, config *docker.Config, f utils.Fataler) (shortId string) {
+func createTestContainer(eng *engine.Engine, config *runconfig.Config, f utils.Fataler) (shortId string) {
 	return createNamedTestContainer(eng, config, f, "")
 }
 
@@ -82,7 +73,7 @@ func containerFileExists(eng *engine.Engine, id, dir string, t utils.Fataler) bo
 		t.Fatal(err)
 	}
 	defer c.Unmount()
-	if _, err := os.Stat(path.Join(c.BasefsPath(), dir)); err != nil {
+	if _, err := os.Stat(path.Join(c.RootfsPath(), dir)); err != nil {
 		if os.IsNotExist(err) {
 			return false
 		}
@@ -105,11 +96,13 @@ func containerAttach(eng *engine.Engine, id string, t utils.Fataler) (io.WriteCl
 }
 
 func containerWait(eng *engine.Engine, id string, t utils.Fataler) int {
-	return getContainer(eng, id, t).Wait()
+	ex, _ := getContainer(eng, id, t).State.WaitStop(-1 * time.Second)
+	return ex
 }
 
 func containerWaitTimeout(eng *engine.Engine, id string, t utils.Fataler) error {
-	return getContainer(eng, id, t).WaitTimeout(500 * time.Millisecond)
+	_, err := getContainer(eng, id, t).State.WaitStop(500 * time.Millisecond)
+	return err
 }
 
 func containerKill(eng *engine.Engine, id string, t utils.Fataler) {
@@ -127,8 +120,8 @@ func containerAssertExists(eng *engine.Engine, id string, t utils.Fataler) {
 }
 
 func containerAssertNotExists(eng *engine.Engine, id string, t utils.Fataler) {
-	runtime := mkRuntimeFromEngine(eng, t)
-	if c := runtime.Get(id); c != nil {
+	daemon := mkDaemonFromEngine(eng, t)
+	if c := daemon.Get(id); c != nil {
 		t.Fatal(fmt.Errorf("Container %s should not exist", id))
 	}
 }
@@ -151,59 +144,67 @@ func assertHttpError(r *httptest.ResponseRecorder, t utils.Fataler) {
 	}
 }
 
-func getContainer(eng *engine.Engine, id string, t utils.Fataler) *docker.Container {
-	runtime := mkRuntimeFromEngine(eng, t)
-	c := runtime.Get(id)
+func getContainer(eng *engine.Engine, id string, t utils.Fataler) *daemon.Container {
+	daemon := mkDaemonFromEngine(eng, t)
+	c := daemon.Get(id)
 	if c == nil {
 		t.Fatal(fmt.Errorf("No such container: %s", id))
 	}
 	return c
 }
 
-func mkServerFromEngine(eng *engine.Engine, t utils.Fataler) *docker.Server {
+func mkServerFromEngine(eng *engine.Engine, t utils.Fataler) *server.Server {
 	iSrv := eng.Hack_GetGlobalVar("httpapi.server")
 	if iSrv == nil {
 		panic("Legacy server field not set in engine")
 	}
-	srv, ok := iSrv.(*docker.Server)
+	srv, ok := iSrv.(*server.Server)
 	if !ok {
-		panic("Legacy server field in engine does not cast to *docker.Server")
+		panic("Legacy server field in engine does not cast to *server.Server")
 	}
 	return srv
 }
 
-func mkRuntimeFromEngine(eng *engine.Engine, t utils.Fataler) *docker.Runtime {
-	iRuntime := eng.Hack_GetGlobalVar("httpapi.runtime")
-	if iRuntime == nil {
-		panic("Legacy runtime field not set in engine")
+func mkDaemonFromEngine(eng *engine.Engine, t utils.Fataler) *daemon.Daemon {
+	iDaemon := eng.Hack_GetGlobalVar("httpapi.daemon")
+	if iDaemon == nil {
+		panic("Legacy daemon field not set in engine")
 	}
-	runtime, ok := iRuntime.(*docker.Runtime)
+	daemon, ok := iDaemon.(*daemon.Daemon)
 	if !ok {
-		panic("Legacy runtime field in engine does not cast to *docker.Runtime")
+		panic("Legacy daemon field in engine does not cast to *daemon.Daemon")
 	}
-	return runtime
+	return daemon
 }
 
-func NewTestEngine(t utils.Fataler) *engine.Engine {
-	root, err := newTestDirectory(unitTestStoreBase)
-	if err != nil {
-		t.Fatal(err)
+func newTestEngine(t utils.Fataler, autorestart bool, root string) *engine.Engine {
+	if root == "" {
+		if dir, err := newTestDirectory(unitTestStoreBase); err != nil {
+			t.Fatal(err)
+		} else {
+			root = dir
+		}
 	}
-	eng, err := engine.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
+	os.MkdirAll(root, 0700)
+
+	eng := engine.New()
 	// Load default plugins
+	builtins.Register(eng)
 	// (This is manually copied and modified from main() until we have a more generic plugin system)
 	job := eng.Job("initserver")
 	job.Setenv("Root", root)
-	job.SetenvBool("AutoRestart", false)
+	job.SetenvBool("AutoRestart", autorestart)
+	job.Setenv("ExecDriver", "native")
 	// TestGetEnabledCors and TestOptionsRoute require EnableCors=true
 	job.SetenvBool("EnableCors", true)
 	if err := job.Run(); err != nil {
 		t.Fatal(err)
 	}
 	return eng
+}
+
+func NewTestEngine(t utils.Fataler) *engine.Engine {
+	return newTestEngine(t, false, "")
 }
 
 func newTestDirectory(templateDir string) (dir string, err error) {
@@ -247,13 +248,13 @@ func readFile(src string, t *testing.T) (content string) {
 	return string(data)
 }
 
-// Create a test container from the given runtime `r` and run arguments `args`.
+// Create a test container from the given daemon `r` and run arguments `args`.
 // If the image name is "_", (eg. []string{"-i", "-t", "_", "bash"}, it is
 // dynamically replaced by the current test image.
 // The caller is responsible for destroying the container.
 // Call t.Fatal() at the first error.
-func mkContainer(r *docker.Runtime, args []string, t *testing.T) (*docker.Container, *docker.HostConfig, error) {
-	config, hc, _, err := docker.ParseRun(args, nil)
+func mkContainer(r *daemon.Daemon, args []string, t *testing.T) (*daemon.Container, *runconfig.HostConfig, error) {
+	config, hc, _, err := runconfig.Parse(args, nil)
 	defer func() {
 		if err != nil && t != nil {
 			t.Fatal(err)
@@ -283,7 +284,7 @@ func mkContainer(r *docker.Runtime, args []string, t *testing.T) (*docker.Contai
 // and return its standard output as a string.
 // The image name (eg. the XXX in []string{"-i", "-t", "XXX", "bash"}, is dynamically replaced by the current test image.
 // If t is not nil, call t.Fatal() at the first error. Otherwise return errors normally.
-func runContainer(eng *engine.Engine, r *docker.Runtime, args []string, t *testing.T) (output string, err error) {
+func runContainer(eng *engine.Engine, r *daemon.Daemon, args []string, t *testing.T) (output string, err error) {
 	defer func() {
 		if err != nil && t != nil {
 			t.Fatal(err)
@@ -308,7 +309,7 @@ func runContainer(eng *engine.Engine, r *docker.Runtime, args []string, t *testi
 		return "", err
 	}
 
-	container.Wait()
+	container.State.WaitStop(-1 * time.Second)
 	data, err := ioutil.ReadAll(stdout)
 	if err != nil {
 		return "", err
@@ -318,7 +319,7 @@ func runContainer(eng *engine.Engine, r *docker.Runtime, args []string, t *testi
 }
 
 // FIXME: this is duplicated from graph_test.go in the docker package.
-func fakeTar() (io.Reader, error) {
+func fakeTar() (io.ReadCloser, error) {
 	content := []byte("Hello world!\n")
 	buf := new(bytes.Buffer)
 	tw := tar.NewWriter(buf)
@@ -332,7 +333,7 @@ func fakeTar() (io.Reader, error) {
 		tw.Write([]byte(content))
 	}
 	tw.Close()
-	return buf, nil
+	return ioutil.NopCloser(buf), nil
 }
 
 func getAllImages(eng *engine.Engine, t *testing.T) *engine.Table {
