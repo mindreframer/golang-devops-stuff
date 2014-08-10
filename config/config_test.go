@@ -27,7 +27,6 @@ var _ = Describe("Config", func() {
         "cc_base_url": "http://127.0.0.1:6001",
         "skip_cert_verify": true,
         "store_schema_version": 1,
-        "store_type": "etcd",
         "store_urls": ["http://127.0.0.1:4001"],
         "store_max_concurrent_requests": 30,
         "sender_nats_start_subject": "hm9000.start",
@@ -98,7 +97,6 @@ var _ = Describe("Config", func() {
 			Ω(config.StoreHeartbeatCacheRefreshInterval()).Should(Equal(20 * time.Second))
 
 			Ω(config.StoreSchemaVersion).Should(Equal(1))
-			Ω(config.StoreType).Should(Equal("etcd"))
 			Ω(config.StoreURLs).Should(Equal([]string{"http://127.0.0.1:4001"}))
 			Ω(config.StoreMaxConcurrentRequests).Should(Equal(30))
 

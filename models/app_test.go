@@ -1,11 +1,12 @@
 package models_test
 
 import (
+	"time"
+
 	. "github.com/cloudfoundry/hm9000/models"
 	"github.com/cloudfoundry/hm9000/testhelpers/appfixture"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	"time"
 )
 
 var _ = Describe("App", func() {
@@ -103,6 +104,17 @@ var _ = Describe("App", func() {
 				Ω(app().LogDescription()["CrashCounts"]).Should(ContainSubstring(`"InstanceIndex":2`))
 				Ω(app().LogDescription()["CrashCounts"]).Should(ContainSubstring(`"CrashCount":3`))
 			})
+		})
+	})
+
+	Describe("MarshalJSON", func() {
+		It("implements MarshalJSON", func() {
+			jsonRepresentation := string(app().ToJSON())
+			Ω(jsonRepresentation).Should(ContainSubstring(`"droplet":"%s"`, appGuid))
+			Ω(jsonRepresentation).Should(ContainSubstring(`"version":"%s"`, appVersion))
+			Ω(jsonRepresentation).Should(ContainSubstring(`"desired":{`))
+			Ω(jsonRepresentation).Should(ContainSubstring(`"instance_heartbeats":[`))
+			Ω(jsonRepresentation).Should(ContainSubstring(`"crash_counts":[`))
 		})
 	})
 

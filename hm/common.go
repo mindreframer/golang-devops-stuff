@@ -3,6 +3,9 @@ package hm
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"time"
+
 	"github.com/cloudfoundry/gunk/timeprovider"
 	"github.com/cloudfoundry/gunk/timeprovider/faketimeprovider"
 	"github.com/cloudfoundry/hm9000/config"
@@ -12,10 +15,7 @@ import (
 	"github.com/cloudfoundry/storeadapter"
 	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
 	"github.com/cloudfoundry/storeadapter/workerpool"
-	"github.com/cloudfoundry/storeadapter/zookeeperstoreadapter"
 	"github.com/cloudfoundry/yagnats"
-	"strconv"
-	"time"
 
 	"os"
 )
@@ -66,32 +66,42 @@ func connectToMessageBus(l logger.Logger, conf *config.Config) yagnats.NATSClien
 func acquireLock(l logger.Logger, conf *config.Config, lockName string) {
 	adapter, _ := connectToStoreAdapter(l, conf)
 	l.Info("Acquiring lock for " + lockName)
-	lostLockChannel, _, err := adapter.GetAndMaintainLock(lockName, 10)
+
+	lock := storeadapter.StoreNode{
+		Key: "/hm/locks/" + lockName,
+		TTL: 10,
+	}
+
+	status, _, err := adapter.MaintainNode(lock)
 	if err != nil {
 		l.Error("Failed to talk to lock store", err)
 		os.Exit(1)
 	}
 
+	lockAcquired := make(chan bool)
+
 	go func() {
-		<-lostLockChannel
-		l.Error("Lost the lock", errors.New("Lock the lock"))
-		os.Exit(197)
+		for {
+			if <-status {
+				if lockAcquired != nil {
+					close(lockAcquired)
+					lockAcquired = nil
+				}
+			} else {
+				l.Error("Lost the lock", errors.New("Lost the lock"))
+				os.Exit(197)
+			}
+		}
 	}()
 
+	<-lockAcquired
 	l.Info("Acquired lock for " + lockName)
 }
 
 func connectToStoreAdapter(l logger.Logger, conf *config.Config) (storeadapter.StoreAdapter, metricsaccountant.UsageTracker) {
 	var adapter storeadapter.StoreAdapter
 	workerPool := workerpool.NewWorkerPool(conf.StoreMaxConcurrentRequests)
-	if conf.StoreType == "etcd" {
-		adapter = etcdstoreadapter.NewETCDStoreAdapter(conf.StoreURLs, workerPool)
-	} else if conf.StoreType == "ZooKeeper" {
-		adapter = zookeeperstoreadapter.NewZookeeperStoreAdapter(conf.StoreURLs, workerPool, buildTimeProvider(l), time.Second)
-	} else {
-		l.Error(fmt.Sprintf("Unknown store type %s.  Choose one of 'etcd' or 'ZooKeeper'", conf.StoreType), fmt.Errorf("Unkown store type"))
-		os.Exit(1)
-	}
+	adapter = etcdstoreadapter.NewETCDStoreAdapter(conf.StoreURLs, workerPool)
 	err := adapter.Connect()
 	if err != nil {
 		l.Error("Failed to connect to the store", err)
@@ -102,13 +112,6 @@ func connectToStoreAdapter(l logger.Logger, conf *config.Config) (storeadapter.S
 }
 
 func connectToStore(l logger.Logger, conf *config.Config) (store.Store, metricsaccountant.UsageTracker) {
-	if conf.StoreType == "etcd" || conf.StoreType == "ZooKeeper" {
-		adapter, workerPool := connectToStoreAdapter(l, conf)
-		return store.NewStore(conf, adapter, l), workerPool
-	} else {
-		l.Error(fmt.Sprintf("Unknown store type %s.  Choose one of 'etcd' or 'ZooKeeper'", conf.StoreType), fmt.Errorf("Unkown store type"))
-		os.Exit(1)
-	}
-
-	return nil, nil
+	adapter, workerPool := connectToStoreAdapter(l, conf)
+	return store.NewStore(conf, adapter, l), workerPool
 }

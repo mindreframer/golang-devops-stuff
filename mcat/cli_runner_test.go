@@ -3,42 +3,40 @@ package mcat_test
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/cloudfoundry/hm9000/config"
-	. "github.com/onsi/gomega"
-	"github.com/vito/cmdtest"
-	. "github.com/vito/cmdtest/matchers"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
-)
 
-func interruptSession(session *cmdtest.Session) {
-	session.Cmd.Process.Signal(os.Interrupt)
-	session.Wait(time.Second)
-}
+	"github.com/onsi/ginkgo"
+
+	"github.com/cloudfoundry/hm9000/config"
+	. "github.com/onsi/gomega"
+	"github.com/onsi/gomega/gbytes"
+	"github.com/onsi/gomega/gexec"
+)
 
 type CLIRunner struct {
 	configPath       string
-	listenerSession  *cmdtest.Session
-	metricsSession   *cmdtest.Session
-	apiServerSession *cmdtest.Session
-	evacuatorSession *cmdtest.Session
+	listenerSession  *gexec.Session
+	metricsSession   *gexec.Session
+	apiServerSession *gexec.Session
+	evacuatorSession *gexec.Session
+	hm9000Binary     string
 
 	verbose bool
 }
 
-func NewCLIRunner(storeType string, storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int, verbose bool) *CLIRunner {
+func NewCLIRunner(hm9000Binary string, storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int, verbose bool) *CLIRunner {
 	runner := &CLIRunner{
-		verbose: verbose,
+		hm9000Binary: hm9000Binary,
+		verbose:      verbose,
 	}
-	runner.generateConfig(storeType, storeURLs, ccBaseURL, natsPort, metricsServerPort)
+	runner.generateConfig(storeURLs, ccBaseURL, natsPort, metricsServerPort)
 	return runner
 }
 
-func (runner *CLIRunner) generateConfig(storeType string, storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int) {
+func (runner *CLIRunner) generateConfig(storeURLs []string, ccBaseURL string, natsPort int, metricsServerPort int) {
 	tmpFile, err := ioutil.TempFile("/tmp", "hm9000_clirunner")
 	defer tmpFile.Close()
 	Ω(err).ShouldNot(HaveOccurred())
@@ -47,7 +45,6 @@ func (runner *CLIRunner) generateConfig(storeType string, storeURLs []string, cc
 
 	conf, err := config.DefaultConfig()
 	Ω(err).ShouldNot(HaveOccurred())
-	conf.StoreType = storeType
 	conf.StoreURLs = storeURLs
 	conf.CCBaseURL = ccBaseURL
 	conf.NATS[0].Port = natsPort
@@ -68,7 +65,7 @@ func (runner *CLIRunner) StartListener(timestamp int) {
 }
 
 func (runner *CLIRunner) StopListener() {
-	interruptSession(runner.listenerSession)
+	runner.listenerSession.Interrupt().Wait(time.Second)
 }
 
 func (runner *CLIRunner) StartMetricsServer(timestamp int) {
@@ -76,7 +73,7 @@ func (runner *CLIRunner) StartMetricsServer(timestamp int) {
 }
 
 func (runner *CLIRunner) StopMetricsServer() {
-	interruptSession(runner.metricsSession)
+	runner.metricsSession.Interrupt().Wait(time.Second)
 }
 
 func (runner *CLIRunner) StartAPIServer(timestamp int) {
@@ -84,7 +81,7 @@ func (runner *CLIRunner) StartAPIServer(timestamp int) {
 }
 
 func (runner *CLIRunner) StopAPIServer() {
-	interruptSession(runner.apiServerSession)
+	runner.apiServerSession.Interrupt().Wait(time.Second)
 }
 
 func (runner *CLIRunner) StartEvacuator(timestamp int) {
@@ -92,68 +89,44 @@ func (runner *CLIRunner) StartEvacuator(timestamp int) {
 }
 
 func (runner *CLIRunner) StopEvacuator() {
-	interruptSession(runner.evacuatorSession)
+	runner.evacuatorSession.Interrupt().Wait(time.Second)
 }
 
 func (runner *CLIRunner) Cleanup() {
 	os.Remove(runner.configPath)
 }
 
-func (runner *CLIRunner) start(command string, timestamp int, message string) *cmdtest.Session {
-	cmd := exec.Command("hm9000", command, fmt.Sprintf("--config=%s", runner.configPath))
+func (runner *CLIRunner) start(command string, timestamp int, message string) *gexec.Session {
+	cmd := exec.Command(runner.hm9000Binary, command, fmt.Sprintf("--config=%s", runner.configPath))
 	cmd.Env = append(os.Environ(), fmt.Sprintf("HM9000_FAKE_TIME=%d", timestamp))
 
-	var session *cmdtest.Session
-	var err error
-	if runner.verbose {
-		session, err = cmdtest.StartWrapped(cmd, teeToStdout, teeToStdout)
-	} else {
-		session, err = cmdtest.Start(cmd)
-	}
-
+	session, err := gexec.Start(cmd, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	Ω(err).ShouldNot(HaveOccurred())
-
-	Ω(session).Should(SayWithTimeout(message, 5*time.Second))
+	Eventually(session, 5*time.Second).Should(gbytes.Say(message))
 
 	return session
 }
 
 func (runner *CLIRunner) Run(command string, timestamp int) {
-	cmd := exec.Command("hm9000", command, fmt.Sprintf("--config=%s", runner.configPath))
+	cmd := exec.Command(runner.hm9000Binary, command, fmt.Sprintf("--config=%s", runner.configPath))
 	cmd.Env = append(os.Environ(), fmt.Sprintf("HM9000_FAKE_TIME=%d", timestamp))
-	out, _ := cmd.CombinedOutput()
-	if runner.verbose {
-		fmt.Printf(command+" (%s) \n", time.Unix(int64(timestamp), 0))
-		fmt.Printf(strings.Repeat("~", len(command)) + "\n")
-		fmt.Printf(string(out))
 
-		fmt.Printf("\n")
-	}
+	session, err := gexec.Start(cmd, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
+	Ω(err).ShouldNot(HaveOccurred())
 
+	session.Wait(10 * time.Second)
 	time.Sleep(50 * time.Millisecond)
 }
 
-func (runner *CLIRunner) StartSession(command string, timestamp int, extraArgs ...string) *cmdtest.Session {
+func (runner *CLIRunner) StartSession(command string, timestamp int, extraArgs ...string) *gexec.Session {
 	args := []string{command, fmt.Sprintf("--config=%s", runner.configPath)}
 	args = append(args, extraArgs...)
 
-	cmd := exec.Command("hm9000", args...)
+	cmd := exec.Command(runner.hm9000Binary, args...)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("HM9000_FAKE_TIME=%d", timestamp))
 
-	var session *cmdtest.Session
-	var err error
-
-	if runner.verbose {
-		session, err = cmdtest.StartWrapped(cmd, teeToStdout, teeToStdout)
-	} else {
-		session, err = cmdtest.Start(cmd)
-	}
-
+	session, err := gexec.Start(cmd, ginkgo.GinkgoWriter, ginkgo.GinkgoWriter)
 	Ω(err).ShouldNot(HaveOccurred())
 
 	return session
-}
-
-func teeToStdout(out io.Writer) io.Writer {
-	return io.MultiWriter(out, os.Stdout)
 }

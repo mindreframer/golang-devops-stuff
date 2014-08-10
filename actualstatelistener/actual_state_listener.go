@@ -1,15 +1,16 @@
 package actualstatelistener
 
 import (
+	"strconv"
+	"sync"
+	"time"
+
 	"github.com/cloudfoundry/gunk/timeprovider"
 	"github.com/cloudfoundry/hm9000/config"
 	"github.com/cloudfoundry/hm9000/helpers/logger"
 	"github.com/cloudfoundry/hm9000/helpers/metricsaccountant"
 	"github.com/cloudfoundry/hm9000/models"
 	"github.com/cloudfoundry/hm9000/store"
-	"strconv"
-	"sync"
-	"time"
 
 	"github.com/cloudfoundry/yagnats"
 )
@@ -88,8 +89,6 @@ func (listener *ActualStateListener) Start() {
 
 		listener.totalReceivedHeartbeats++
 		listener.heartbeatsToSave = append(listener.heartbeatsToSave, heartbeat)
-
-		totalReceivedHeartbeats := listener.totalReceivedHeartbeats
 		numToSave := len(listener.heartbeatsToSave)
 
 		listener.heartbeatMutex.Unlock()
@@ -97,8 +96,6 @@ func (listener *ActualStateListener) Start() {
 		listener.logger.Info("Received a heartbeat", map[string]string{
 			"Heartbeats Pending Save": strconv.Itoa(numToSave),
 		})
-
-		listener.metricsAccountant.TrackReceivedHeartbeats(totalReceivedHeartbeats)
 	})
 
 	go listener.syncHeartbeats()
@@ -112,10 +109,13 @@ func (listener *ActualStateListener) Start() {
 func (listener *ActualStateListener) syncHeartbeats() {
 	syncInterval := listener.timeProvider.NewTickerChannel(HeartbeatSyncTimer, listener.config.ListenerHeartbeatSyncInterval())
 
+	previousReceivedHeartbeats := -1
+
 	for {
 		listener.heartbeatMutex.Lock()
 		heartbeatsToSave := listener.heartbeatsToSave
 		listener.heartbeatsToSave = []models.Heartbeat{}
+		totalReceivedHeartbeats := listener.totalReceivedHeartbeats
 		listener.heartbeatMutex.Unlock()
 
 		if len(heartbeatsToSave) > 0 {
@@ -148,6 +148,22 @@ func (listener *ActualStateListener) syncHeartbeats() {
 
 				listener.metricsAccountant.TrackSavedHeartbeats(totalSavedHeartbeats)
 			}
+		}
+
+		if previousReceivedHeartbeats != totalReceivedHeartbeats {
+			listener.logger.Debug("Tracking Heartbeat Metrics", map[string]string{
+				"Total Received Heartbeats": strconv.Itoa(totalReceivedHeartbeats),
+			})
+			t := time.Now()
+
+			listener.metricsAccountant.TrackReceivedHeartbeats(totalReceivedHeartbeats)
+
+			listener.logger.Debug("Done Tracking Heartbeat Metrics", map[string]string{
+				"Total Received Heartbeats": strconv.Itoa(totalReceivedHeartbeats),
+				"Duration":                  time.Since(t).String(),
+			})
+
+			previousReceivedHeartbeats = totalReceivedHeartbeats
 		}
 
 		<-syncInterval

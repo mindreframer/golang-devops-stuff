@@ -1,110 +1,97 @@
 package mcat_test
 
 import (
+	"time"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
-	. "github.com/vito/cmdtest/matchers"
-	"time"
+	"github.com/onsi/gomega/gbytes"
+	"github.com/onsi/gomega/gexec"
 )
 
 var _ = Describe("Locking", func() {
-	Context("when etcd is down", func() {
-		It("logs an error and exits 1", func() {
-			if coordinator.CurrentStoreType == "etcd" {
-				coordinator.StopStore()
-				listener := cliRunner.StartSession("listen", 1)
-				defer interruptSession(listener)
-				Expect(listener).To(SayWithTimeout("Failed to talk to lock store", 3*time.Second))
-				Expect(listener).To(ExitWith(1))
-				coordinator.StartETCD()
-			}
-		})
-	})
-
 	Describe("vieing for the lock", func() {
 		Context("when two long-lived processes try to run", func() {
 			It("one waits for the other to exit and then grabs the lock", func() {
-				if coordinator.CurrentStoreType == "etcd" {
-					listenerA := cliRunner.StartSession("listen", 1)
+				listenerA := cliRunner.StartSession("listen", 1)
 
-					Ω(listenerA).Should(Say("Acquired lock"))
-					defer interruptSession(listenerA)
+				Eventually(listenerA, 10*time.Second).Should(gbytes.Say("Acquired lock"))
 
-					listenerB := cliRunner.StartSession("listen", 1)
-					defer interruptSession(listenerB)
+				defer func() {
+					listenerA.Interrupt().Wait()
+				}()
 
-					Ω(listenerB).Should(Say("Acquiring"))
-					Ω(listenerB).ShouldNot(SayWithTimeout("Acquired", 1*time.Second))
+				listenerB := cliRunner.StartSession("listen", 1)
+				defer func() {
+					listenerB.Interrupt().Wait()
+				}()
 
-					interruptSession(listenerA)
+				Eventually(listenerB, 10*time.Second).Should(gbytes.Say("Acquiring"))
+				Consistently(listenerB).ShouldNot(gbytes.Say("Acquired"))
 
-					coordinator.StoreRunner.FastForwardTime(10)
+				listenerA.Interrupt().Wait()
 
-					Ω(listenerB).Should(SayWithTimeout("Acquired", 3*time.Second))
-				}
+				coordinator.StoreRunner.FastForwardTime(10)
+
+				Eventually(listenerB, 20*time.Second).Should(gbytes.Say("Acquired"))
 			})
 		})
 
 		Context("when two polling processes try to run", func() {
 			It("one waits for the other to exit and then grabs the lock", func() {
-				if coordinator.CurrentStoreType == "etcd" {
-					analyzerA := cliRunner.StartSession("analyze", 1, "--poll")
-					defer interruptSession(analyzerA)
+				analyzerA := cliRunner.StartSession("analyze", 1, "--poll")
+				defer func() {
+					analyzerA.Interrupt().Wait()
+				}()
 
-					Ω(analyzerA).Should(Say("Acquired lock"))
+				Eventually(analyzerA, 10*time.Second).Should(gbytes.Say("Acquired lock"))
 
-					analyzerB := cliRunner.StartSession("analyze", 1, "--poll")
-					defer interruptSession(analyzerB)
+				analyzerB := cliRunner.StartSession("analyze", 1, "--poll")
+				defer func() {
+					analyzerB.Interrupt().Wait()
+				}()
 
-					Ω(analyzerB).Should(Say("Acquiring"))
-					Ω(analyzerB).ShouldNot(SayWithTimeout("Acquired", 1*time.Second))
+				Eventually(analyzerB, 10*time.Second).Should(gbytes.Say("Acquiring"))
+				Consistently(analyzerB).ShouldNot(gbytes.Say("Acquired"))
 
-					interruptSession(analyzerA)
+				analyzerA.Interrupt().Wait()
 
-					coordinator.StoreRunner.FastForwardTime(10)
+				coordinator.StoreRunner.FastForwardTime(10)
 
-					Ω(analyzerB).Should(SayWithTimeout("Acquired", 3*time.Second))
-				}
+				Eventually(analyzerB, 20*time.Second).Should(gbytes.Say("Acquired"))
 			})
 		})
 	})
 
 	Context("when the lock disappears", func() {
 		Context("long-lived processes", func() {
-			It("should exit 17", func() {
-				if coordinator.CurrentStoreType == "etcd" {
-					listenerA := cliRunner.StartSession("listen", 1)
-					defer interruptSession(listenerA)
+			It("should exit 197", func() {
+				listenerA := cliRunner.StartSession("listen", 1)
+				defer func() {
+					listenerA.Interrupt().Wait()
+				}()
 
-					Ω(listenerA).Should(Say("Acquired lock"))
+				Eventually(listenerA, 10*time.Second).Should(gbytes.Say("Acquired lock"))
 
-					coordinator.StoreAdapter.Delete("/hm/locks")
+				coordinator.StoreAdapter.Delete("/hm/locks")
 
-					Ω(listenerA).Should(Say("Lost the lock"))
-					status, err := listenerA.Wait(20 * time.Second)
-
-					Ω(err).ShouldNot(HaveOccurred())
-					Ω(status).Should(Equal(197))
-				}
+				Eventually(listenerA, 10*time.Second).Should(gbytes.Say("Lost the lock"))
+				Eventually(listenerA, 20*time.Second).Should(gexec.Exit(197))
 			})
 		})
 
 		Context("polling processes", func() {
-			It("should exit 17", func() {
-				if coordinator.CurrentStoreType == "etcd" {
-					analyzerA := cliRunner.StartSession("analyze", 1, "--poll")
-					defer interruptSession(analyzerA)
+			It("should exit 197", func() {
+				analyzerA := cliRunner.StartSession("analyze", 1, "--poll")
+				defer func() {
+					analyzerA.Interrupt().Wait()
+				}()
 
-					Ω(analyzerA).Should(Say("Acquired lock"))
+				Eventually(analyzerA, 10*time.Second).Should(gbytes.Say("Acquired lock"))
 
-					coordinator.StoreAdapter.Delete("/hm/locks")
+				coordinator.StoreAdapter.Delete("/hm/locks")
 
-					Ω(analyzerA).Should(Say("Lost the lock"))
-					status, err := analyzerA.Wait(20 * time.Second)
-
-					Ω(err).ShouldNot(HaveOccurred())
-					Ω(status).Should(Equal(197))
-				}
+				Eventually(analyzerA, 10*time.Second).Should(gbytes.Say("Lost the lock"))
+				Eventually(analyzerA, 20*time.Second).Should(gexec.Exit(197))
 			})
 		})
 	})

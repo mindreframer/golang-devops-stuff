@@ -1,6 +1,7 @@
 package desiredstateserver_test
 
 import (
+	"io/ioutil"
 	. "github.com/cloudfoundry/hm9000/testhelpers/custommatchers"
 	. "github.com/cloudfoundry/hm9000/testhelpers/desiredstateserver"
 	. "github.com/onsi/ginkgo"
@@ -45,9 +46,9 @@ var _ = Describe("making requests", func() {
 			resp, err := http.Get(url)
 			Ω(err).ShouldNot(HaveOccurred())
 			Ω(resp.StatusCode).Should(Equal(http.StatusOK))
+			defer resp.Body.Close()
 
-			body := make([]byte, resp.ContentLength)
-			_, err = resp.Body.Read(body)
+			body, err := ioutil.ReadAll(resp.Body)
 			Ω(err).ShouldNot(HaveOccurred())
 
 			err = json.Unmarshal(body, &response)
@@ -150,8 +151,9 @@ var _ = Describe("making requests", func() {
 			JustBeforeEach(func() {
 				Ω(resp.StatusCode).Should(Equal(http.StatusOK))
 
-				body := make([]byte, resp.ContentLength)
-				_, err := resp.Body.Read(body)
+				defer resp.Body.Close()
+
+				body, err := ioutil.ReadAll(resp.Body)
 				Ω(err).ShouldNot(HaveOccurred())
 
 				err = json.Unmarshal(body, &response)

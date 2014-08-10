@@ -15,15 +15,25 @@ type desiredStateMatcher struct {
 	expected models.DesiredAppState
 }
 
-func (m *desiredStateMatcher) Match(actual interface{}) (success bool, message string, err error) {
+func (m *desiredStateMatcher) Match(actual interface{}) (success bool, err error) {
 	desiredState, ok := actual.(models.DesiredAppState)
 	if !ok {
-		return false, "", fmt.Errorf("DesiredStateMatcher expects a DesiredAppState, got %T instead", actual)
+		return false, fmt.Errorf("DesiredStateMatcher expects a DesiredAppState, got %T instead", actual)
 	}
 
 	if m.expected.Equal(desiredState) {
-		return true, fmt.Sprintf("Expected\n\t%#v\nnot to equal\n\t%#v", desiredState, m.expected), nil
+		return true, nil
 	} else {
-		return false, fmt.Sprintf("Expected\n\t%#v\nto equal\n\t%#v", desiredState, m.expected), nil
+		return false, nil
 	}
+}
+
+func (m *desiredStateMatcher) FailureMessage(actual interface{}) (message string) {
+	desiredState := actual.(models.DesiredAppState)
+	return fmt.Sprintf("Expected\n\t%#v\nto equal\n\t%#v", desiredState, m.expected)
+}
+
+func (m *desiredStateMatcher) NegatedFailureMessage(actual interface{}) (message string) {
+	desiredState := actual.(models.DesiredAppState)
+	return fmt.Sprintf("Expected\n\t%#v\nnot to equal\n\t%#v", desiredState, m.expected)
 }

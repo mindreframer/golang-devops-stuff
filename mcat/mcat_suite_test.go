@@ -1,14 +1,13 @@
 package mcat_test
 
 import (
+	"testing"
+
 	"github.com/cloudfoundry/hm9000/testhelpers/startstoplistener"
 	. "github.com/onsi/ginkgo"
 	ginkgoConfig "github.com/onsi/ginkgo/config"
 	. "github.com/onsi/gomega"
-	"os"
-	"os/exec"
-	"os/signal"
-	"testing"
+	"github.com/onsi/gomega/gexec"
 )
 
 var (
@@ -19,54 +18,29 @@ var (
 )
 
 func TestMCAT(t *testing.T) {
-	registerSignalHandler()
 	RegisterFailHandler(Fail)
 
-	cmd := exec.Command("go", "install", "github.com/cloudfoundry/hm9000")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		println("FAILED TO COMPILE HM9000")
-		println(string(output))
-		os.Exit(1)
-	}
+	RunSpecs(t, "MCAT ETCD MD Suite")
+}
 
-	coordinator = NewMCATCoordinator(ginkgoConfig.GinkgoConfig.ParallelNode, ginkgoConfig.DefaultReporterConfig.Verbose)
+var _ = BeforeSuite(func() {
+	hm9000Binary, err := gexec.Build("github.com/cloudfoundry/hm9000")
+	Ω(err).ShouldNot(HaveOccurred())
+
+	coordinator = NewMCATCoordinator(hm9000Binary, ginkgoConfig.GinkgoConfig.ParallelNode, ginkgoConfig.DefaultReporterConfig.Verbose)
+
 	coordinator.StartNats()
 	coordinator.StartDesiredStateServer()
 	coordinator.StartStartStopListener()
-
-	store := os.Getenv("STORE")
-
-	if store == "" || store == "ETCD" {
-		//run the suite for ETCD...
-		coordinator.StartETCD()
-		RunSpecs(t, "MCAT ETCD MD Suite")
-		coordinator.StopStore()
-	}
-
-	if store == "ZooKeeper" {
-		//...and then for zookeeper
-		coordinator.StartZooKeeper()
-		RunSpecs(t, "MCAT ZooKeeper MD Suite")
-		coordinator.StopStore()
-	}
-
-	coordinator.StopAllExternalProcesses()
-}
+	coordinator.StartETCD()
+})
 
 var _ = BeforeEach(func() {
 	cliRunner, simulator, startStopListener = coordinator.PrepForNextTest()
 })
 
-func registerSignalHandler() {
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, os.Kill)
-
-		select {
-		case <-c:
-			coordinator.StopAllExternalProcesses()
-			os.Exit(0)
-		}
-	}()
-}
+var _ = AfterSuite(func() {
+	coordinator.StopETCD()
+	coordinator.StopAllExternalProcesses()
+	gexec.CleanupBuildArtifacts()
+})

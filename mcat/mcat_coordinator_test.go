@@ -1,7 +1,8 @@
 package mcat_test
 
 import (
-	"github.com/cloudfoundry/gunk/timeprovider"
+	"strconv"
+
 	"github.com/cloudfoundry/hm9000/config"
 	storepackage "github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/hm9000/testhelpers/desiredstateserver"
@@ -12,13 +13,9 @@ import (
 	"github.com/cloudfoundry/storeadapter/etcdstoreadapter"
 	"github.com/cloudfoundry/storeadapter/storerunner"
 	"github.com/cloudfoundry/storeadapter/storerunner/etcdstorerunner"
-	"github.com/cloudfoundry/storeadapter/storerunner/zookeeperstorerunner"
 	"github.com/cloudfoundry/storeadapter/workerpool"
-	"github.com/cloudfoundry/storeadapter/zookeeperstoreadapter"
 	"github.com/cloudfoundry/yagnats"
 	. "github.com/onsi/gomega"
-	"strconv"
-	"time"
 )
 
 type MCATCoordinator struct {
@@ -27,12 +24,12 @@ type MCATCoordinator struct {
 	StoreRunner  storerunner.StoreRunner
 	StoreAdapter storeadapter.StoreAdapter
 
+	hm9000Binary      string
 	natsRunner        *natsrunner.NATSRunner
 	startStopListener *startstoplistener.StartStopListener
 
 	Conf *config.Config
 
-	CurrentStoreType          string
 	DesiredStateServerBaseUrl string
 	DesiredStateServerPort    int
 	NatsPort                  int
@@ -44,8 +41,9 @@ type MCATCoordinator struct {
 	currentCLIRunner *CLIRunner
 }
 
-func NewMCATCoordinator(parallelNode int, verbose bool) *MCATCoordinator {
+func NewMCATCoordinator(hm9000Binary string, parallelNode int, verbose bool) *MCATCoordinator {
 	coordinator := &MCATCoordinator{
+		hm9000Binary: hm9000Binary,
 		ParallelNode: parallelNode,
 		Verbose:      verbose,
 	}
@@ -76,7 +74,7 @@ func (coordinator *MCATCoordinator) PrepForNextTest() (*CLIRunner, *Simulator, *
 	if coordinator.currentCLIRunner != nil {
 		coordinator.currentCLIRunner.Cleanup()
 	}
-	coordinator.currentCLIRunner = NewCLIRunner(coordinator.CurrentStoreType, coordinator.StoreRunner.NodeURLS(), coordinator.DesiredStateServerBaseUrl, coordinator.NatsPort, coordinator.MetricsServerPort, coordinator.Verbose)
+	coordinator.currentCLIRunner = NewCLIRunner(coordinator.hm9000Binary, coordinator.StoreRunner.NodeURLS(), coordinator.DesiredStateServerBaseUrl, coordinator.NatsPort, coordinator.MetricsServerPort, coordinator.Verbose)
 	store := storepackage.NewStore(coordinator.Conf, coordinator.StoreAdapter, fakelogger.NewFakeLogger())
 	simulator := NewSimulator(coordinator.Conf, coordinator.StoreRunner, store, coordinator.StateServer, coordinator.currentCLIRunner, coordinator.MessageBus)
 
@@ -99,7 +97,6 @@ func (coordinator *MCATCoordinator) StartStartStopListener() {
 }
 
 func (coordinator *MCATCoordinator) StartETCD() {
-	coordinator.CurrentStoreType = "etcd"
 	etcdPort := 5000 + (coordinator.ParallelNode-1)*10
 	coordinator.StoreRunner = etcdstorerunner.NewETCDClusterRunner(etcdPort, 1)
 	coordinator.StoreRunner.Start()
@@ -109,18 +106,7 @@ func (coordinator *MCATCoordinator) StartETCD() {
 	Ω(err).ShouldNot(HaveOccurred())
 }
 
-func (coordinator *MCATCoordinator) StartZooKeeper() {
-	coordinator.CurrentStoreType = "ZooKeeper"
-	zookeeperPort := 2181 + (coordinator.ParallelNode-1)*10
-	coordinator.StoreRunner = zookeeperstorerunner.NewZookeeperClusterRunner(zookeeperPort, 1)
-	coordinator.StoreRunner.Start()
-
-	coordinator.StoreAdapter = zookeeperstoreadapter.NewZookeeperStoreAdapter(coordinator.StoreRunner.NodeURLS(), workerpool.NewWorkerPool(coordinator.Conf.StoreMaxConcurrentRequests), &timeprovider.RealTimeProvider{}, time.Second)
-	err := coordinator.StoreAdapter.Connect()
-	Ω(err).ShouldNot(HaveOccurred())
-}
-
-func (coordinator *MCATCoordinator) StopStore() {
+func (coordinator *MCATCoordinator) StopETCD() {
 	coordinator.StoreRunner.Stop()
 	if coordinator.StoreAdapter != nil {
 		coordinator.StoreAdapter.Disconnect()

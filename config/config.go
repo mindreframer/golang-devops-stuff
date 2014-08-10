@@ -38,7 +38,6 @@ type Config struct {
 	SkipSSLVerification            bool   `json:"skip_cert_verify"`
 
 	StoreSchemaVersion         int      `json:"store_schema_version"`
-	StoreType                  string   `json:"store_type"`
 	StoreURLs                  []string `json:"store_urls"`
 	StoreMaxConcurrentRequests int      `json:"store_max_concurrent_requests"`
 

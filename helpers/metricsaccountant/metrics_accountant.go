@@ -1,11 +1,11 @@
 package metricsaccountant
 
 import (
+	"time"
+
 	"github.com/cloudfoundry/hm9000/models"
 	"github.com/cloudfoundry/hm9000/store"
 	"github.com/cloudfoundry/storeadapter"
-	"sync"
-	"time"
 )
 
 type UsageTracker interface {
@@ -35,28 +35,20 @@ type MetricsAccountant interface {
 }
 
 type RealMetricsAccountant struct {
-	store      store.Store
-	storeMutex *sync.Mutex
+	store store.Store
 }
 
 func New(store store.Store) *RealMetricsAccountant {
 	return &RealMetricsAccountant{
-		store:      store,
-		storeMutex: &sync.Mutex{},
+		store: store,
 	}
 }
 
 func (m *RealMetricsAccountant) TrackReceivedHeartbeats(metric int) error {
-	m.storeMutex.Lock()
-	defer m.storeMutex.Unlock()
-
 	return m.store.SaveMetric("ReceivedHeartbeats", float64(metric))
 }
 
 func (m *RealMetricsAccountant) TrackSavedHeartbeats(metric int) error {
-	m.storeMutex.Lock()
-	defer m.storeMutex.Unlock()
-
 	return m.store.SaveMetric("SavedHeartbeats", float64(metric))
 }
 
