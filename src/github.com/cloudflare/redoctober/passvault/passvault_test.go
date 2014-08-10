@@ -6,7 +6,25 @@ package passvault
 
 import (
 	"testing"
+	"os"
 )
+
+func TestStaticVault(t *testing.T) {
+	err := InitFromDisk("/tmp/redoctober.json")
+	if err != nil {
+		t.Fatalf("Error reading record")
+	}
+
+	_, err = AddNewRecord("test", "bad pass", true) 
+	if err != nil {
+		t.Fatalf("Error creating record")
+	}
+	err = InitFromDisk("/tmp/redoctober.json")
+	if err != nil {
+		t.Fatalf("Error reading record")
+	}
+	os.Remove("/tmp/redoctober.json")
+}
 
 func TestRSAEncryptDecrypt(t *testing.T) {
 	oldDefaultRecordType := DefaultRecordType
