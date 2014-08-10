@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,49 +6,58 @@
 package db
 
 import (
-	"github.com/globocom/config"
-	"labix.org/v2/mgo"
+	"github.com/tsuru/config"
+	"github.com/tsuru/tsuru/db/storage"
+	"gopkg.in/mgo.v2"
 )
 
-type session struct {
-	DB *mgo.Database
+const (
+	DefaultDatabaseURL  = "127.0.0.1:27017"
+	DefaultDatabaseName = "gandalf"
+)
+
+type Storage struct {
+	*storage.Storage
 }
 
-// The global Session that must be used by users.
-var Session session
-
-// Connect uses database:url and database:name settings in config file and
-// connects to the database. If it cannot connect or these settings are not
-// defined, it will panic.
-func Connect() {
+// conn reads the gandalf config and calls storage.Open to get a database connection.
+//
+// Most gandalf packages should probably use this function. storage.Open is intended for
+// use when supporting more than one database.
+func conn() (*storage.Storage, error) {
 	url, _ := config.GetString("database:url")
 	if url == "" {
-		url = "localhost:27017"
+		url = DefaultDatabaseURL
 	}
-	name, _ := config.GetString("database:name")
-	if name == "" {
-		name = "gandalf"
+	dbname, _ := config.GetString("database:name")
+	if dbname == "" {
+		dbname = DefaultDatabaseName
 	}
-	s, err := mgo.Dial(url)
-	if err != nil {
-		panic(err)
-	}
-	Session.DB = s.DB(name)
+	return storage.Open(url, dbname)
+}
+
+func Conn() (*Storage, error) {
+	var (
+		strg Storage
+		err  error
+	)
+	strg.Storage, err = conn()
+	return &strg, err
 }
 
 // Repository returns a reference to the "repository" collection in MongoDB.
-func (s *session) Repository() *mgo.Collection {
-	return s.DB.C("repository")
+func (s *Storage) Repository() *storage.Collection {
+	return s.Collection("repository")
 }
 
 // User returns a reference to the "user" collection in MongoDB.
-func (s *session) User() *mgo.Collection {
-	return s.DB.C("user")
+func (s *Storage) User() *storage.Collection {
+	return s.Collection("user")
 }
 
-func (s *session) Key() *mgo.Collection {
+func (s *Storage) Key() *storage.Collection {
 	index := mgo.Index{Key: []string{"body"}, Unique: true}
-	c := s.DB.C("key")
+	c := s.Collection("key")
 	c.EnsureIndex(index)
 	return c
 }

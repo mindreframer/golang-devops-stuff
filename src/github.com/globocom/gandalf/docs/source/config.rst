@@ -2,15 +2,15 @@
 Configuring ganfalf
 ===================
 
-Ganfalf uses a configuration file in `YAML <http://www.yaml.org/>`_ format. This
-document describes what each option means, and how it should look like.
+Ganfalf uses a configuration file in `YAML <http://www.yaml.org/>`_ format.
+This document describes what each option means, and how it should look like.
 
 Notation
 ========
 
-Ganfalf uses a colon to represent nesting in YAML. So, whenever this document say
-something like ``key1:key2``, it refers to the value of the ``key2`` that is
-nested in the block that is the value of ``key1``. For example,
+Ganfalf uses a colon to represent nesting in YAML. So, whenever this document
+say something like ``key1:key2``, it refers to the value of the ``key2`` that
+is nested in the block that is the value of ``key1``. For example,
 ``database:url`` means:
 
 .. highlight:: yaml
@@ -23,14 +23,14 @@ nested in the block that is the value of ``key1``. For example,
 Ganfalf configuration
 =====================
 
-This section describes gandalf's core configuration. Other sections will include
-configuration of optional components, and finally, a full sample file.
+This section describes gandalf's core configuration. Other sections will
+include configuration of optional components, and finally, a full sample file.
 
 HTTP server
 -----------
 
-Ganfalf provides a REST API, that supports HTTP and HTTP/TLS (a.k.a. HTTPS). Here
-are the options that affect how gandalf's API behaves:
+Gandalf provides a REST API, that supports HTTP and HTTP/TLS (a.k.a. HTTPS).
+Here are the options that affect how gandalf's API behaves:
 
 webserver:port
 ++++++++++++++
@@ -42,19 +42,29 @@ has no default value.
 host
 ++++
 
-``host`` is the value used to compose the remote URL for the repositories
-managed by Gandalf. For example, if the repository is named "myapp" and the
-host is "gandalf.mycompany.com", then the remote URL for the repository will be
+``host`` is the value used to compose the remote URL for repositories managed
+by Gandalf. For example, if the repository is named "myapp" and the host is
+"gandalf.mycompany.com", then the remote URL for the repository will be
 "git@gandalf.mycompany.com:myapp.git".
+
+readonly-host
++++++++++++++
+
+When specified, ``readonly-host`` is the value used to compose the readonly
+remote URL for repositories managed by Gandalf. For example, if the repository
+is named "myapp" and the host is "private.gandalf.mycompany.com", then the
+readonly remote URL will be "git://private.gandalf.mycompany.com/myapp.git".
+
+When ommited, ``host`` is used for composing the readonly remote URL.
 
 Database access
 ---------------
 
-Ganfalf uses MongoDB as database manager, to store information about users, VM's,
-and its components. Regarding database control, you're able to define to which
-database server gandalf will connect (providing a `MongoDB connection string
-<http://docs.mongodb.org/manual/reference/connection-string/>`_). The database
-related options are listed below:
+Ganfalf uses MongoDB as database manager, to store information about users,
+VM's, and its components. Regarding database control, you're able to define to
+which database server gandalf will connect (providing a `MongoDB connection
+string <http://docs.mongodb.org/manual/reference/connection-string/>`_). The
+database related options are listed below:
 
 database:url
 ++++++++++++

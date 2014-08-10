@@ -8,12 +8,12 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"github.com/globocom/config"
-	"github.com/globocom/gandalf/db"
-	"github.com/globocom/gandalf/repository"
-	"github.com/globocom/gandalf/user"
+	"github.com/tsuru/config"
+	"github.com/tsuru/gandalf/db"
+	"github.com/tsuru/gandalf/repository"
+	"github.com/tsuru/gandalf/user"
+	"gopkg.in/mgo.v2/bson"
 	"io"
-	"labix.org/v2/mgo/bson"
 	"log/syslog"
 	"os"
 	"os/exec"
@@ -68,7 +68,12 @@ func requestedRepository() (repository.Repository, error) {
 		return repository.Repository{}, err
 	}
 	var repo repository.Repository
-	if err := db.Session.Repository().Find(bson.M{"_id": repoName}).One(&repo); err != nil {
+	conn, err := db.Conn()
+	if err != nil {
+		return repository.Repository{}, err
+	}
+	defer conn.Close()
+	if err := conn.Repository().Find(bson.M{"_id": repoName}).One(&repo); err != nil {
 		return repository.Repository{}, errors.New("Repository not found")
 	}
 	return repo, nil
@@ -106,7 +111,12 @@ func validateCmd() error {
 // stdout object, where the SSH_ORIGINAL_COMMAND output is going to be written
 func executeAction(f func(*user.User, *repository.Repository) bool, errMsg string, stdout io.Writer) {
 	var u user.User
-	if err := db.Session.User().Find(bson.M{"_id": os.Args[1]}).One(&u); err != nil {
+	conn, err := db.Conn()
+	if err != nil {
+		return
+	}
+	defer conn.Close()
+	if err := conn.User().Find(bson.M{"_id": os.Args[1]}).One(&u); err != nil {
 		log.Err("Error obtaining user. Gandalf database is probably in an inconsistent state.")
 		fmt.Fprintln(os.Stderr, "Error obtaining user. Gandalf database is probably in an inconsistent state.")
 		return
@@ -182,7 +192,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, err.Error())
 		return
 	}
-	db.Connect()
 	err = validateCmd()
 	if err != nil {
 		log.Err(err.Error())

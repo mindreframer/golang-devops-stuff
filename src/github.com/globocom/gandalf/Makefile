@@ -1,22 +1,18 @@
-get: get-test get-prod
+get: get-code godep
 
-get-test:
-	@/bin/echo "Installing test dependencies... "
-	@go list -f '{{range .TestImports}}{{.}} {{end}}' ./... | tr ' ' '\n' |\
-		grep '^.*\..*/.*$$' | grep -v 'github.com/globocom/gandalf' |\
-		sort | uniq | xargs go get -u >/dev/null 2>&1
-	@/bin/echo "ok"
+get-code:
+	go get $(GO_EXTRAFLAGS) -u -d -t ./...
 
-get-prod:
-	@/bin/echo "Installing production dependencies... "
-	@go list -f '{{range .Imports}}{{.}} {{end}}' ./... | tr ' ' '\n' |\
-		grep '^.*\..*/.*$$' | grep -v 'github.com/globocom/gandalf' |\
-		sort | uniq | xargs go get -u >/dev/null 2>&1
-	@/bin/echo "ok"
+godep:
+	go get $(GO_EXTRAFLAGS) github.com/tools/godep
+	godep restore ./...
 
 test:
-	@go test -i ./...
-	@go test ./...
+	go clean $(GO_EXTRAFLAGS) ./...
+	go test $(GO_EXTRAFLAGS) ./...
 
 doc:
 	@cd docs && make html
+
+run:
+	@godep go run webserver/main.go -config ./etc/gandalf.conf

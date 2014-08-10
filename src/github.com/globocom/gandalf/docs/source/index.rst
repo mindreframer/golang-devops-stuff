@@ -21,5 +21,6 @@ Get involved:
 Other topcis:
 =============
 
+* :doc:`API </api>`
 * :doc:`Making a backup </making-backup>`
 * :doc:`Install gandalf from source </install-from-source>`

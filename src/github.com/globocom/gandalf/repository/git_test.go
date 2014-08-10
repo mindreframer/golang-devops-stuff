@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -6,10 +6,10 @@ package repository
 
 import (
 	"fmt"
-	"github.com/globocom/commandmocker"
-	"github.com/globocom/config"
-	"github.com/globocom/gandalf/fs"
-	"github.com/globocom/tsuru/fs/testing"
+	"github.com/tsuru/commandmocker"
+	"github.com/tsuru/config"
+	"github.com/tsuru/gandalf/fs"
+	"github.com/tsuru/tsuru/fs/testing"
 	"launchpad.net/gocheck"
 	"path"
 )

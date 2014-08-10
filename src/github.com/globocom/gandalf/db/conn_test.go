@@ -1,12 +1,11 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
 package db
 
 import (
-	"github.com/globocom/config"
-	"labix.org/v2/mgo"
+	"github.com/tsuru/config"
 	"launchpad.net/gocheck"
 	"testing"
 )
@@ -20,35 +19,47 @@ var _ = gocheck.Suite(&S{})
 func (s *S) SetUpSuite(c *gocheck.C) {
 	config.Set("database:url", "127.0.0.1:27017")
 	config.Set("database:name", "gandalf_tests")
-	Connect()
 }
 
 func (s *S) TearDownSuite(c *gocheck.C) {
-	Session.DB.DropDatabase()
+	conn, err := Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	conn.User().Database.DropDatabase()
 }
 
 func (s *S) TestSessionRepositoryShouldReturnAMongoCollection(c *gocheck.C) {
-	var rep *mgo.Collection
-	rep = Session.Repository()
-	cRep := Session.DB.C("repository")
+	conn, err := Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	rep := conn.Repository()
+	cRep := conn.Collection("repository")
 	c.Assert(rep, gocheck.DeepEquals, cRep)
 }
 
 func (s *S) TestSessionUserShouldReturnAMongoCollection(c *gocheck.C) {
-	var usr *mgo.Collection
-	usr = Session.User()
-	cUsr := Session.DB.C("user")
+	conn, err := Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	usr := conn.User()
+	cUsr := conn.Collection("user")
 	c.Assert(usr, gocheck.DeepEquals, cUsr)
 }
 
 func (s *S) TestSessionKeyShouldReturnKeyCollection(c *gocheck.C) {
-	key := Session.Key()
-	cKey := Session.DB.C("key")
+	conn, err := Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	key := conn.Key()
+	cKey := conn.Collection("key")
 	c.Assert(key, gocheck.DeepEquals, cKey)
 }
 
 func (s *S) TestSessionKeyBodyIsUnique(c *gocheck.C) {
-	key := Session.Key()
+	conn, err := Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	key := conn.Key()
 	indexes, err := key.Indexes()
 	c.Assert(err, gocheck.IsNil)
 	c.Assert(indexes, gocheck.HasLen, 2)
@@ -57,9 +68,11 @@ func (s *S) TestSessionKeyBodyIsUnique(c *gocheck.C) {
 }
 
 func (s *S) TestConnect(c *gocheck.C) {
-	Connect()
-	c.Assert(Session.DB.Name, gocheck.Equals, "gandalf_tests")
-	err := Session.DB.Session.Ping()
+	conn, err := Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	c.Assert(conn.User().Database.Name, gocheck.Equals, "gandalf_tests")
+	err = conn.User().Database.Session.Ping()
 	c.Assert(err, gocheck.IsNil)
 }
 
@@ -70,7 +83,9 @@ func (s *S) TestConnectDefaultSettings(c *gocheck.C) {
 	defer config.Set("database:name", oldName)
 	config.Unset("database:url")
 	config.Unset("database:name")
-	Connect()
-	c.Assert(Session.DB.Name, gocheck.Equals, "gandalf")
-	c.Assert(Session.DB.Session.LiveServers(), gocheck.DeepEquals, []string{"localhost:27017"})
+	conn, err := Conn()
+	c.Assert(err, gocheck.IsNil)
+	defer conn.Close()
+	c.Assert(conn.User().Database.Name, gocheck.Equals, "gandalf")
+	c.Assert(conn.User().Database.Session.LiveServers(), gocheck.DeepEquals, []string{"127.0.0.1:27017"})
 }

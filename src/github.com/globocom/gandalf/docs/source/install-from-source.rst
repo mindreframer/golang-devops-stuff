@@ -18,7 +18,7 @@ Get gandalf:
 
 ::
 
-    $ go get github.com/globocom/gandalf/...
+    $ go get github.com/tsuru/gandalf/...
 
 Gandalf will come with a default configuration file, at etc/gandalf.conf, customize it with your needs before running the install script.
 
@@ -31,7 +31,7 @@ So let's run it:
 
 ::
 
-    $ cd $GOPATH/src/github.com/globocom/gandalf
+    $ cd $GOPATH/src/github.com/tsuru/gandalf
     $ ./setup/install.sh
 
 No output means no error :)

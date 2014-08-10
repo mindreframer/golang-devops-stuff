@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,7 +7,7 @@
 package fs
 
 import (
-	"github.com/globocom/tsuru/fs"
+	"github.com/tsuru/tsuru/fs"
 )
 
 var Fsystem fs.Fs

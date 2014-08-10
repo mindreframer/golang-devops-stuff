@@ -1,4 +1,4 @@
-// Copyright 2013 gandalf authors. All rights reserved.
+// Copyright 2014 gandalf authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -7,10 +7,11 @@ package user
 import (
 	"errors"
 	"fmt"
-	"github.com/globocom/gandalf/db"
-	"github.com/globocom/gandalf/repository"
-	"github.com/globocom/tsuru/log"
-	"labix.org/v2/mgo/bson"
+	"github.com/tsuru/gandalf/db"
+	"github.com/tsuru/gandalf/repository"
+	"github.com/tsuru/tsuru/log"
+	"gopkg.in/mgo.v2"
+	"gopkg.in/mgo.v2/bson"
 	"regexp"
 )
 
@@ -34,8 +35,17 @@ func New(name string, keys map[string]string) (*User, error) {
 		log.Errorf("user.New: %s", err.Error())
 		return u, err
 	}
-	if err := db.Session.User().Insert(&u); err != nil {
-		log.Errorf("user.New: %s", err.Error())
+	conn, err := db.Conn()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	if err := conn.User().Insert(&u); err != nil {
+		if mgo.IsDup(err) {
+			log.Errorf("user.New: %q duplicate user", name)
+			return u, errors.New("Could not create user: user already exists")
+		}
+		log.Errorf("user.New: %s", err)
 		return u, err
 	}
 	return u, addKeys(keys, u.Name)
@@ -61,13 +71,18 @@ func (u *User) isValid() (isValid bool, err error) {
 // - a user has no repositories: gandalf will simply remove the user
 func Remove(name string) error {
 	var u *User
-	if err := db.Session.User().Find(bson.M{"_id": name}).One(&u); err != nil {
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.User().Find(bson.M{"_id": name}).One(&u); err != nil {
 		return fmt.Errorf("Could not remove user: %s", err)
 	}
 	if err := u.handleAssociatedRepositories(); err != nil {
 		return err
 	}
-	if err := db.Session.User().RemoveId(u.Name); err != nil {
+	if err := conn.User().RemoveId(u.Name); err != nil {
 		return fmt.Errorf("Could not remove user: %s", err.Error())
 	}
 	return removeUserKeys(u.Name)
@@ -75,7 +90,12 @@ func Remove(name string) error {
 
 func (u *User) handleAssociatedRepositories() error {
 	var repos []repository.Repository
-	if err := db.Session.Repository().Find(bson.M{"users": u.Name}).All(&repos); err != nil {
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.Repository().Find(bson.M{"users": u.Name}).All(&repos); err != nil {
 		return err
 	}
 	for _, r := range repos {
@@ -87,7 +107,7 @@ func (u *User) handleAssociatedRepositories() error {
 		for i, v := range r.Users {
 			if v == u.Name {
 				r.Users[i], r.Users = r.Users[len(r.Users)-1], r.Users[:len(r.Users)-1]
-				if err := db.Session.Repository().Update(bson.M{"_id": r.Name}, r); err != nil {
+				if err := conn.Repository().Update(bson.M{"_id": r.Name}, r); err != nil {
 					return err
 				}
 				break
@@ -104,7 +124,12 @@ func (u *User) handleAssociatedRepositories() error {
 // Returns an error in case the user does not exists.
 func AddKey(uName string, k map[string]string) error {
 	var u User
-	if err := db.Session.User().FindId(uName).One(&u); err != nil {
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.User().FindId(uName).One(&u); err != nil {
 		return ErrUserNotFound
 	}
 	return addKeys(k, u.Name)
@@ -115,7 +140,12 @@ func AddKey(uName string, k map[string]string) error {
 // If the user or the key is not found, returns an error.
 func RemoveKey(uName, kName string) error {
 	var u User
-	if err := db.Session.User().FindId(uName).One(&u); err != nil {
+	conn, err := db.Conn()
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if err := conn.User().FindId(uName).One(&u); err != nil {
 		return ErrUserNotFound
 	}
 	return removeKey(kName, uName)
