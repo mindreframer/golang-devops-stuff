@@ -8,8 +8,10 @@ import (
 	"github.com/coreos/go-etcd/etcd"
 )
 
+// KeyPrefix is used to create the full service path.
 const KeyPrefix = "/discover"
 
+// EtcdBackend for service discovery.
 type EtcdBackend struct {
 	Client *etcd.Client
 }
@@ -21,6 +23,7 @@ func servicePath(name, addr string) string {
 	return KeyPrefix + "/services/" + name + "/" + addr
 }
 
+// Subscribe to changes in services of a given name.
 func (b *EtcdBackend) Subscribe(name string) (UpdateStream, error) {
 	stream := &etcdStream{ch: make(chan *ServiceUpdate), stop: make(chan bool)}
 	watch := b.getStateChanges(name, stream.stop)
@@ -28,7 +31,7 @@ func (b *EtcdBackend) Subscribe(name string) (UpdateStream, error) {
 	go func() {
 		if response != nil {
 			for _, n := range response.Node.Nodes {
-				if update := b.responseToUpdate(response, &n); update != nil {
+				if update := b.responseToUpdate(response, n); update != nil {
 					stream.ch <- update
 				}
 			}
@@ -61,10 +64,7 @@ func (b *EtcdBackend) responseToUpdate(resp *etcd.Response, node *etcd.Node) *Se
 	}
 	serviceName := splitKey[3]
 	serviceAddr := splitKey[4]
-	//if "get" == resp.Action || ("set" == resp.Action && node.Value != node.PrevValue) {
-	// TODO: the above is broken right now. until then what happens if we don't ignore heartbeats?
-	// should be resolved soon: http://thread.gmane.org/gmane.comp.distributed.etcd/56
-	if "get" == resp.Action || "set" == resp.Action {
+	if "get" == resp.Action || ("set" == resp.Action || "update" == resp.Action) && (resp.PrevNode == nil || node.Value != resp.PrevNode.Value) {
 		// GET is because getCurrentState returns responses of Action GET.
 		// some SETs are heartbeats, so we ignore SETs where value didn't change.
 		var serviceAttrs map[string]string
@@ -99,25 +99,27 @@ func (b *EtcdBackend) getStateChanges(name string, stop chan bool) chan *etcd.Re
 	return watch
 }
 
+// Register a service with etcd.
 func (b *EtcdBackend) Register(name, addr string, attrs map[string]string) error {
-	attrsJson, err := json.Marshal(attrs)
+	attrsJSON, err := json.Marshal(attrs)
 	if err != nil {
 		return err
 	}
-	_, err = b.Client.Set(servicePath(name, addr), string(attrsJson), HeartbeatIntervalSecs+MissedHearbeatTTL)
-	return err
-}
+	attrsString := string(attrsJSON)
+	path := servicePath(name, addr)
+	ttl := uint64(HeartbeatIntervalSecs + MissedHearbeatTTL)
 
-func (b *EtcdBackend) Heartbeat(name, addr string) error {
-	resp, err := b.Client.Get(servicePath(name, addr), false, false)
-	if err != nil {
-		return err
+	_, err = b.Client.Update(path, attrsString, ttl)
+	if e, ok := err.(*etcd.EtcdError); ok && e.ErrorCode == 100 {
+		// This is a workaround for etcd issue #407: https://github.com/coreos/etcd/issues/407
+		// If we just do a Set and don't try to Update first, createdIndex will get incremented
+		// on each heartbeat, breaking leader election.
+		_, err = b.Client.Set(path, attrsString, ttl)
 	}
-	// ignore test failure, it doesn't need a heartbeat if it was just set.
-	_, err = b.Client.CompareAndSwap(servicePath(name, addr), resp.Node.Value, HeartbeatIntervalSecs+MissedHearbeatTTL, resp.Node.Value, resp.Node.ModifiedIndex)
 	return err
 }
 
+// Unregister a service with etcd.
 func (b *EtcdBackend) Unregister(name, addr string) error {
 	_, err := b.Client.Delete(servicePath(name, addr), false)
 	return err

@@ -5,17 +5,22 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/coreos/go-etcd/etcd"
+	"github.com/flynn/go-flynn/attempt"
 	"github.com/flynn/rpcplus"
 	rpc "github.com/flynn/rpcplus/comborpc"
 )
 
 const (
+	// HeartbeatIntervalSecs is the expected interval at which services register themselves.
 	HeartbeatIntervalSecs = 5
-	MissedHearbeatTTL     = 5
+	// MissedHearbeatTTL allows for services to miss a heartbeat before being set to offline.
+	MissedHearbeatTTL = 5
 )
 
+// ServiceUpdate is sent when a service comes online or goes offline.
 type ServiceUpdate struct {
 	Name    string
 	Addr    string
@@ -24,36 +29,60 @@ type ServiceUpdate struct {
 	Created uint
 }
 
+// Args represents the data sent to discoverd's register and unregister API methods.
 type Args struct {
 	Name  string
 	Addr  string
 	Attrs map[string]string
 }
 
+// UpdateStream represents a subscription to changes in service registration.
 type UpdateStream interface {
 	Chan() chan *ServiceUpdate
 	Close()
 }
 
+// DiscoveryBackend represents a system that registers/unregisters services and notifies on updates.
 type DiscoveryBackend interface {
 	Subscribe(name string) (UpdateStream, error)
 	Register(name string, addr string, attrs map[string]string) error
 	Unregister(name string, addr string) error
-	Heartbeat(name string, addr string) error
 }
 
+// Agent represents the discoverd server--the backend its using, where it's listening, etc.
 type Agent struct {
 	Backend DiscoveryBackend
 	Address string
 }
 
+// Attempts is the attempt strategy that is used to connect to etcd.
+var Attempts = attempt.Strategy{
+	Min:   5,
+	Total: 5 * time.Second,
+	Delay: 200 * time.Millisecond,
+}
+
+// NewServer creates a new discoverd server listening at addr and backed by etcd.
 func NewServer(addr string, etcdAddrs []string) *Agent {
+	client := etcd.NewClient(etcdAddrs)
+
+	// check to make sure that etcd is online and accepting connections
+	// etcd takes a while to come online, so we attempt a GET multiple times
+	err := Attempts.Run(func() (err error) {
+		_, err = client.Get("/", false, false)
+		return
+	})
+	if err != nil {
+		log.Fatalf("Failed to connect to etcd at %v: %q", etcdAddrs, err)
+	}
+
 	return &Agent{
-		Backend: &EtcdBackend{Client: etcd.NewClient(etcdAddrs)},
+		Backend: &EtcdBackend{Client: client},
 		Address: addr,
 	}
 }
 
+// ListenAndServe starts the the discoverd agent.
 func ListenAndServe(server *Agent) error {
 	rpc.HandleHTTP()
 	if err := rpc.Register(server); err != nil {
@@ -71,6 +100,7 @@ func expandAddr(addr string) string {
 	return addr
 }
 
+// Subscribe returns a stream of ServiceUpdate objects for the given service name.
 func (s *Agent) Subscribe(args *Args, stream rpcplus.Stream) error {
 	updates, err := s.Backend.Subscribe(args.Name)
 	if err != nil {
@@ -90,6 +120,7 @@ func (s *Agent) Subscribe(args *Args, stream rpcplus.Stream) error {
 	return nil
 }
 
+// Register announces a service is online at an address.
 func (s *Agent) Register(args *Args, ret *string) error {
 	if len(args.Addr) == 0 {
 		return errors.New("discoverd: Addr must be set")
@@ -109,6 +140,7 @@ func (s *Agent) Register(args *Args, ret *string) error {
 	return nil
 }
 
+// Unregister announces a service has gone offline.
 func (s *Agent) Unregister(args *Args, ret *struct{}) error {
 	addr := expandAddr(args.Addr)
 	err := s.Backend.Unregister(args.Name, addr)
@@ -117,16 +149,5 @@ func (s *Agent) Unregister(args *Args, ret *struct{}) error {
 		return err
 	}
 	log.Println("Unregister:", args.Name, addr)
-	return nil
-}
-
-func (s *Agent) Heartbeat(args *Args, ret *struct{}) error {
-	addr := expandAddr(args.Addr)
-	err := s.Backend.Heartbeat(args.Name, addr)
-	if err != nil {
-		log.Println("Heartbeat: error:", err)
-		return err
-	}
-	log.Println("Heartbeat:", args.Name, addr)
 	return nil
 }
