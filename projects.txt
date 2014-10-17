@@ -22,6 +22,7 @@ https://github.com/cloudfoundry/yagnats.git
 https://github.com/coreos/etcd.git
 https://github.com/coreos/rudder.git
 https://github.com/crosbymichael/skydock.git
+https://github.com/crosbymichael/slex.git
 https://github.com/crowdmob/goamz.git
 https://github.com/dotcloud/docker.git
 https://github.com/efficient/epaxos.git
