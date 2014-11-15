@@ -74,6 +74,7 @@ https://github.com/spf13/nitro.git
 https://github.com/stripe-ctf/octopus.git
 https://github.com/tsenart/tb.git
 https://github.com/tsenart/vegeta.git
+https://github.com/tylertreat/Comcast.git
 https://github.com/uniqush/uniqush-push.git
 https://github.com/vektra/tachyon.git
 https://github.com/vito/garden.git
@@ -81,4 +82,3 @@ https://github.com/VividCortex/robustly.git
 https://github.com/xtaci/gonet.git
 https://github.com/YuriyNasretdinov/GoSSHa.git
 https://github.com/zimbatm/socketmaster.git
-https://github.com/tylertreat/Comcast.git
