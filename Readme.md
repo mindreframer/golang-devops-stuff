@@ -139,6 +139,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Service discovery via DNS for docker
        91 commits, last change: 2014-07-28 - 11:00, 566 stars, 42 forks
 
+    crosbymichael/slex:
+      SSH multiplex
+       13 commits, last change: 2014-10-30 - 00:17, 214 stars, 13 forks
+
     crowdmob/goamz:
       Fork of the GOAMZ version developed within Canonical with additional functionality with DynamoDB
        724 commits, last change: 2014-08-24 - 16:57, 209 stars, 129 forks
@@ -342,6 +346,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
     tsenart/vegeta:
       HTTP load testing tool and library. It's over 9000!
        203 commits, last change: 2014-07-01 - 21:47, 1,717 stars, 82 forks
+
+    tylertreat/Comcast:
+      Simulating shitty network connections so you can build better systems.
+       25 commits, last change: 2014-11-13 - 15:05, 375 stars, 11 forks
 
     uniqush/uniqush-push:
       Uniqush is a free and open source software which provides a unified push service for server-side notification to apps on mobile devices.
