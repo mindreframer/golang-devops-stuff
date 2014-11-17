@@ -1,0 +1,375 @@
+{{define "content"}}
+
+<div class="row">
+	<div class="col-md-12">
+		<!-- Custom Tabs -->
+		<div class="nav-tabs-custom">
+			<ul class="nav nav-tabs">
+				<li class="active"><a href="#tab_1" data-toggle="tab">Node Information</a></li>
+				<li><a href="#tab_2" data-toggle="tab">Memory</a></li>
+				<li><a href="#tab_3" data-toggle="tab">Replication</a></li>
+				<li><a href="#tab_4" data-toggle="tab">Command Stats</a></li>
+				<li><a href="#tab_5" data-toggle="tab">Persistence</a></li>
+				<li><a href="#tab_6" data-toggle="tab">Latency</a></li>
+				<li><a href="#tab_7" data-toggle="tab">Slow Log</a></li>
+				<li class="pull-right"><a href="#" class="text-muted"><i class="fa fa-gear">&nbsp; </i></a></li>
+			</ul>
+			<!-- tabs -->
+			<div class="tab-content">
+				<!-- TAB: INFO -->
+				<div class="tab-pane active" id="tab_1">
+					<div class="box box-solid">
+						<div class="box-header"> <h3 class="box-title">{{.Node.Name}}</h3> </div><!-- /.box-header -->
+						<div class="box-body">
+							<div class="row">
+								<dl class="dl-horizontal">
+									<dt>Node Name: </dt>
+									<dd>{{.Node.Name}}</dd>
+									<dt>Last Update: </dt>
+									<dd> 
+										{{.Node.LastUpdate.Format "2006-01-02 3:04"}}
+										{{if .Node.LastUpdateValid }} 
+										<span class="text-green"> 
+										{{else}} 
+										<span class="text-danger">
+										{{end}}
+											 ( {{Float2Int .Node.LastUpdateDelay.Seconds}} seconds ago )
+										</span>
+									</dd>
+									<dt>Version: </dt>
+									<dd>{{.Node.Info.Server.Version}}</dd>
+									<dt>Instance Size: </dt>
+									<dd>{{HumanizeBytes .Node.MaxMemory}}</dd>
+									<dt>Number of Slaves</dt>
+									<dd>
+									{{.Node.Info.Replication.ConnectedSlaves}}  
+									</dd>
+								</dl>
+							</div>
+						</div>
+					</div>
+				</div><!-- /.tab-pane -->
+				<!-- Memory -->
+				<div class="tab-pane" id="tab_2">
+					<div class="box-body">
+						<div class="row">
+							<div class="col-md-12">
+								<div class="box box-solid">
+									<div class="box-body">
+										<dl class="dl-horizontal">
+											<dt>Max Memory: </dt>
+											<dd>{{HumanizeBytes .Node.MaxMemory}}</dd>
+
+											<dt>Used Memory: </dt>
+											<dd>{{ .Node.Info.Memory.UsedMemoryHuman}}</dd>
+
+											<dt>Percent Used </dt>
+											<dd>
+												<div class="progress active" style="width:30%">
+													{{if .Node.MemoryUseCritical}}
+													<div class="progress-bar progress-bar-red" role="progressbar" aria-valuenow="{{Float2Int .Node.PercentUsed}}" aria-valuemin="0" aria-valuemax="100" style="width: {{Float2Int .Node.PercentUsed}}%">
+													{{else if .Node.MemoryUseWarn}}
+													<div class="progress-bar progress-bar-yellow" role="progressbar" aria-valuenow="{{Float2Int .Node.PercentUsed}}" aria-valuemin="0" aria-valuemax="100" style="width: {{Float2Int .Node.PercentUsed}}%">
+													{{else}}
+													<div class="progress-bar progress-bar-green" role="progressbar" aria-valuenow="{{Float2Int .Node.PercentUsed}}" aria-valuemin="0" aria-valuemax="100" style="width: {{Float2Int .Node.PercentUsed}}%">
+													{{end}}
+														{{ $pu := Float2Int .Node.PercentUsed }}
+														{{ if gt $pu 70 }}
+														{{Float2Int .Node.PercentUsed}}% Used
+														{{end}}
+													</div>
+														{{ $pu := Float2Int .Node.PercentUsed }}
+														{{ if le $pu 70 }}
+														{{Float2Int .Node.PercentUsed}}% Used
+														{{end}}
+												</div>
+											</dd>
+
+											<dt>Peak Memory: </dt>
+											<dd>{{HumanizeBytes .Node.Info.Memory.UsedMemoryPeak}}</dd>
+
+											<dt>Used System Memory: </dt>
+											<dd>{{HumanizeBytes .Node.Info.Memory.UsedMemoryRss}}</dd>
+
+											<dt>Used System Lua: </dt>
+											<dd>{{HumanizeBytes .Node.Info.Memory.UsedMemoryLua}}</dd>
+
+										</dl>
+									</div><!-- /.box-body -->
+								</div><!-- /.box -->
+							</div>
+						</div>
+					</div>
+				</div><!-- /.tab-pane -->
+				<!-- Replication -->
+				<div class="tab-pane" id="tab_3">
+					<div class="box-body">
+						<div class="row">
+							<div class="col-md-12">
+								<div class="box box-solid">
+									<div class="box-body">
+										<dl class="dl-horizontal">
+											<dt>Role: </dt>
+											<dd>{{title .Node.Info.Replication.Role}}</dd>
+											
+											<dt>Connected Slave Count: </dt>
+											<dd>{{.Node.Info.Replication.ConnectedSlaves}}</dd>
+											
+											<dt> Master Sync : </dt>
+											<dd>
+											{{if .Node.Info.Replication.MasterSyncInProgress}}
+											<span class="fa fa-spin fa-refresh text-yellow">&nbsp; </span> Synchronizing
+											{{else}}
+											<span class="fa fa-cloud-download text-green"> Synchronized</span>
+											{{end}}
+											</dd>
+											<dt>Master Replication Offset: </dt>
+											<dd>{{.Node.Info.Replication.MasterReplicationOffset}}</dd>
+											
+										</dl>
+									</div><!-- /.box-body -->
+								</div><!-- /.box -->
+							</div>
+						</div>
+						{{ if .Node.Slaves}}
+						<div class="row">
+							<div class="box">
+								<div class="box-header">
+									<h3 class="box-title">Connected Slaves </h3>
+								</div><!-- /.box-header -->
+								<div class="box-body table-responsive no-padding">
+									<table class="table table-hover" width="98%">
+										<tr>
+											<th width="25%">Name</th>
+											<th width="10%">Address</th>
+											<th width="10%">Port</th>
+											<th width="10%">Slave Priority</th>
+											<th width="10%">Replication Offset</th>
+											<th width="20%">Actions</th>
+										</tr>
+										{{range .Node.Slaves }}
+										<tr>
+											<td>
+												<a href="/node/{{.Name}}">{{.Name}}</a>
+											</td>
+											<td>{{.Address}} </td>
+											<td> {{.Port}} </td>
+											<td> {{.Info.Replication.SlavePriority}} </td>
+											<td> {{.Info.Replication.SlaveReplicationOffset}} </td>
+											<td>
+												<a href="/pod/dropslave" class="btn btn-danger disabled btn-sm">Remove</a>
+											</td>
+										<td> 
+										</tr>
+										{{end}}
+									</table>
+								</div><!-- /.box-body -->
+							</div><!-- /.box -->
+						</div><!-- /.row (slave table row) -->
+						{{end}}
+					</div>
+				</div><!-- /.tab-pane -->
+				<!-- Command Stats -->
+				<div class="tab-pane" id="tab_4">
+					<div class="box">
+						<div class="box-header">
+							<h3 class="box-title">Command Call Stats</h3>
+						</div><!-- /.box-header -->
+						<div class="box-body">
+							<div class="row">
+								<table class="table table-striped">
+									<tr>
+										<th style="width: 10px">Command</th>
+										<th>Count</th>
+										<th>Total Time</th>
+										<th>Average Time</th>
+									</tr>
+									{{range $name, $val := .Node.Info.Commandstats.Stats}}											
+									<tr>
+										<td>{{title $name}}</td>
+										<td>{{CommifyFloat $val.calls}}</td>
+										<td>{{HumanizeCallStats $val.usec}} </td>
+										<td>{{HumanizeCallStats $val.usec_per_call}} </td>
+									</tr>
+									{{end}}
+								</table>
+							</div><!-- /.box-body -->
+						</div><!-- /.box -->
+					</div>
+				</div><!-- /.tab-pane -->
+				<!-- Persistence -->
+				<div class="tab-pane" id="tab_5">
+					<div class="row">
+							<dl class="dl-horizontal">
+								<dt>Loading Status</dt>
+								<dd>
+								{{if .Node.Info.Persistence.Loading}}
+								<span class="fa fa-spin fa-spinner text-yellow">&nbsp;</span>
+								{{else}}
+								<span class="fa fa-check text-green">&nbsp;</span>
+								{{end}}
+								</dd>
+
+								<dt>Persistence Style</dt>
+								<dd>
+									<div class="button-group">
+									{{if .Node.SaveEnabled }}
+										<span class="btn btn-disabled bg-maroon btn-sm" >Snapshot</span>
+									{{end}}
+									{{if .Node.Info.Persistence.AOFEnabled }}
+										<span class="btn btn-disabled bg-maroon btn-sm" >AOF</span>
+									{{end}}
+									{{if eq .Node.SaveEnabled .Node.AOFEnabled }}
+										{{if not .Node.SaveEnabled}}
+										<span class="btn btn-disabled bg-maroon btn-sm" >CACHE</span>
+										{{end}}
+									{{end}}
+									</div>
+								</dd>
+
+								<dt>Non-Persisted Changes </dt>
+								<dd> {{.Node.Info.Persistence.ChangesSinceSave}} </dd>
+
+								{{ if .Node.SaveEnabled }}
+								<dt>Last BGSAVE Status</dt>
+								<dd> 
+									{{if OkToBool .Node.Info.Persistence.LastBGSaveStatus}}
+									<span class="fa fa-check text-green">&nbsp;</span>
+									{{else}}
+									<span class="fa fa-error text-red">{{.Node.Info.Persistence.LastBGSaveStatus}}</span>
+									{{end}}
+								</dd>
+								{{end}}
+								{{if .Node.AOFEnabled }}
+								<dt>Last AOF Rewrite Status</dt>
+								<dd> 
+									{{if OkToBool .Node.Info.Persistence.LastBGRewriteStatus}}
+									<span class="fa fa-check text-green">&nbsp;</span>
+									{{else}}
+									<span class="fa fa-error text-red">{{.Node.Info.Persistence.LastBGRewriteStatus}}</span>
+									{{end}}
+								</dd>
+								{{end}}
+							</dl>
+					</div>
+				</div><!-- /.tab-pane -->
+				<!-- Latency -->
+				<div class="tab-pane" id="tab_6">
+					<div class="row">
+						<h2> Latency Monitoring</h2>
+							<dl class="dl-horizontal">
+								<dt>Enabled</dt>
+								<dd>
+								{{if .Node.LatencyMonitoringEnabled}}
+								Yes
+								{{else}}
+								No
+								{{end}}
+								</dd>
+								<dt>Latency Threshold</dt>
+								<dd>
+								{{.Node.LatencyThreshold}}
+								</dd>
+							</dl>
+							{{if .Node.LatencyMonitoringEnabled}}
+							<h2> Latency Doctor </h2>
+							<pre>{{.Node.LatencyDoctor}}</pre>
+							{{end}}
+					</div>
+						<div class="row">
+							<div class="box">
+								<div class="box-header">
+									<h3 class="box-title">Command Latency Events </h3>
+								</div><!-- /.box-header -->
+								<div class="box-body table-responsive no-padding">
+									<table class="table table-hover" width="98%">
+										<tr>
+											<th> Timestamp</th>
+											<th> Latency in Milliseconds</th>
+										</tr>
+										{{range .Node.LatencyHistory.Records }}
+										<tr>
+											<td> {{.Timestamp}} </td>
+											<td> {{.Milliseconds}} milliseconds </td>
+										</tr>
+										{{end}}
+									</table>
+								</div><!-- /.box-body -->
+							</div><!-- /.box -->
+						</div><!-- /.row (slave table row) -->
+				</div><!-- /.tab-pane -->
+				<!-- Slow Log -->
+				<div class="tab-pane" id="tab_7">
+					<div class="row">
+						<h2> SlowLog Monitoring</h2>
+							<dl class="dl-horizontal">
+								<dt>Slowlog Threshold</dt>
+								<dd> {{.Node.SlowLogThreshold}} </dd>
+								<dt>Slowlog Record Count</dt>
+								<dd> {{.Node.SlowLogLength}} </dd>
+							</dl>
+					</div>
+						<div class="row">
+							<div class="box">
+								<div class="box-header">
+									<h3 class="box-title">Command Latency Events </h3>
+								</div><!-- /.box-header -->
+								<div class="box-body table-responsive no-padding">
+									<table class="table table-bordered table-striped" id="slowlog-table" width="98%">
+										<thead>
+										<tr>
+											<th> ID </th>
+											<th> Timestamp</th>
+											<th> Event Time </th>
+											<th> Command </th>
+										</tr>
+										</thead>
+										<tbody>
+										{{range .Node.SlowLogRecords }}
+										<tr>
+											<td> {{.ID}} </td>
+											<td> {{.Timestamp}} </td>
+											<td>{{HumanizeSlowlog .Microseconds}} </td>
+											<td> {{range .Command }} {{.}} {{end}} </td>
+										</tr>
+										{{end}}
+										</tbody>
+										<tfoot>
+										<tr>
+											<th> ID </th>
+											<th> Timestamp</th>
+											<th> Event Time </th>
+											<th> Command </th>
+										</tr>
+										</tfoot>
+									</table>
+								</div><!-- /.box-body -->
+							</div><!-- /.box -->
+						</div><!-- /.row (slave table row) -->
+				</div><!-- /.tab-pane -->
+			</div><!-- /.tab-content -->
+		</div><!-- nav-tabs-custom -->
+	</div><!-- /.col -->
+</div>
+
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/2.0.2/jquery.min.js"></script>
+
+<script src="/static/js/plugins/datatables/jquery.dataTables.js" type="text/javascript"></script>
+<script src="/static/js/plugins/datatables/dataTables.bootstrap.js" type="text/javascript"></script>
+<script type="text/javascript">
+        $('#slowlog-table').dataTable({
+            "bPaginate": true,
+            "bLengthChange": true,
+            "bFilter": false,
+            "bSort": true,
+            "bInfo": true,
+            "bAutoWidth": true,
+            "bProcessing": true,
+            "bStateSave": true,
+            "bOrdering": true,
+            "bOrder": [[1,'asc']]
+        }).order([1,'desc'] ).draw();
+</script>
+
+
+{{end}}

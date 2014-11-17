@@ -1,0 +1,40 @@
+{{define "content"}}
+	<div class="box-body">
+		<div class="row">
+			<div class="col-md-12">
+					</div><!-- /.box-header -->
+					{{ if .Data.Error }}
+					<div class="box box-solid box-danger">
+						<div class="box-header">
+							<h3 class="box-title"> Error </h3>
+						</div>
+						<div class="box-body">
+							<p> Unable to add Pod. Error is {{.Data.Error}} </p>
+						</div>
+					</div>
+
+					{{else}}
+					<div class="box box-solid">
+						<div class="box-header">
+							<h3 class="box-title">{{.Data.Name}}</h3>
+						</div>
+						<div class="box-body">
+							<dl>
+								<dt>Pod Name: </dt>
+								<dd>{{.Data.Name}}</dd>
+
+								<dt>Master Address</dt>
+								<dd>
+								{{.Data.Address }}
+								</dd>
+
+								<dt>Quorum Required</dt>
+								<dd>{{.Data.Quorum}}</dd>
+							</dl>
+						</div><!-- /.box-body -->
+					</div><!-- /.box -->
+					{{end}}
+			</div><!-- ./col -->
+	</div>
+
+{{end}}

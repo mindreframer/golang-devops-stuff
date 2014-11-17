@@ -1,0 +1,7 @@
+{
+	"service": {
+		"name": "sentinel",
+		"tags": ["sentinel"],
+		"port": 26379
+	}
+}

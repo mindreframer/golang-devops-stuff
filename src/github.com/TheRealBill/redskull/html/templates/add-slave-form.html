@@ -1,0 +1,29 @@
+{{define "content"}}
+
+<div class="box box-primary">
+	<div class="box-header">
+		<h3 class="box-title">Add Slave To Pod {{.Pod.Name}}</h3>
+	</div><!-- /.box-header -->
+	<!-- form start -->
+	<form role="form" action="/pod/{{.Pod.Name}}/addslave" method="post">
+		<div class="box-body">
+			<div class="form-group">
+				<label for="host">Slave's address</label>
+				<input type="text" class="form-control" name="host" id="host" placeholder="Enter New Slave's IP Address">
+				<label for="port">Slave's Port</label>
+				<input type="text" class="form-control" name="port" id="port" placeholder="Enter New Slave's Port Number">
+
+			<div class="form-group">
+				<label for="authtoken">Current Slave Auth</label>
+				<input type="text" class="form-control" name="authtoken" id="authtoken" placeholder="If the slave *currently* requires a password, enter it here.">
+			</div>
+
+			</div>
+		</div><!-- /.box-body -->
+
+		<div class="box-footer">
+			<button type="submit" class="btn btn-primary">Submit</button>
+		</div>
+	</form>
+</div><!-- /.box -->
+{{end}}

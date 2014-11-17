@@ -1,0 +1,77 @@
+#!/bin/bash
+export SESSION=redskull
+export DEVDIR=$GOPATH/src/github.com/therealbill/$SESSION
+tmux has-session -t $SESSION 2>/dev/null
+if [ $? != 0 ]
+then
+	#tmux set -g base-index 1
+	#tmux set -g pane-base-index 1
+	tmux new -s $SESSION -n core -d
+	tmux send-keys -t $SESSION "cd $DEVDIR" C-m
+	tmux send-keys -t core "vim main.go" C-m
+	tmux split-window -v -t core
+	tmux split-window -v -t core
+	tmux select-layout -t core main-horizontal
+	tmux send-keys -t $SESSION:core.2 "cd $DEVDIR" C-m
+	tmux send-keys -t $SESSION:core.3 "cd $DEVDIR" C-m
+
+	tmux new-window -n server -t $SESSION
+	tmux send-keys -t $SESSION:server.1 "cd $DEVDIR" C-m
+
+	tmux new-window -n handlers -t $SESSION
+	tmux split-window -h -t handlers
+	tmux send-keys -t $SESSION:handlers.1 "cd $DEVDIR/handlers" C-m
+	tmux send-keys -t $SESSION:handlers.2 "cd $DEVDIR/handlers" C-m
+
+	tmux new-window -n templates -t $SESSION
+	tmux split-window -h -t templates
+	tmux send-keys -t $SESSION:templates.1 "cd $DEVDIR/html/templates" C-m
+	tmux send-keys -t $SESSION:templates.2 "cd $DEVDIR/html/templates" C-m
+
+	# Windows for running local Redis Server instances
+	tmux new-window -n redis-servers -t $SESSION
+	tmux split-window -v -t redis-servers.1
+	tmux split-window -h -t redis-servers.1
+	tmux split-window -v -t redis-servers.1
+	tmux split-window -h -t redis-servers.2
+	tmux split-window -v -t redis-servers.2
+	tmux split-window -v -t redis-servers.3
+	tmux split-window -v -t redis-servers.5
+	tmux split-window -v -t redis-servers.6
+	tmux select-layout -t redis-servers tiled
+	# Fire up Redis Server instances
+	for x in `seq 1 9`; do
+		tmux send-keys -t $SESSION:redis-servers.$x "cd /tmp/" C-m
+		tmux send-keys -t $SESSION:redis-servers.$x "redis-server --port 650$x --dbfilename 650$x.rdb" C-m
+	done
+
+	# Sentinel window
+	tmux new-window -n redis-sentinel -t $SESSION
+	tmux split-window -v -t redis-sentinel
+	tmux split-window -v -t redis-sentinel
+	tmux select-layout -t redis-sentinel main-horizontal
+	# Fire up three sentinels
+	for x in 1 2 3; do
+		tmux send-keys -t $SESSION:redis-servers.$x "cd /tmp/" C-m
+		tmux send-keys -t $SESSION:redis-sentinel.$x "echo port 2638$x >/tmp/s-$x.conf" C-m
+		tmux send-keys -t $SESSION:redis-sentinel.$x "redis-server /tmp/s-$x.conf --sentinel" C-m
+	done
+
+	tmux new-window -n git -t $SESSION
+	tmux split-window -h -t git
+	tmux split-window -h -t git
+	tmux select-layout -t git main-horizontal
+	tmux send-keys -t $SESSION:git.1 "cd $DEVDIR" C-m
+	tmux send-keys -t $SESSION:git.1 "while :; do clear && git status && sleep 15 ; done" C-m
+	tmux send-keys -t $SESSION:git.2 "cd $DEVDIR" C-m
+	tmux send-keys -t $SESSION:git.3 "cd $DEVDIR" C-m
+
+	tmux new-window -n shell -t $SESSION
+	tmux send-keys -t $SESSION:shell.1 "cd $DEVDIR" C-m
+
+	tmux select-window -t $SESSION:core
+	tmux select-pane -t $SESSION:core.2
+fi
+
+
+tmux attach -t $SESSION

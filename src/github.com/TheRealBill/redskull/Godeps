@@ -1,0 +1,6 @@
+github.com/kelseyhightower/envconfig
+github.com/therealbill/airbrake-go
+github.com/therealbill/libredis/client
+github.com/therealbill/libredis/info
+github.com/zenazn/goji
+github.com/dustin/go-humanize

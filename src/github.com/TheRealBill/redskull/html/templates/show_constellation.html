@@ -1,0 +1,108 @@
+{{define "content"}}
+
+<div class="row">
+			<div class="col-md-4">
+				<div class="box box-solid {{if .Constellation.IsBalanced}}box-success{{else}}box-danger{{end}}">
+					<div class="box-header">
+						<h3 class="box-title">Constellation: {{title .Constellation.Name}}</h3>
+					</div><!-- /.box-header -->
+					<div class="box-body">
+						<dl width="100%">
+							<dt>State</dt>
+							<dd>
+							{{if .Constellation.IsBalanced }}
+								<span class="text-green">Balanced</span>
+							{{else}}
+								<span class="text-red">UN-Balanced!</span> {{tableflip}}
+							{{end}}
+							</dd>
+							<dt>Pods Managed</dt>
+							<dd>{{.Constellation.Metrics.PodCount}}</dd>
+
+							<dt>Total Pod Memory </dt>
+							<dd>{{HumanizeBigBytes .Constellation.Metrics.TotalPodMemory}}</dd>
+
+							<dt>Total Node Memory </dt>
+							<dd>{{HumanizeBigBytes .Constellation.Metrics.TotalNodeMemory}}</dd>
+
+							<dt>Nodes Managed</dt>
+							<dd>{{.Constellation.Metrics.NodeCount}}</dd>
+						</dl>
+					</div><!-- /.box-body -->
+				</div><!-- /.box -->
+			</div><!-- ./col -->
+			<div class="col-md-4">
+				<div class="box box-solid box-primary">
+					<div class="box-header">
+						<h3 class="box-title">Constellation: Instance Metrics</h3>
+					</div><!-- /.box-header -->
+					<div class="box-body table-responsive no-padding">
+							<table class="table table-hover">
+								<tr>
+									<th> Instance Size </th>
+									<th> Instances Managed </th>
+								</tr>
+							{{range $size,$total := .Constellation.Metrics.PodSizes }}
+							<tr>
+								<td>{{HumanizeBigBytes $size}}</td>
+								<td>{{$total}}</td>
+							</tr>
+							{{end}}
+						</table>
+					</div><!-- /.box-body -->
+				</div><!-- /.box -->
+			</div><!-- ./col -->
+			<div class="col-md-4">
+				<div class="box box-solid box-primary">
+					<div class="box-header">
+						<h3 class="box-title">Available Actions</h3>
+					</div>
+					<div class="box-body table-responsive no-padding">
+						<div class="input-group">
+							<div class="input-group-btn">
+								<a href="/constellation/addpodform/"><button class="btn btn-block btn-sm btn-default"><i class="fa fa-plus"> Add Pod</i></button></a>
+								<a href="/constellation/addsentinelform/"><button class="btn btn-block btn-sm btn-default"><i class="fa fa-plus"> Add Sentinel</i></button></a>
+								{{if .Constellation.IsBalanced }}
+								{{else}}
+								<br /> <a href="/constellation/rebalance/" class="btn btn-warning btn-block btn-sm"> Rebalance Constellation</a> 
+								{{end}}
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+</div>
+
+<div class="row">
+		{{range .Constellation.GetAllSentinelsQuietly }}
+		<div class="col-md-3">
+			<div class="box box-primary box-solid">
+				<div class="box-header">
+					<h4 class="box-title">  Sentinel Node @ {{.Name}} 
+				</div>
+				<div class="box-body">
+					<table class="table-hover no-padding" width="90%">
+						<tr>
+							<th width="70%">Redis Version: </th>
+							<td align="right">{{.Info.Server.Version}}</td>
+						</tr>
+						<tr>
+							<th>Uptime in Days</th>
+							<td align="right">{{.Info.Server.UptimeInDays}}d</td>
+						</tr>
+						<tr>
+							<th>Uptime in Seconds</th>
+							<td align="right">{{.Info.Server.UptimeInSeconds}}</td>
+						</tr>
+						<tr>
+							<th>Pods Monitored </th>
+							<td align="right">{{.PodCount}}</td>
+						</tr>
+					</table>
+				</div>
+			</div>
+		</div>
+		{{end}}
+</div>
+
+{{end}}

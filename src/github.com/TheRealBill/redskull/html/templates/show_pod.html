@@ -1,0 +1,175 @@
+{{define "content"}}
+
+<div class="row">
+	<div class="col-md-6">
+		<div class="box box-solid box-primary">
+			<div class="box-header">
+				<h3 class="box-title">{{.Pod.Name}}</h3>
+			</div><!-- /.box-header -->
+			<div class="box-body">
+				<dl class="dl-horizontal">
+					<dt>Can Failover</dt>
+					<dd>
+					{{if .Data.Conditions.CanFailover}}
+							<span class="text-green fa fa-thumbs-o-up"> Yes</span>
+					
+					{{else}}
+						<i class="text-red fa fa-bomb"> NO</i> {{tableflip}}
+					{{end}}
+					</dd>
+
+					<dt> Slave Memory Status </dt>
+					<dd>
+					{{if .Data.Conditions.SlavesHaveEnoughMemory }}
+							<span class="text-green fa fa-thumbs-o-up"> Yes</span>
+					{{else}}
+						<span class="fa fa-bomb"></span><span class="text-red">At least one slave lacks enough memory to match the master</span> 
+					{{end}}
+					</dd>
+
+					<dt> Configured Sentinels </dt>
+					<dd>  
+						{{if .Data.Conditions.HasFullSentinelComplement }}
+							<span class="text-green fa fa-thumbs-o-up"> 
+						{{else}}
+							<span class="fa text-orange fa-thumbs-o-down">
+						{{end}}
+						{{.Data.Metrics.LiveSentinels}} of  {{.Data.Metrics.NeededSentinels}} 
+					</dd>
+
+					<dt> Live Sentinels </dt>
+					<dd>
+						{{if .Data.Conditions.SentinelConfigMatch }}
+							<span class="text-green fa fa-thumbs-o-up"> 
+						{{else}}
+							<span class="fa text-red fa-thumbs-o-down">
+						{{end}}
+						{{.Data.Metrics.LiveSentinels}} of  {{.Data.Metrics.ReportedSentinels}} 
+					</dd>
+
+					<dt> Master Node </dt>
+					<dd> <a href="/node/{{.Pod.Master.Name}}"> {{.Pod.Master.Name}}</a> </dd>
+
+					<dt>Number of Slaves</dt>
+					<dd>
+					{{.Pod.Master.Info.Replication.ConnectedSlaves}}  
+					</dd>
+
+					<dt>Memory </dt>
+					<dd> 
+						<div class="progress " >
+							{{if .Pod.Master.MemoryUseCritical}}
+							<div class="progress-bar progress-bar-red" role="progressbar" aria-valuenow="{{Float2Int .Pod.Master.PercentUsed}}" aria-valuemin="0" aria-valuemax="100" style="width: {{Float2Int .Pod.Master.PercentUsed}}%">
+							{{else if .Pod.Master.MemoryUseWarn}}
+							<div class="progress-bar progress-bar-yellow" role="progressbar" aria-valuenow="{{Float2Int .Pod.Master.PercentUsed}}" aria-valuemin="0" aria-valuemax="100" style="width: {{Float2Int .Pod.Master.PercentUsed}}%">
+							{{else}}
+							<div class="progress-bar progress-bar-green" role="progressbar" aria-valuenow="{{Float2Int .Pod.Master.PercentUsed}}" aria-valuemin="0" aria-valuemax="100" style="width: {{Float2Int .Pod.Master.PercentUsed}}%">
+							{{end}}
+								<span class="sr-only">{{Float2Int .Pod.Master.PercentUsed}}% Complete</span>
+							</div>
+						Using {{ HumanizeBytes .Pod.Master.Info.Memory.UsedMemory }} of {{ HumanizeBytes .Pod.Master.MaxMemory }} 
+						</div>
+					</dd>
+
+				</dl>
+			</div><!-- /.box-body -->
+		</div><!-- /.box -->
+	</div><!-- ./col -->
+	<div class="col-md-3">
+		<div class="box box-primary box-solid">
+			<div class="box-header"> <h3 class="box-title">Live Sentinels </h3> </div><!-- /.box-header -->
+			<div class="box-body">
+				<ul>
+					{{range .Constellation.GetSentinelsForPod .Pod.Name }}
+					<li>{{.Name}} </li>
+					{{end}}
+				</ul>
+			</div><!-- /.box-body -->
+		</div><!-- /.box -->
+	</div> <!-- col -->
+	<div class="col-md-3">
+		<div class="box box-primary box-solid">
+			<div class="box-header">
+				<h3 class="box-title">Available Actions for Pod</h3>
+			</div><!-- /.box-header -->
+			<div class="box-body">
+					<div class="box">
+						<div class="box-body">
+							<a href="/node/{{.Pod.Info.IP}}:{{.Pod.Info.Port}}" class="btn btn-info btn-block">View Master Node</a>
+							<a href="/pod/{{.Pod.Name}}/addslave" class="btn btn-info btn-block">Add Slave</a>
+						</div>
+					</div>
+					<div class="box">
+						<div class="box-body">
+							{{if .Data.Conditions.CanFailover }}
+							<form action="/pod/{{.Pod.Name}}/failover" method="post">
+								<button type="submit" class="btn btn-warning btn-block">Force Failover</button>
+							</form>
+							{{end}}
+							<form action="/pod/{{.Pod.Name}}/reset" method=post> 
+								<button type="submit" class="btn btn-warning btn-block">Reset Slaves & Sentinels</button>
+							</form>
+							{{ if eq .Data.Conditions.HasFullSentinelComplement false }}
+							<form action="/pod/{{.Pod.Name}}/balance" method=post> 
+								<button type="submit" class="btn btn-warning btn-block">Rebalance Pod</button>
+							</form>
+							{{end}}
+							<a href="/constellation/removepod" class="btn btn-danger btn-block">Stop Managing</a>
+						</div>
+					</div>
+			</div><!-- /.box-body -->
+		</div><!-- /.box -->
+	</div>
+</div>
+
+
+<div class="row">
+	<div class="col-md-12">
+		<div class="box box-primary">
+			<div class="box-header"> <h3 class="box-title">Connected Slaves </h3> </div><!-- /.box-header -->
+			<div class="box-body table-responsive no-padding">
+				<table class="table table-hover" width="98%">
+					<tr>
+						<th width="25%">Name</th>
+						<th width="10%">Address</th>
+						<th width="10%">Port</th>
+						<th width="10%">Slave Priority</th>
+						<th width="10%">Slave Max Memory</th>
+						<th width="10%">Replication Offset</th>
+						<th width="20%">Actions</th>
+					</tr>
+					{{range .Data.Slaves }}
+					<tr>
+						<td>
+							<a href="/node/{{.Name}}">{{.Name}}</a>
+						</td>
+						<td>{{.Address}} </td>
+						<td> {{.Port}} </td>
+						<td> 
+							{{if .IsPromotable}}
+							<span>
+							{{else}}
+							<span class="text-yellow">
+							{{end}}
+								{{.Info.Replication.SlavePriority}} 
+							</span>
+						</td>
+						<td> <span> {{HumanizeBytes .MaxMemory}}</span> </td>
+						<td> {{.Info.Replication.SlaveReplicationOffset}} </td>
+						<td>
+							<a href="/pod/dropslave" class="btn btn-danger disabled btn-sm">Remove</a>
+						</td>
+					<td> 
+					</tr>
+					{{end}}
+				</table>
+			</div>
+		</div> <!-- box -->
+	</div>
+</div><!-- /.row (main row) -->
+
+
+
+
+
+{{end}}
