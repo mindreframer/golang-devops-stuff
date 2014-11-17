@@ -1,0 +1,99 @@
+{{define "content"}}
+
+<div class="row">
+	<div class="col-lg-3 col-xs-6">
+		<!-- small box -->
+		<div class="small-box bg-aqua">
+			<div class="inner">
+				<h3> {{len .Constellation.NodeMap}} </h3>
+				<p> Total Nodes </p>
+			</div>
+			<div class="icon"> <i class="ion "></i> </div>
+			<a href="#" class="small-box-footer"> More info <i class="fa fa-arrow-circle-right"></i> </a>
+		</div>
+	</div><!-- ./col -->
+	<div class="col-lg-3 col-xs-6">
+		<!-- small box -->
+		{{if .NodeMaster.HasNodesInErrorState }}
+		<div class="small-box bg-red">
+		{{else}}
+		<div class="small-box bg-green">
+		{{end}}
+			<div class="inner">
+				<h3> {{.NodeMaster.ErrorNodeCount}} </h3>
+				<p> Nodes With Errors </p>
+			</div>
+			<div class="icon"> <i class="ion "></i> </div>
+			<a href="#" class="small-box-footer"> More info <i class="fa fa-arrow-circle-right"></i> </a>
+		</div>
+	</div><!-- ./col -->
+</div><!-- /.row -->
+
+<div class="row">
+	<div class="box box-primary box-solid">
+		<div class="box-header">
+			<h3 class="box-title"> Known Nodes</h3>
+		</div><!-- /.box-header -->
+		<div class="box-body table-responsive ">
+			<table class="table table-hover table-striped" id="nodes-table">
+				<thead>
+					<tr>
+						<th>Name <i class="fa fa-sort"></i></th>
+						<th>Last Start <i class="fa fa-sort"></i></th>
+						<th>Version <i class="fa fa-sort"></i></th>
+						<th>Used Memory <i class="fa fa-sort"></i></th>
+						<th>Max Memory <i class="fa fa-sort"></i></th>
+					</tr>
+				</thead>
+				<tbody>
+					{{range .Data }}
+					{{ if .MemoryUseCritical }}
+					<tr class="text-red">
+					{{else}}
+					<tr>
+					{{end}}
+						<td>
+							<a href="/node/{{.Name}}">{{.Name}}</a>
+						</td>
+						<td>{{.UptimeHuman}}</td>
+						<td>{{.Info.Server.Version}}</td>
+						<td>{{.Info.Memory.UsedMemoryHuman}}</td>
+						<td>{{.MaxMemoryHuman}}</td>
+					</tr>
+					{{end}}
+				</tbody>
+				<tfoot>
+					<tr>
+						<th>Name <i class="fa fa-sort"></i></th>
+						<th>Last Start <i class="fa fa-sort"></i></th>
+						<th>Version <i class="fa fa-sort"></i></th>
+						<th>Used Memory <i class="fa fa-sort"></i></th>
+						<th>Max Memory <i class="fa fa-sort"></i></th>
+					</tr>
+				</tfoot>
+			</table>
+		</div><!-- /.box-body -->
+	</div><!-- /.box -->
+</div><!-- /.row (main row) -->
+ <script src="http://ajax.googleapis.com/ajax/libs/jquery/2.0.2/jquery.min.js"></script>
+
+<script src="/static/js/plugins/datatables/jquery.dataTables.js" type="text/javascript"></script>
+<script src="/static/js/plugins/datatables/dataTables.bootstrap.js" type="text/javascript"></script>
+<script type="text/javascript">
+        $('#nodes-table').dataTable({
+            "bPaginate": true,
+            "bLengthChange": true,
+            "bFilter": true,
+            "bSort": true,
+            "bInfo": true,
+            "bAutoWidth": true,
+            "bProcessing": true,
+            "bStateSave": true
+        });
+</script>
+
+
+
+
+
+{{end}}

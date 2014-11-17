@@ -1,0 +1,36 @@
+{{define "content"}}
+	<div class="box-body">
+		<div class="row">
+			<div class="col-md-12">
+				<div class="box box-solid">
+					<div class="box-header">
+						<h3 class="box-title">Adding slave to {{.Pod.Name}} <span class="fa fa-spinner fa-gear"></span></h3>
+					</div><!-- /.box-header -->
+					<div class="box-body">
+						<h3> Slave Add Initiated</h3>
+						<p> Request was submitted, page will reload to the pod view in {{.RefreshTime}}s</p>
+						<dl>
+							<dt>Slave Name: </dt>
+							<dd>{{.Data.SlaveName}}</dd>
+
+							<dt>Master Address</dt>
+							<dd>
+							{{.Pod.Info.IP }}
+							</dd>
+
+							<dt>Slave Address</dt>
+							<dd>
+							{{.Data.SlaveAddress }}
+
+							<dt>Slave Port</dt>
+							<dd>
+							{{.Data.SlavePort }}
+							</dd>
+						</dl>
+					</div><!-- /.box-body -->
+				</div><!-- /.box -->
+			</div><!-- ./col -->
+		</div>
+	</div>
+
+{{end}}

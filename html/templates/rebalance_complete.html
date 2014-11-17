@@ -1,0 +1,19 @@
+{{ define "content" }}
+
+
+<div class="row">
+	<div class="col-md-12">
+		<div class="box box-solid {{if .Constellation.IsBalanced}}box-success{{else}}box-danger{{end}}">
+			<div class="box-header">
+				  <h3 class="box-title">Rebalance of {{title .Constellation.Name}} Initiated</h3>
+			</div><!-- /.box-header -->
+			<div class="box-body">
+				<p> A Constellation rebalance has been requested. Refreshing constellation page in {{.RefreshTime}}s. </p>
+			</div><!-- /.box-body -->
+		</div><!-- /.box -->
+	</div><!-- ./col -->
+</div>
+
+
+
+{{end}}

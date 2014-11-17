@@ -1,0 +1,263 @@
+{{define "content"}}
+<div class="row">
+	<div class="col-lg-3 col-xs-6">
+		<div class="small-box bg-aqua">
+			<div class="inner">
+				<h3> {{.Constellation.SentinelCount}} </h3>
+				<p> Sentinels </p>
+			</div>
+			<div class="icon"> <i class="ion "></i> </div>
+			<a href="/constellation/" class="small-box-footer"> More info <i class="fa fa-arrow-circle-right"></i> </a>
+		</div>
+	</div><!-- ./col -->
+	<div class="col-lg-3 col-xs-6">
+		<div class="small-box bg-aqua">
+			<div class="inner">
+				<h3> {{.Constellation.PodCount}} </h3>
+				<p> All Pods </p>
+			</div>
+			<div class="icon"> <i class="ion "></i> </div>
+			<a href="/pods/" class="small-box-footer"> More info <i class="fa fa-arrow-circle-right"></i> </a>
+		</div>
+	</div><!-- ./col -->
+	<div class="col-lg-3 col-xs-6">
+		{{if .Constellation.HasPodsInErrorState}}
+		<div class="small-box bg-red">
+		{{else}}
+		<div class="small-box bg-aqua">
+		{{end}}
+			<div class="inner">
+				<h3> {{.Constellation.ErrorPodCount}} </h3>
+				<p> Pods With Errors </p>
+			</div>
+			<div class="icon"> <i class="ion "></i> </div>
+			<a href="#allerrors" class="small-box-footer"> More info <i class="fa fa-arrow-circle-right"></i> </a>
+			</div>
+	</div><!-- ./col -->
+</div><!-- /.row -->
+
+<div class="row">
+	<div class="box box-primary">
+		<div class="box-header"> <h3 class="box-title"> Pods With Errors</h3> </div>
+		<div class="box-body">
+			<div class="nav-tabs-custom">
+				<ul class="nav nav-tabs">
+					<li> <a href="#allerrors" data-toggle="tab">All Errors ({{.Constellation.ErrorPodCount}})</a> </li>
+					<li> <a href="#noquorum" data-toggle="tab">No Quorum ({{.Data.NoQuorum}})</a> </li>
+					<li> <a href="#missingsentinels" data-toggle="tab">Missing Sentinels ({{.Data.MissingSentinels}})</a> </li>
+					<li> <a href="#toomanysentinels" data-toggle="tab">Too Many Sentinels ({{.Data.TooManySentinels}})</a> </li>
+					<li> <a href="#novalidslave" data-toggle="tab">No Valid Slave ({{.Data.NoValidSlave}})</a> </li>
+					<li> <a href="#invalidauth" data-toggle="tab">Invalid Auth ({{.Data.InvalidAuth}})</a> </li>
+				</ul>
+				<div class="tab-content">
+					<div class="tab-pane active" id="allerrors">
+						<table class="table table-hover">
+							<tr>
+								<th>Name</th>
+								<th>Quorum</th>
+								<th>Master</th>
+								<th>Slave Count</th>
+								<th>Sentinel Count</th>
+							</tr>
+							{{range .Constellation.GetPodsInError }}
+								{{ if ne .Name "" }}
+								<tr class="text-white text-bold">
+									<td>
+										<a href="/pod/{{.Info.Name}}"> {{.Info.Name}}</a>
+									</td>
+									<td> 
+										{{if .HasQuorum}} 
+										<span class="text-green fa fa-thumbs-o-up"> </span>
+										{{else}} 
+										<span class="text-danger fa fa-thumbs-o-down"> <span>
+										{{end}}
+									</td>
+									<td><a href="/node/{{.Info.IP}}:{{.Info.Port}}"> {{.Info.IP}}:{{.Info.Port}} </a> </td>
+									{{if .HasInfo }}
+										<td>
+											{{if eq .Master.Info.Replication.ConnectedSlaves 0}}
+											<span class="label label-warning">
+											{{else}}
+											<span class="label label-success">
+											{{end}}
+												{{.Master.Info.Replication.ConnectedSlaves}}
+											</span>
+										</td>
+									{{else}}
+										<td> <span class="label label-danger"> 0 </span> </td>
+									{{end}}
+									{{if .HasQuorum }}
+										{{if .MissingSentinels }}
+										<td><span class="label label-warning">{{.SentinelCount}} of {{.NeededSentinels}}</span></td>
+										{{else}}
+										<td><span class="label label-success">{{.SentinelCount }} of {{.NeededSentinels}}</span></td>
+										{{end}}
+									{{else}}
+									<td><span class="label label-success">{{.SentinelCount }} of {{.NeededSentinels}}</span></td>
+									{{end}}
+								</tr>
+								{{end}}
+							{{end}}
+						</table>
+					</div> <!-- tab pane -->
+					<div class="tab-pane" id="noquorum">
+						<h2> Problem</h2>
+						<p> These pods are unable to failover because they lack quorum. This is due to not having enough sentinels active to initiate a failover. </p>
+						<h2> Solution </h2>
+						<p> To fix this the constellation needs rebalanced. For now this is a global action, but pod-specific actions will be added. </p>
+						<table class="table table-hover">
+							<tr>
+								<th>Name</th>
+								<th>Quorum</th>
+								<th>Master</th>
+								<th>Slave Count</th>
+								<th>Sentinel Count</th>
+							</tr>
+							{{range .Constellation.GetPodsInError }}
+								{{if .HasQuorum }}
+								{{else}}
+								<tr class="text-white text-bold">
+									<td>
+										<a href="/pod/{{.Info.Name}}"> {{.Info.Name}}</a>
+									</td>
+									<td>{{.Info.Quorum}}</td>
+									<td>{{.Info.IP}}:{{.Info.Port}}</td>
+										{{if .HasInfo }}
+											<td>{{.Master.Info.Replication.ConnectedSlaves}}</td>
+										{{else}}
+											<td>0</td>
+										{{end}}
+										<td><span class="label label-warning">{{.SentinelCount}} </span></td>
+								</tr>
+								{{end}}
+							{{end}}
+						</table>
+					</div> <!-- tab pane -->
+					<div class="tab-pane" id="missingsentinels">
+						<h2> Problem</h2>
+						<p> These pods are missing one or more sentinels. They may have quorum but do not have quorum+1 sentinels actively monitoring it. </p>
+						<h2> Solution </h2>
+						<p> To fix this you will need to reset the pod from the pod view. </p>
+						<table class="table table-hover">
+							<tr>
+								<th>Name</th>
+								<th>Active Sentinel Count</th>
+								<th>Needed Sentinels</th>
+								<th>Reported Sentinels</th>
+							</tr>
+							{{range .Constellation.GetPodsInError }}
+								{{if .MissingSentinels }}
+								<tr class="text-white text-bold">
+									<td> <a href="/pod/{{.Info.Name}}"> {{.Info.Name}}</a> </td>
+									<td><span class="label label-warning">{{.SentinelCount}} </span></td>
+									<td>{{.NeededSentinels}}</td>
+									<td>{{.ReportedSentinelCount}}</td>
+								</tr>
+								{{end}}
+							{{end}}
+						</table>
+					</div> <!-- tab pane -->
+					<div class="tab-pane" id="toomanysentinels">
+						<h2> Problem: Too Many Sentinels</h2>
+						<p> These pods have more sentinels than quorum*2 listed in sentinel. This means there is a possibility of split-brain operation. </p>
+						<p> 
+							Due to the way Sentinel currently reports other
+							sentinels, this can occur when the pod has been
+							added to sentinels and then removed from some. It
+							is also possible that a failvoer can not occur
+							because Sentinel currently insists on a majority of
+							the sentinels it has ever seen - regardless of
+							current state. Thus if some of the listed sentinels
+							are not available there may be no ability for the
+							sentinels to elect a leader to activater a
+							failover.
+						</p>
+						<h2> Solution </h2>
+						<p> 
+							To fix this you should first reset the pod from the
+							pod view. This will clear out any sentinels which
+							are not currently active. Then you will need to
+							manually remove any remaining surplus sentinels or
+							increase quorum to ensure you have at least half of
+							the total sentinels as quorum.
+						</p>
+						<table class="table table-hover">
+							<tr>
+								<th>Name</th>
+								<th>Quorum</th>
+								<th>Needed Sentinels</th>
+								<th>Reported Sentinel Count</th>
+								<th>Active Sentinels</th>
+							</tr>
+							{{range .Constellation.GetPodsInError }}
+							{{if .Name }}
+								{{if .TooManySentinels}}
+								<tr class="text-white text-bold">
+									<td> <a href="/pod/{{.Info.Name}}"> {{.Info.Name}}</a> </td>
+									<td>{{.Info.Quorum}}</td>
+									<td>{{.NeededSentinels}}</td>
+									<td><span class="label label-warning">{{.ReportedSentinelCount}} </span></td>
+									<td>{{.SentinelCount}}</td>
+								</tr>
+								{{end}}
+							{{end}}
+							{{end}}
+						</table>
+					</div> <!-- tab pane -->
+					<div class="tab-pane" id="novalidslave">
+						<h2> Problem</h2>
+						<p> These pods do not have a valid slave attached to the master, or we were unable to obtain slave info. </p>
+						<h2> Solution </h2>
+						<p> To fix this the master first ensure the pod has the correct authentication information. If not correct that issue first and see if it persists. If it persists or is correct, the master will need to have a slave added to it. </p>
+						<table class="table table-hover">
+							<tr>
+								<th>Name</th>
+								<th>Slave Count</th>
+							</tr>
+							{{range .Constellation.GetPodsInError }}
+								{{ if ne .Name "" }}
+								{{if .CanFailover }}
+								{{else}}
+								<tr class="text-white text-bold">
+									<td> <a href="/pod/{{.Info.Name}}"> {{.Info.Name}}</a> </td>
+									{{if .HasInfo }}
+										<td>{{.Master.Info.Replication.ConnectedSlaves}}</td>
+									{{else}}
+										<td>0</td>
+									{{end}}
+								</tr>
+								{{end}}
+								{{end}}
+							{{end}}
+						</table>
+					</div> <!-- tab pane -->
+					<div class="tab-pane" id="invalidauth">
+						<h2> Problem</h2>
+						<p> These pods do not have a valid authentication token set in the sentinels. </p>
+						<h2> Solution </h2>
+						<p> To fix this the pod will need to have it's auth set in sentinel. Currently this is a manual process  using "sentinel set auth-pass PODNAME AUTH" in the sentinel CLI and needs done on each sentinel. </p>
+						<table class="table table-hover">
+							<tr>
+								<th>Name</th>
+								<th>Master</th>
+							</tr>
+							{{range .Constellation.GetPodsInError }}
+								{{ if ne .Name "" }}
+								{{if .HasInfo }}
+								{{else}}
+								<tr class="text-white text-bold">
+									<td> <a href="/pod/{{.Info.Name}}"> {{.Info.Name}}</a> </td>
+									<td>{{.Info.IP}}:{{.Info.Port}}</td>
+								</tr>
+								{{end}}
+								{{end}}
+							{{end}}
+						</table>
+					</div> <!-- tab pane -->
+				</div> <!-- tab-content -->
+			</div> <!-- nav-tab-custom -->
+		</div><!-- /.box body -->
+	</div> <!-- box -->
+</div><!-- /.row (main row) -->
+
+{{end}}

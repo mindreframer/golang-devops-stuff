@@ -1,0 +1,37 @@
+{{ define "content" }}
+
+
+{{ if .Error }}
+<div class="row">
+		<div class="col-md-12">
+			<div class="box box-solid {{if .Constellation.IsBalanced}}box-success{{else}}box-danger{{end}}">
+				<div class="box-header">
+					  <h3 class="box-title">Balance request Error! </h3>
+				</div><!-- /.box-header -->
+				<div class="box-body">
+					<p> A rebalance as requested for {{.Pod.Name}}. Unfortunately and error occured. </p>
+					<p> Error returnded is: </p>
+					<blockquote>{{.Error}}</blockquote>
+				</div><!-- /.box-body -->
+			</div><!-- /.box -->
+		</div><!-- ./col -->
+	</div>
+
+{{else}}
+
+	<div class="row">
+		<div class="col-md-12">
+			<div class="box box-solid {{if .Constellation.IsBalanced}}box-success{{else}}box-danger{{end}}">
+				<div class="box-header">
+					  <h3 class="box-title">Rebalance of {{title .Constellation.Name}} Initiated</h3>
+				</div><!-- /.box-header -->
+				<div class="box-body">
+					<p> A rebalance has been requested for {{.Pod.Name}}. Refreshing pod page in {{.RefreshTime}}s. </p>
+				</div><!-- /.box-body -->
+			</div><!-- /.box -->
+		</div><!-- ./col -->
+	</div>
+{{end}}
+
+
+{{end}}

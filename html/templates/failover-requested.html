@@ -1,0 +1,10 @@
+{{define "content"}}
+<h1> Failover Requested <i class="fa fa-spinner fa-spin"> </i> </h1>
+	<p>
+		A failover request has been submitted to the constellation. It will take a few
+		seconds to determine if the request was successful. In {{.RefreshTime}} seconds
+		the Pod's view will automatically be reloaded.
+	</p>
+	<p> In the meantime you can load a different page without interrupting the failover process.
+	</p>
+{{end}}

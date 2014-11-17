@@ -1,0 +1,154 @@
+{{define "content"}}
+
+<div class="row">
+	<div class="col-lg-3 col-xs-6">
+		<!-- small box -->
+		<div class="small-box bg-aqua">
+			<div class="inner">
+				<h3> {{.Constellation.PodCount}} </h3>
+				<p> All Pods </p>
+			</div>
+			<div class="icon"> <i class="ion "></i> </div>
+			<a href="/constellation/" class="small-box-footer"> More info <i class="fa fa-arrow-circle-right"></i> </a>
+		</div>
+	</div><!-- ./col -->
+	<div class="col-lg-3 col-xs-6">
+		<!-- small box -->
+		{{if .Constellation.HasPodsInErrorState}}
+		<div class="small-box bg-red">
+		{{else}}
+			<div class="small-box bg-aqua">
+		{{end}}
+			<div class="inner">
+				<h3> {{.Constellation.ErrorPodCount}} </h3>
+				<p> Pods With Errors </p>
+			</div>
+			<div class="icon"> <i class="ion "></i> </div>
+			<a href="/dashboard/#allerrors" class="small-box-footer"> More info <i class="fa fa-arrow-circle-right"></i> </a>
+		</div>
+	</div><!-- ./col -->
+</div><!-- /.row -->
+
+<div class="row">
+	<div class="box box-primary">
+		<div class="box-header">
+			<h3 class="box-title">Pods At a Glance</h3>
+		</div><!-- /.box-header -->
+		<div class="box-body table-responsive ">
+			<table class="table table-bordered table-striped" id="pod-table">
+				<thead>
+					<tr>
+						<th>Name <i class="fa fa-sort"></i></th>
+						<th>Size <i class="fa fa-sort"></i></th>
+						<th>Percent Used <i class="fa fa-sort"></i></th>
+						<th>Quorum </i></th>
+						<th>Master <i class="fa fa-sort"></i></th>
+						<th>Slave Status (#) <i class="fa fa-sort"></i></th>
+						<th>Sentinel Count <i class="fa fa-sort"></i></th>
+						<th>Valid Auth </th>
+					</tr>
+				</thead>
+				<tbody>
+					{{range .Constellation.GetPods }}
+					<tr>
+						<td> <a href="/pod/{{.Name}}">{{.Name}}</a> </td>
+						<td> 
+							{{if .Master }}
+								{{HumanizeBytes .Master.MaxMemory}}
+							{{else}}
+								Unknown
+							{{end}}
+						</td>
+						<td> 
+							{{if .Master }}
+								{{if .Master.MemoryUseCritical }}
+								<span class="text-danger">
+								{{else if .Master.MemoryUseWarn}}
+								<span class="text-warning">
+								{{else}}
+								<span class="text-success">
+								{{end}}
+								{{Float2Int .Master.PercentUsed}}
+								</span>
+							{{else}}
+								Unknown
+							{{end}}
+						</td>
+						<td> {{if .HasQuorum }}
+							<span class="text-green fa fa-thumbs-o-up"> </span>
+							{{else}}
+							<span class="text-danger fa fa-thumbs-o-down"> </span>
+							{{end}}
+						</td>
+						<td><a href="/node/{{.Info.IP}}:{{.Info.Port}}"> {{.Info.IP}}:{{.Info.Port}} </a> </td>
+						<td>
+							{{if .Master}} 
+								{{if eq .Master.Info.Replication.ConnectedSlaves 0 }}
+									<span class="text-danger fa fa-thumbs-o-down"> (0) </span>
+								{{ else }}
+									<span class="text-success fa fa-thumbs-o-up"> ({{.Master.Info.Replication.ConnectedSlaves}}) </span>
+								{{end}}
+							{{else}} 
+								<span class="text-danger fa fa-thumbs-o-down"> (UNKNOWN) </span>
+							{{end}}
+						</td>
+
+						{{if .HasQuorum }}
+							{{if .MissingSentinels }}
+							<td><span class="label label-warning">{{.SentinelCount}}  of {{.NeededSentinels}} </span></td>
+							{{else}}
+							<td><span class="label label-success">{{.SentinelCount}}  of {{.NeededSentinels}} </span></td>
+							{{end}}
+						{{else}}
+							{{if .MissingSentinels }}
+							<td><span class="label label-warning">{{.SentinelCount}}  of {{.NeededSentinels}} </span></td>
+							{{else}}
+							<td><span class="label label-success">{{.SentinelCount}}  of {{.NeededSentinels}} </span></td>
+							{{end}}
+						{{end}}
+						<td>
+							{{if .HasInfo }}
+								<span class="label label-success fa fa-thumbs-o-up"> </span>
+							{{else}}
+								<span class="label label-danger fa fa-thumbs-o-down"> </span>
+							{{end}}
+						</td>
+					</tr>
+				{{end}}
+					</tbody>
+					<tfoot>
+					<tr>
+						<th>Name <i class="fa fa-sort"></i></th>
+						<th>Size <i class="fa fa-sort"></i></th>
+						<th>Percent Used <i class="fa fa-sort"></i></th>
+						<th>Quorum <i class="fa fa-sort"></i></th>
+						<th>Master <i class="fa fa-sort"></i></th>
+						<th>Slave Status (#) <i class="fa fa-sort"></i></th>
+						<th>Sentinel Count <i class="fa fa-sort"></i></th>
+						<th>Valid Auth <i class="fa fa-sort"></i></th>
+					</tr>
+					</tfoot>
+			</table>
+		</div><!-- /.box-body -->
+	</div><!-- /.box -->
+</div><!-- /.row (main row) -->
+ <script src="http://ajax.googleapis.com/ajax/libs/jquery/2.0.2/jquery.min.js"></script>
+
+<script src="/static/js/plugins/datatables/jquery.dataTables.js" type="text/javascript"></script>
+<script src="/static/js/plugins/datatables/dataTables.bootstrap.js" type="text/javascript"></script>
+<script type="text/javascript">
+		$('#pod-table').dataTable({
+			"bPaginate": true,
+			"bLengthChange": true,
+			"bFilter": true,
+			"bSort": true,
+			"bInfo": true,
+			"bAutoWidth": true,
+			"bProcessing": true,
+			"bStateSave": true,
+			"bOrdering": true,
+			"bOrder": [[2,'desc']]
+		}).order([1,'desc'] ).draw();
+</script>
+
+{{end}}
