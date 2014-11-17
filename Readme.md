@@ -339,6 +339,10 @@ This repository is supposed to work with [DirEnv](https://github.com/zimbatm/dir
       Many-armed network simulator
        17 commits, last change: 2014-03-06 - 03:58, 71 stars, 2 forks
 
+    TheRealBill/redskull:
+      Red Skull is a Sentinel management system
+       28 commits, last change: 2014-11-12 - 20:39, 25 stars, 5 forks
+
     tsenart/tb:
       A generic lock-free implementation of the "Token-Bucket" algorithm
        54 commits, last change: 2014-06-25 - 02:22, 58 stars, 2 forks
